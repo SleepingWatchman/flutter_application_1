@@ -1,5 +1,57 @@
 import 'package:flutter/material.dart';
 import 'dart:math';
+import 'package:intl/intl.dart';
+import 'package:intl/date_symbol_data_local.dart';
+
+class WeeklyScheduleGrid extends StatelessWidget {
+  final DateTime selectedDay;
+  final ValueChanged<DateTime> onDaySelected;
+
+  WeeklyScheduleGrid({required this.selectedDay, required this.onDaySelected});
+
+  // Метод для вычисления дней текущей недели (начало – понедельник)
+  List<DateTime> _getWeekDays(DateTime currentDate) {
+    int currentWeekday = currentDate.weekday;
+    DateTime monday = currentDate.subtract(Duration(days: currentWeekday - 1));
+    return List.generate(7, (index) => monday.add(Duration(days: index)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final weekDays = _getWeekDays(DateTime.now());
+    return Padding(
+      padding: const EdgeInsets.all(8.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: weekDays.map((day) {
+          bool isSelected = day.year == selectedDay.year &&
+              day.month == selectedDay.month &&
+              day.day == selectedDay.day;
+          return GestureDetector(
+            onTap: () => onDaySelected(day),
+            child: Column(
+              children: [
+                Text(
+                  DateFormat('EEE', 'ru').format(day), // краткое название дня
+                  style: TextStyle(
+                    color: isSelected ? Colors.cyan : Colors.white70,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                Text(
+                  DateFormat('dd.MM').format(day),
+                  style: TextStyle(
+                    color: isSelected ? Colors.cyan : Colors.white70,
+                  ),
+                ),
+              ],
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
 
 /// Виджет выбора цвета с помощью слайдеров для R, G, B.
 class ColorPicker extends StatefulWidget {
@@ -113,7 +165,9 @@ class Folder {
   Folder({required this.name, required this.backgroundColor, this.notes = const []});
 }
 
-void main() {
+void main() async{
+  WidgetsFlutterBinding.ensureInitialized();
+  await initializeDateFormatting('ru', null); // Инициализация данных для русской локали
   runApp(const NotesApp());
 }
 
@@ -182,47 +236,143 @@ class ScheduleScreen extends StatefulWidget {
 }
 class _ScheduleScreenState extends State<ScheduleScreen> {
   final List<Map<String, String>> _schedule = [];
+  DateTime _selectedDate = DateTime.now();
   int? _selectedIndex;
-  void _addScheduleEntry() {
-    setState(() {
-      _schedule.add({
-        'time': '00:00 - 01:00',
-        'Предмет': '', // свободное поле для редактирования названия предмета
-        'Преподаватель': 'Преподаватель',
-        'Аудитория': 'Аудитория',
-        'note': '',
-      });
-    });
+
+  @override
+  Widget build(BuildContext context) {
+    final String selectedDateKey = DateFormat('yyyy-MM-dd').format(_selectedDate);
+    // Фильтрация расписания по выбранной дате
+    final List<Map<String, String>> filteredSchedule =
+        _schedule.where((entry) => entry['date'] == selectedDateKey).toList();
+
+    return Column(
+      children: [
+        WeeklyScheduleGrid(
+          selectedDay: _selectedDate,
+          onDaySelected: (day) {
+            setState(() {
+              _selectedDate = day;
+            });
+          },
+        ),
+        Expanded(
+          child: Row(
+            children: [
+              Expanded(
+                flex: 2,
+                child: Container(
+                  color: Colors.grey[900],
+                  child: Column(
+                    children: [
+                      ElevatedButton(
+                        onPressed: _addScheduleEntry,
+                        child: const Text('Добавить интервал'),
+                      ),
+                      Expanded(
+                        child: ListView.separated(
+                          itemCount: filteredSchedule.length,
+                          separatorBuilder: (context, index) =>
+                              const Divider(color: Colors.cyan),
+                          itemBuilder: (context, index) {
+                            // Поиск исходного индекса в полном списке _schedule
+                            int originalIndex =
+                                _schedule.indexOf(filteredSchedule[index]);
+                            return GestureDetector(
+                              onSecondaryTapDown: (details) {
+                                _showScheduleContextMenu(
+                                    context,
+                                    originalIndex,
+                                    details.globalPosition);
+                              },
+                              child: ListTile(
+                                title: Row(
+                                  children: [
+                                    Expanded(
+                                      flex: 2,
+                                      child: Text(
+                                        filteredSchedule[index]['time'] ?? '',
+                                        style: const TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.bold),
+                                      ),
+                                    ),
+                                    const VerticalDivider(
+                                        color: Colors.cyan, thickness: 2),
+                                    Expanded(
+                                      flex: 5,
+                                      child: Text(
+                                        '${filteredSchedule[index]['Предмет'] ?? ''} - ${filteredSchedule[index].keys.where((k) => k != 'time' && k != 'note' && k != 'date').map((k) => "$k: ${filteredSchedule[index][k]}").join(", ")}',
+                                        style: const TextStyle(
+                                            color: Colors.white70),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                onTap: () {
+                                  setState(() {
+                                    _selectedIndex =
+                                        _schedule.indexOf(filteredSchedule[index]);
+                                  });
+                                },
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              Expanded(
+                flex: 1,
+                child: Container(
+                  color: Colors.grey[850],
+                  padding: const EdgeInsets.all(8),
+                  alignment: Alignment.topLeft,
+                  child: _selectedIndex == null
+                      ? const Text('Выберите занятие',
+                          style: TextStyle(color: Colors.white))
+                      : SingleChildScrollView(
+                          child: Text(
+                            _schedule[_selectedIndex!]['note'] ?? '',
+                            style: const TextStyle(color: Colors.white70),
+                          ),
+                        ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
   }
-  void _editSchedule(int index) {
-    TextEditingController timeController = TextEditingController(text: _schedule[index]['time']);
-    // Используем оператор ??, чтобы если значение отсутствует, подставить пустую строку
-    TextEditingController subjectController = TextEditingController(text: _schedule[index]['Предмет'] ?? '');
-    TextEditingController noteController = TextEditingController(text: _schedule[index]['note'] ?? '');
-    List<DynamicFieldEntry> dynamicFields = [];
-    _schedule[index].forEach((key, value) {
-      if (key != 'time' && key != 'note') {
-        // В динамические поля также попадёт ключ "Предмет", если он существует, но мы уже обрабатываем его отдельно.
-        if (key == 'Предмет') return;
-        dynamicFields.add(DynamicFieldEntry(key: key, value: value));
-      }
-    });
-    // Добавляем отдельно поле "Предмет"
-    dynamicFields.insert(0, DynamicFieldEntry(key: 'Предмет', value: subjectController.text));
-    showDialog(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(builder: (context, setStateDialog) {
+
+  void _addScheduleEntry() {
+  final TextEditingController timeController = TextEditingController();
+  // Изначально добавляем одно динамическое поле "Предмет"
+  List<DynamicFieldEntry> dynamicFields = [DynamicFieldEntry(key: 'Предмет', value: '')];
+  String? timeError;
+
+  showDialog(
+    context: context,
+    builder: (context) {
+      return StatefulBuilder(
+        builder: (context, setStateDialog) {
           return AlertDialog(
-            title: const Text('Редактировать занятие'),
+            title: const Text('Добавить занятие'),
             content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   TextField(
                     controller: timeController,
-                    decoration: const InputDecoration(labelText: 'Время'),
+                    decoration: InputDecoration(
+                      labelText: 'Время (Формат HH:MM - HH:MM)',
+                      errorText: timeError,
+                    ),
                   ),
+                  const SizedBox(height: 10),
                   Column(
                     children: dynamicFields.map((field) {
                       int fieldIndex = dynamicFields.indexOf(field);
@@ -244,7 +394,11 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                             ),
                           ),
                           IconButton(
-                            onPressed: () { setStateDialog(() { dynamicFields.removeAt(fieldIndex); }); },
+                            onPressed: () {
+                              setStateDialog(() {
+                                dynamicFields.removeAt(fieldIndex);
+                              });
+                            },
                             icon: const Icon(Icons.delete),
                           ),
                         ],
@@ -254,7 +408,127 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                   Align(
                     alignment: Alignment.centerLeft,
                     child: TextButton(
-                      onPressed: () { setStateDialog(() { dynamicFields.add(DynamicFieldEntry(key: 'Новое поле', value: '')); }); },
+                      onPressed: () {
+                        setStateDialog(() {
+                          dynamicFields.add(DynamicFieldEntry(key: 'Новое поле', value: ''));
+                        });
+                      },
+                      child: const Text('Добавить поле'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  // Проверка формата времени
+                  RegExp timeRegExp = RegExp(r'^([01]\d|2[0-3]):[0-5]\d\s*-\s*([01]\d|2[0-3]):[0-5]\d$');
+                  if (!timeRegExp.hasMatch(timeController.text.trim())) {
+                    setStateDialog(() {
+                      timeError = 'Неверный формат времени. Используйте HH:MM - HH:MM';
+                    });
+                    return;
+                  }
+                  // Формируем новый пункт расписания с автоматически добавленной датой
+                  Map<String, String> newEntry = {
+                    'time': timeController.text.trim(),
+                    'date': DateFormat('yyyy-MM-dd').format(_selectedDate),
+                  };
+                  for (var field in dynamicFields) {
+                    String key = field.keyController.text.trim();
+                    if (key.isNotEmpty) {
+                      newEntry[key] = field.valueController.text;
+                    }
+                  }
+                  setState(() {
+                    _schedule.add(newEntry);
+                  });
+                  Navigator.of(context).pop();
+                },
+                child: const Text('Сохранить'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Отмена'),
+              ),
+            ],
+          );
+        },
+      );
+    },
+  );
+}
+
+  void _editSchedule(int index) {
+  TextEditingController timeController = TextEditingController(text: _schedule[index]['time']);
+  TextEditingController noteController = TextEditingController(text: _schedule[index]['note'] ?? '');
+  List<DynamicFieldEntry> dynamicFields = [];
+
+  // Итерируемся по ключам, исключая 'time' и 'note'
+  _schedule[index].forEach((key, value) {
+    if (key != 'time' && key != 'note') {
+      dynamicFields.add(DynamicFieldEntry(key: key, value: value));
+    }
+  });
+
+  showDialog(
+    context: context,
+    builder: (context) {
+      return StatefulBuilder(
+        builder: (context, setStateDialog) {
+          return AlertDialog(
+            title: const Text('Редактировать занятие'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: timeController,
+                    decoration: const InputDecoration(labelText: 'Время'),
+                  ),
+                  const SizedBox(height: 10),
+                  // Отображаем все динамические поля, включая поле "Предмет", если оно существует
+                  Column(
+                    children: dynamicFields.map((field) {
+                      int fieldIndex = dynamicFields.indexOf(field);
+                      return Row(
+                        children: [
+                          Expanded(
+                            flex: 3,
+                            child: TextField(
+                              controller: field.keyController,
+                              decoration: const InputDecoration(labelText: 'Поле'),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            flex: 4,
+                            child: TextField(
+                              controller: field.valueController,
+                              decoration: const InputDecoration(labelText: 'Значение'),
+                            ),
+                          ),
+                          IconButton(
+                            onPressed: () {
+                              setStateDialog(() {
+                                dynamicFields.removeAt(fieldIndex);
+                              });
+                            },
+                            icon: const Icon(Icons.delete),
+                          ),
+                        ],
+                      );
+                    }).toList(),
+                  ),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton(
+                      onPressed: () {
+                        setStateDialog(() {
+                          dynamicFields.add(DynamicFieldEntry(key: 'Новое поле', value: ''));
+                        });
+                      },
                       child: const Text('Добавить поле'),
                     ),
                   ),
@@ -271,24 +545,18 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
               TextButton(
                 onPressed: () {
                   Map<String, String> dynamicMap = {};
-                  // Извлекаем значение поля "Предмет" отдельно
-                  String subjectValue = '';
                   for (var field in dynamicFields) {
                     String key = field.keyController.text.trim();
-                    if (key == 'Предмет') {
-                      subjectValue = field.valueController.text;
-                    } else if (key.isNotEmpty) {
+                    if (key.isNotEmpty) {
                       dynamicMap[key] = field.valueController.text;
                     }
                   }
                   setState(() {
                     _schedule[index] = {
                       'time': timeController.text,
-                      'Предмет': subjectValue,
                       'note': noteController.text,
                       ...dynamicMap,
                     };
-                    _selectedIndex = index;
                   });
                   Navigator.of(context).pop();
                 },
@@ -300,10 +568,12 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
               ),
             ],
           );
-        });
-      },
-    );
-  }
+        },
+      );
+    },
+  );
+}
+
   void _deleteScheduleEntry(int index) {
     setState(() {
       _schedule.removeAt(index);
@@ -324,73 +594,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       if (value == 'edit') { _editSchedule(index); }
       else if (value == 'delete') { _deleteScheduleEntry(index); }
     });
-  }
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          flex: 2,
-          child: Container(
-            color: Colors.grey[900],
-            child: Column(
-              children: [
-                ElevatedButton(
-                  onPressed: _addScheduleEntry,
-                  child: const Text('Добавить интервал'),
-                ),
-                Expanded(
-                  child: ListView.separated(
-                    itemCount: _schedule.length,
-                    separatorBuilder: (context, index) => const Divider(color: Colors.cyan),
-                    itemBuilder: (context, index) {
-                      return GestureDetector(
-                        onSecondaryTapDown: (details) { _showScheduleContextMenu(context, index, details.globalPosition); },
-                        child: ListTile(
-                          title: Row(
-                            children: [
-                              Expanded(
-                                flex: 2,
-                                child: Text(_schedule[index]['time'] ?? '', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                              ),
-                              const VerticalDivider(color: Colors.cyan, thickness: 2),
-                              Expanded(
-                                flex: 5,
-                                child: Text(
-                                  '${_schedule[index]['Предмет'] ?? ''} - ${_schedule[index].keys.where((k) => k != 'time' && k != 'note').map((k) => "$k: ${_schedule[index][k]}").join(", ")}',
-                                  style: const TextStyle(color: Colors.white70),
-                                ),
-                              ),
-                            ],
-                          ),
-                          onTap: () { setState(() { _selectedIndex = index; }); },
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        Expanded(
-          flex: 1,
-          child: Container(
-            color: Colors.grey[850],
-            padding: const EdgeInsets.all(8),
-            alignment: Alignment.topLeft,
-            child: _selectedIndex == null
-                ? const Text('Выберите занятие', style: TextStyle(color: Colors.white))
-                : SingleChildScrollView(
-                    child: Text(
-                      _schedule[_selectedIndex!]['note'] ?? '',
-                      style: const TextStyle(color: Colors.white70),
-                    ),
-                  ),
-          ),
-        ),
-      ],
-    );
   }
 }
 

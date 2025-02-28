@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:intl/intl.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:sqflite/sqflite.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:path/path.dart' as p;
 
 /// Класс для работы с базой данных, реализующий CRUD-операции для всех сущностей.
@@ -436,6 +437,8 @@ class ConnectionDB {
 
 /// Функция main: инициализация БД и запуск приложения
 void main() async {
+  sqfliteFfiInit();
+  databaseFactory = databaseFactoryFfi;
   WidgetsFlutterBinding.ensureInitialized();
   await DatabaseHelper().database;
   await initializeDateFormatting('ru', null);
@@ -522,105 +525,9 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     });
   }
 
-  @override
-  Widget build(BuildContext context) {
-    String selectedDateKey = DateFormat('yyyy-MM-dd').format(_selectedDate);
-    List<ScheduleEntry> filteredSchedule = _schedule.where((entry) => entry.date == selectedDateKey).toList();
-
-    return Column(
-      children: [
-        WeeklyScheduleGrid(
-          selectedDay: _selectedDate,
-          onDaySelected: (day) {
-            setState(() {
-              _selectedDate = day;
-              _loadSchedule();
-            });
-          },
-        ),
-        Expanded(
-          child: Row(
-            children: [
-              Expanded(
-                flex: 2,
-                child: Container(
-                  color: Colors.grey[900],
-                  child: Column(
-                    children: [
-                      ElevatedButton(
-                        onPressed: _addScheduleEntry,
-                        child: const Text('Добавить интервал'),
-                      ),
-                      Expanded(
-                        child: ListView.separated(
-                          itemCount: filteredSchedule.length,
-                          separatorBuilder: (context, index) => const Divider(color: Colors.cyan),
-                          itemBuilder: (context, index) {
-                            int originalIndex = _schedule.indexOf(filteredSchedule[index]);
-                            return GestureDetector(
-                              onSecondaryTapDown: (details) {
-                                _showScheduleContextMenu(context, originalIndex, details.globalPosition);
-                              },
-                              child: ListTile(
-                                title: Row(
-                                  children: [
-                                    Expanded(
-                                      flex: 2,
-                                      child: Text(
-                                        filteredSchedule[index].time,
-                                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                                      ),
-                                    ),
-                                    const VerticalDivider(color: Colors.cyan, thickness: 2),
-                                    Expanded(
-                                      flex: 5,
-                                      child: Text(
-                                        filteredSchedule[index].note ?? '',
-                                        style: const TextStyle(color: Colors.white70),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                onTap: () {
-                                  setState(() {
-                                    _selectedIndex = originalIndex;
-                                  });
-                                },
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              Expanded(
-                flex: 1,
-                child: Container(
-                  color: Colors.grey[850],
-                  padding: const EdgeInsets.all(8),
-                  alignment: Alignment.topLeft,
-                  child: _selectedIndex == null
-                      ? const Text('Выберите занятие', style: TextStyle(color: Colors.white))
-                      : SingleChildScrollView(
-                          child: Text(
-                            _schedule[_selectedIndex!].note ?? '',
-                            style: const TextStyle(color: Colors.white70),
-                          ),
-                        ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
   void _addScheduleEntry() {
     final TextEditingController timeController = TextEditingController();
-    final TextEditingController noteController = TextEditingController();
+    final TextEditingController shortNoteController = TextEditingController();
     List<DynamicFieldEntry> dynamicFields = [DynamicFieldEntry(key: 'Предмет', value: '')];
     String? timeError;
 
@@ -635,6 +542,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    // Ввод времени
                     TextField(
                       controller: timeController,
                       decoration: InputDecoration(
@@ -643,6 +551,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                       ),
                     ),
                     const SizedBox(height: 10),
+                    // Динамические поля
                     Column(
                       children: dynamicFields.map((field) {
                         int fieldIndex = dynamicFields.indexOf(field);
@@ -686,19 +595,29 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                         child: const Text('Добавить поле'),
                       ),
                     ),
+                    const SizedBox(height: 10),
+                    // Многострочное поле для краткой заметки, расположенное ниже динамических полей
+                    TextField(
+                      controller: shortNoteController,
+                      decoration: const InputDecoration(labelText: 'Краткая заметка'),
+                      maxLines: null,
+                      keyboardType: TextInputType.multiline,
+                    ),
                   ],
                 ),
               ),
               actions: [
                 TextButton(
                   onPressed: () {
-                    RegExp timeRegExp = RegExp(r'^([01]\d|2[0-3]):[0-5]\d\s*-\s*([01]\d|2[0-3]):[0-5]\d$');
+                    RegExp timeRegExp = RegExp(
+                        r'^([01]\d|2[0-3]):[0-5]\d\s*-\s*([01]\d|2[0-3]):[0-5]\d$');
                     if (!timeRegExp.hasMatch(timeController.text.trim())) {
                       setStateDialog(() {
                         timeError = 'Неверный формат времени. Используйте HH:MM - HH:MM';
                       });
                       return;
                     }
+                    // Формирование динамических полей в виде JSON
                     Map<String, String> dynamicMap = {};
                     for (var field in dynamicFields) {
                       String key = field.keyController.text.trim();
@@ -709,7 +628,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                     ScheduleEntry newEntry = ScheduleEntry(
                       time: timeController.text.trim(),
                       date: DateFormat('yyyy-MM-dd').format(_selectedDate),
-                      note: jsonEncode(dynamicMap),
+                      note: shortNoteController.text.trim(), // краткая заметка для предпросмотра
+                      dynamicFieldsJson: jsonEncode(dynamicMap), // динамические поля для списка
                     );
                     DatabaseHelper().insertScheduleEntry(newEntry).then((id) {
                       newEntry.id = id;
@@ -736,19 +656,20 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   void _editSchedule(int index) {
     ScheduleEntry entry = _schedule[index];
     TextEditingController timeController = TextEditingController(text: entry.time);
-    TextEditingController noteController = TextEditingController(text: entry.note ?? '');
+    TextEditingController shortNoteController = TextEditingController(text: entry.note ?? '');
     List<DynamicFieldEntry> dynamicFields = [];
-    if (entry.note != null && entry.note!.isNotEmpty) {
-      Map<String, dynamic> decoded = jsonDecode(entry.note!);
+    if (entry.dynamicFieldsJson != null && entry.dynamicFieldsJson!.isNotEmpty) {
+      Map<String, dynamic> decoded = jsonDecode(entry.dynamicFieldsJson!);
       decoded.forEach((key, value) {
-        dynamicFields.add(DynamicFieldEntry(key: key, value: value));
+        dynamicFields.add(DynamicFieldEntry(key: key, value: value.toString()));
       });
     }
+
     showDialog(
       context: context,
-      builder: (BuildContext context) {
+      builder: (BuildContext outerContext) {
         return StatefulBuilder(
-          builder: (context, setStateDialog) {
+          builder: (BuildContext innerContext, void Function(void Function()) setStateDialog) {
             return AlertDialog(
               title: const Text('Редактировать занятие'),
               content: SingleChildScrollView(
@@ -760,6 +681,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                       decoration: const InputDecoration(labelText: 'Время'),
                     ),
                     const SizedBox(height: 10),
+                    // Динамические поля
                     Column(
                       children: dynamicFields.map((field) {
                         int fieldIndex = dynamicFields.indexOf(field);
@@ -804,10 +726,12 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                       ),
                     ),
                     const SizedBox(height: 10),
+                    // Многострочное поле для краткой заметки, расположенное ниже динамических полей
                     TextField(
-                      controller: noteController,
-                      decoration: const InputDecoration(labelText: 'Заметка'),
-                      maxLines: 3,
+                      controller: shortNoteController,
+                      decoration: const InputDecoration(labelText: 'Краткая заметка'),
+                      maxLines: null,
+                      keyboardType: TextInputType.multiline,
                     ),
                   ],
                 ),
@@ -823,18 +747,19 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                       }
                     }
                     entry.time = timeController.text;
-                    entry.note = jsonEncode(dynamicMap);
+                    entry.note = shortNoteController.text.trim();
+                    entry.dynamicFieldsJson = jsonEncode(dynamicMap);
                     DatabaseHelper().updateScheduleEntry(entry).then((_) {
                       setState(() {
                         _schedule[index] = entry;
                       });
                     });
-                    Navigator.of(context).pop();
+                    Navigator.of(outerContext).pop();
                   },
                   child: const Text('Сохранить'),
                 ),
                 TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
+                  onPressed: () => Navigator.of(outerContext).pop(),
                   child: const Text('Отмена'),
                 ),
               ],
@@ -865,11 +790,124 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         const PopupMenuItem<String>(value: 'delete', child: Text('Удалить')),
       ],
     ).then((value) {
-      if (value == 'edit') { _editSchedule(index); }
-      else if (value == 'delete') { _deleteScheduleEntry(index); }
+      if (value == 'edit') {
+        _editSchedule(index);
+      } else if (value == 'delete') {
+        _deleteScheduleEntry(index);
+      }
     });
   }
+
+  @override
+  Widget build(BuildContext context) {
+    String selectedDateKey = DateFormat('yyyy-MM-dd').format(_selectedDate);
+    // Фильтрация расписания по выбранной дате
+    List<ScheduleEntry> filteredSchedule = _schedule.where((entry) => entry.date == selectedDateKey).toList();
+
+    return Column(
+      children: [
+        WeeklyScheduleGrid(
+          selectedDay: _selectedDate,
+          onDaySelected: (day) {
+            setState(() {
+              _selectedDate = day;
+              _loadSchedule();
+            });
+          },
+        ),
+        Expanded(
+          child: Row(
+            children: [
+              // Левый блок: список расписания
+              Expanded(
+                flex: 2,
+                child: Container(
+                  color: Colors.grey[900],
+                  child: Column(
+                    children: [
+                      ElevatedButton(
+                        onPressed: _addScheduleEntry,
+                        child: const Text('Добавить интервал'),
+                      ),
+                      Expanded(
+                        child: ListView.separated(
+                          itemCount: filteredSchedule.length,
+                          separatorBuilder: (context, index) => const Divider(color: Colors.cyan),
+                          itemBuilder: (context, index) {
+                            ScheduleEntry entry = filteredSchedule[index];
+                            String dynamicFieldsDisplay = '';
+                            if (entry.dynamicFieldsJson != null && entry.dynamicFieldsJson!.isNotEmpty) {
+                              Map<String, dynamic> decoded = jsonDecode(entry.dynamicFieldsJson!);
+                              dynamicFieldsDisplay = decoded.entries
+                                  .map((e) => "${e.key}: ${e.value}")
+                                  .join(", ");
+                            }
+                            return GestureDetector(
+                              onSecondaryTapDown: (details) {
+                                _showScheduleContextMenu(context, _schedule.indexOf(entry), details.globalPosition);
+                              },
+                              child: ListTile(
+                                title: Row(
+                                  children: [
+                                    Expanded(
+                                      flex: 2,
+                                      child: Text(
+                                        entry.time,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                    const VerticalDivider(color: Colors.cyan, thickness: 2),
+                                    Expanded(
+                                      flex: 5,
+                                      child: Text(
+                                        dynamicFieldsDisplay,
+                                        style: const TextStyle(color: Colors.white70),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                onTap: () {
+                                  setState(() {
+                                    _selectedIndex = _schedule.indexOf(entry);
+                                  });
+                                },
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              // Правый блок: предпросмотр краткой заметки
+              Expanded(
+                flex: 1,
+                child: Container(
+                  color: Colors.grey[850],
+                  padding: const EdgeInsets.all(8),
+                  alignment: Alignment.topLeft,
+                  child: _selectedIndex == null
+                      ? const Text('Выберите занятие', style: TextStyle(color: Colors.white))
+                      : SingleChildScrollView(
+                          child: Text(
+                            _schedule[_selectedIndex!].note ?? '',
+                            style: const TextStyle(color: Colors.white70),
+                          ),
+                        ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
 }
+
 
 /// Экран заметок и папок с использованием БД для заметок
 class NotesScreen extends StatefulWidget {

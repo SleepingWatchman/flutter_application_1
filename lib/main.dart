@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
-import 'dart:math';
+import 'dart:convert';
 import 'package:intl/intl.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 
+/// Класс для работы с базой данных, реализующий CRUD-операции для всех сущностей.
 class DatabaseHelper {
   static final DatabaseHelper _instance = DatabaseHelper._internal();
   factory DatabaseHelper() => _instance;
@@ -21,7 +22,6 @@ class DatabaseHelper {
   Future<Database> _initDatabase() async {
     final databasePath = await getDatabasesPath();
     final path = join(databasePath, 'notes_app.db');
-
     return await openDatabase(
       path,
       version: 1,
@@ -30,7 +30,7 @@ class DatabaseHelper {
   }
 
   Future<void> _onCreate(Database db, int version) async {
-    // Пример создания таблицы для заметок.
+    // Таблица заметок
     await db.execute('''
       CREATE TABLE notes(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -39,50 +39,128 @@ class DatabaseHelper {
         folder TEXT
       )
     ''');
+    // Таблица расписания
+    await db.execute('''
+      CREATE TABLE schedule(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        time TEXT,
+        date TEXT,
+        note TEXT,
+        dynamicFields TEXT
+      )
+    ''');
+    // Таблица заметок на доске
+    await db.execute('''
+      CREATE TABLE pinboard_notes(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT,
+        content TEXT,
+        posX REAL,
+        posY REAL,
+        backgroundColor INTEGER
+      )
+    ''');
+    // Таблица соединений заметок
+    await db.execute('''
+      CREATE TABLE connections(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        fromId INTEGER,
+        toId INTEGER
+      )
+    ''');
   }
 
-    // Метод для вставки новой заметки
+  // Методы для заметок
   Future<int> insertNote(Note note) async {
     final db = await database;
     return await db.insert('notes', note.toMap());
   }
 
-  // Метод для получения всех заметок
   Future<List<Note>> getNotes() async {
     final db = await database;
     final List<Map<String, dynamic>> maps = await db.query('notes');
     return List.generate(maps.length, (i) => Note.fromMap(maps[i]));
   }
 
-  // Метод для обновления существующей заметки
   Future<int> updateNote(Note note) async {
     final db = await database;
-    return await db.update(
-      'notes',
-      note.toMap(),
-      where: 'id = ?',
-      whereArgs: [note.id],
-    );
+    return await db.update('notes', note.toMap(), where: 'id = ?', whereArgs: [note.id]);
   }
 
-  // Метод для удаления заметки по идентификатору
   Future<int> deleteNote(int id) async {
     final db = await database;
-    return await db.delete(
-      'notes',
-      where: 'id = ?',
-      whereArgs: [id],
-    );
+    return await db.delete('notes', where: 'id = ?', whereArgs: [id]);
+  }
+
+  // Методы для расписания
+  Future<int> insertScheduleEntry(ScheduleEntry entry) async {
+    final db = await database;
+    return await db.insert('schedule', entry.toMap());
+  }
+
+  Future<List<ScheduleEntry>> getScheduleEntries(String date) async {
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query('schedule', where: 'date = ?', whereArgs: [date]);
+    return List.generate(maps.length, (i) => ScheduleEntry.fromMap(maps[i]));
+  }
+
+  Future<int> updateScheduleEntry(ScheduleEntry entry) async {
+    final db = await database;
+    return await db.update('schedule', entry.toMap(), where: 'id = ?', whereArgs: [entry.id]);
+  }
+
+  Future<int> deleteScheduleEntry(int id) async {
+    final db = await database;
+    return await db.delete('schedule', where: 'id = ?', whereArgs: [id]);
+  }
+
+  // Методы для заметок на доске
+  Future<int> insertPinboardNote(PinboardNoteDB note) async {
+    final db = await database;
+    return await db.insert('pinboard_notes', note.toMap());
+  }
+
+  Future<List<PinboardNoteDB>> getPinboardNotes() async {
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query('pinboard_notes');
+    return List.generate(maps.length, (i) => PinboardNoteDB.fromMap(maps[i]));
+  }
+
+  Future<int> updatePinboardNote(PinboardNoteDB note) async {
+    final db = await database;
+    return await db.update('pinboard_notes', note.toMap(), where: 'id = ?', whereArgs: [note.id]);
+  }
+
+  Future<int> deletePinboardNote(int id) async {
+    final db = await database;
+    return await db.delete('pinboard_notes', where: 'id = ?', whereArgs: [id]);
+  }
+
+  // Методы для соединений заметок
+  Future<int> insertConnection(ConnectionDB connection) async {
+    final db = await database;
+    return await db.insert('connections', connection.toMap());
+  }
+
+  Future<List<ConnectionDB>> getConnections() async {
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query('connections');
+    return List.generate(maps.length, (i) => ConnectionDB.fromMap(maps[i]));
+  }
+
+  Future<int> deleteConnection(int id) async {
+    final db = await database;
+    return await db.delete('connections', where: 'id = ?', whereArgs: [id]);
   }
 }
 
+/// Виджет для отображения дней недели
 class WeeklyScheduleGrid extends StatelessWidget {
   final DateTime selectedDay;
   final ValueChanged<DateTime> onDaySelected;
 
   WeeklyScheduleGrid({required this.selectedDay, required this.onDaySelected});
 
-  // Метод для вычисления дней текущей недели (начало – понедельник)
   List<DateTime> _getWeekDays(DateTime currentDate) {
     int currentWeekday = currentDate.weekday;
     DateTime monday = currentDate.subtract(Duration(days: currentWeekday - 1));
@@ -105,7 +183,7 @@ class WeeklyScheduleGrid extends StatelessWidget {
             child: Column(
               children: [
                 Text(
-                  DateFormat('EEE', 'ru').format(day), // краткое название дня
+                  DateFormat('EEE', 'ru').format(day),
                   style: TextStyle(
                     color: isSelected ? Colors.cyan : Colors.white70,
                     fontWeight: FontWeight.bold,
@@ -126,7 +204,7 @@ class WeeklyScheduleGrid extends StatelessWidget {
   }
 }
 
-/// Виджет выбора цвета с помощью слайдеров для R, G, B.
+/// Виджет выбора цвета с помощью слайдеров
 class ColorPicker extends StatefulWidget {
   final Color color;
   final ValueChanged<Color> onChanged;
@@ -135,7 +213,6 @@ class ColorPicker extends StatefulWidget {
   @override
   _ColorPickerState createState() => _ColorPickerState();
 }
-
 class _ColorPickerState extends State<ColorPicker> {
   late double r;
   late double g;
@@ -213,7 +290,7 @@ class _ColorPickerState extends State<ColorPicker> {
   }
 }
 
-/// Класс для работы с динамическими полями в расписании.
+/// Класс для работы с динамическими полями в расписании
 class DynamicFieldEntry {
   TextEditingController keyController;
   TextEditingController valueController;
@@ -222,15 +299,13 @@ class DynamicFieldEntry {
         valueController = TextEditingController(text: value);
 }
 
-/// Модель заметки.
+/// Модель заметки
 class Note {
   int? id;
   String title;
   String content;
   String? folder;
-
   Note({this.id, this.title = 'Без названия', this.content = '', this.folder});
-
   Map<String, dynamic> toMap() {
     return {
       'id': id,
@@ -239,7 +314,6 @@ class Note {
       'folder': folder,
     };
   }
-
   factory Note.fromMap(Map<String, dynamic> map) {
     return Note(
       id: map['id'],
@@ -250,19 +324,12 @@ class Note {
   }
 }
 
-
-/// Модель папки.
+/// Модель папки
 class Folder {
   int? id;
   String name;
-  int backgroundColor; // сохраняется в виде int (ARGB)
-
-  Folder({
-    this.id,
-    required this.name,
-    required this.backgroundColor,
-  });
-
+  int backgroundColor; // хранится как int (ARGB)
+  Folder({this.id, required this.name, required this.backgroundColor});
   Map<String, dynamic> toMap() {
     return {
       'id': id,
@@ -270,7 +337,6 @@ class Folder {
       'backgroundColor': backgroundColor,
     };
   }
-
   factory Folder.fromMap(Map<String, dynamic> map) {
     return Folder(
       id: map['id'],
@@ -280,21 +346,14 @@ class Folder {
   }
 }
 
+/// Модель записи расписания
 class ScheduleEntry {
   int? id;
-  String time; // время в формате, например, "HH:MM - HH:MM"
-  String date; // дата в формате "yyyy-MM-dd"
+  String time;
+  String date;
   String? note;
-  String? dynamicFieldsJson; // дополнительные поля, сериализованные в JSON
-
-  ScheduleEntry({
-    this.id,
-    required this.time,
-    required this.date,
-    this.note,
-    this.dynamicFieldsJson,
-  });
-
+  String? dynamicFieldsJson;
+  ScheduleEntry({this.id, required this.time, required this.date, this.note, this.dynamicFieldsJson});
   Map<String, dynamic> toMap() {
     return {
       'id': id,
@@ -304,7 +363,6 @@ class ScheduleEntry {
       'dynamicFields': dynamicFieldsJson,
     };
   }
-
   factory ScheduleEntry.fromMap(Map<String, dynamic> map) {
     return ScheduleEntry(
       id: map['id'],
@@ -316,15 +374,15 @@ class ScheduleEntry {
   }
 }
 
-class PinboardNote {
+/// Модель заметки для доски (для работы с БД)
+class PinboardNoteDB {
   int? id;
   String title;
   String content;
   double posX;
   double posY;
-  int backgroundColor; // сохраняется в виде int (ARGB)
-
-  PinboardNote({
+  int backgroundColor;
+  PinboardNoteDB({
     this.id,
     this.title = 'Без названия',
     this.content = '',
@@ -332,7 +390,6 @@ class PinboardNote {
     required this.posY,
     required this.backgroundColor,
   });
-
   Map<String, dynamic> toMap() {
     return {
       'id': id,
@@ -343,9 +400,8 @@ class PinboardNote {
       'backgroundColor': backgroundColor,
     };
   }
-
-  factory PinboardNote.fromMap(Map<String, dynamic> map) {
-    return PinboardNote(
+  factory PinboardNoteDB.fromMap(Map<String, dynamic> map) {
+    return PinboardNoteDB(
       id: map['id'],
       title: map['title'],
       content: map['content'],
@@ -356,17 +412,12 @@ class PinboardNote {
   }
 }
 
-class Connection {
+/// Модель соединения заметок (для работы с БД)
+class ConnectionDB {
   int? id;
   int fromId;
   int toId;
-
-  Connection({
-    this.id,
-    required this.fromId,
-    required this.toId,
-  });
-
+  ConnectionDB({this.id, required this.fromId, required this.toId});
   Map<String, dynamic> toMap() {
     return {
       'id': id,
@@ -374,9 +425,8 @@ class Connection {
       'toId': toId,
     };
   }
-
-  factory Connection.fromMap(Map<String, dynamic> map) {
-    return Connection(
+  factory ConnectionDB.fromMap(Map<String, dynamic> map) {
+    return ConnectionDB(
       id: map['id'],
       fromId: map['fromId'],
       toId: map['toId'],
@@ -384,11 +434,11 @@ class Connection {
   }
 }
 
-
-void main() async{
+/// Функция main: инициализация БД и запуск приложения
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await DatabaseHelper().database; // Инициализация базы данных
-  await initializeDateFormatting('ru', null); // Инициализация данных для русской локали
+  await DatabaseHelper().database;
+  await initializeDateFormatting('ru', null);
   runApp(const NotesApp());
 }
 
@@ -404,7 +454,7 @@ class NotesApp extends StatelessWidget {
   }
 }
 
-/// Главное окно с NavigationRail для выбора между режимами: Расписание, Заметки, Доска.
+/// Главное окно с NavigationRail
 class MainScreen extends StatefulWidget {
   const MainScreen({Key? key}) : super(key: key);
   @override
@@ -447,9 +497,7 @@ class _MainScreenState extends State<MainScreen> {
   }
 }
 
-//
-// Окно расписания
-//
+/// Экран расписания с использованием БД
 class ScheduleScreen extends StatefulWidget {
   ScheduleScreen({Key? key}) : super(key: key);
   @override
@@ -467,7 +515,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   }
 
   Future<void> _loadSchedule() async {
-    // Формируем ключ даты для выборки записей
     String dateKey = DateFormat('yyyy-MM-dd').format(_selectedDate);
     List<ScheduleEntry> entries = await DatabaseHelper().getScheduleEntries(dateKey);
     setState(() {
@@ -477,10 +524,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final String selectedDateKey = DateFormat('yyyy-MM-dd').format(_selectedDate);
-    // Фильтрация расписания по выбранной дате
-    final List<Map<String, String>> filteredSchedule =
-        _schedule.where((entry) => entry['date'] == selectedDateKey).toList();
+    String selectedDateKey = DateFormat('yyyy-MM-dd').format(_selectedDate);
+    List<ScheduleEntry> filteredSchedule = _schedule.where((entry) => entry.date == selectedDateKey).toList();
 
     return Column(
       children: [
@@ -489,6 +534,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
           onDaySelected: (day) {
             setState(() {
               _selectedDate = day;
+              _loadSchedule();
             });
           },
         ),
@@ -508,18 +554,12 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                       Expanded(
                         child: ListView.separated(
                           itemCount: filteredSchedule.length,
-                          separatorBuilder: (context, index) =>
-                              const Divider(color: Colors.cyan),
+                          separatorBuilder: (context, index) => const Divider(color: Colors.cyan),
                           itemBuilder: (context, index) {
-                            // Поиск исходного индекса в полном списке _schedule
-                            int originalIndex =
-                                _schedule.indexOf(filteredSchedule[index]);
+                            int originalIndex = _schedule.indexOf(filteredSchedule[index]);
                             return GestureDetector(
                               onSecondaryTapDown: (details) {
-                                _showScheduleContextMenu(
-                                    context,
-                                    originalIndex,
-                                    details.globalPosition);
+                                _showScheduleContextMenu(context, originalIndex, details.globalPosition);
                               },
                               child: ListTile(
                                 title: Row(
@@ -527,28 +567,23 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                                     Expanded(
                                       flex: 2,
                                       child: Text(
-                                        filteredSchedule[index]['time'] ?? '',
-                                        style: const TextStyle(
-                                            color: Colors.white,
-                                            fontWeight: FontWeight.bold),
+                                        filteredSchedule[index].time,
+                                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                                       ),
                                     ),
-                                    const VerticalDivider(
-                                        color: Colors.cyan, thickness: 2),
+                                    const VerticalDivider(color: Colors.cyan, thickness: 2),
                                     Expanded(
                                       flex: 5,
                                       child: Text(
-                                        '${filteredSchedule[index]['Предмет'] ?? ''} - ${filteredSchedule[index].keys.where((k) => k != 'time' && k != 'note' && k != 'date').map((k) => "$k: ${filteredSchedule[index][k]}").join(", ")}',
-                                        style: const TextStyle(
-                                            color: Colors.white70),
+                                        filteredSchedule[index].note ?? '',
+                                        style: const TextStyle(color: Colors.white70),
                                       ),
                                     ),
                                   ],
                                 ),
                                 onTap: () {
                                   setState(() {
-                                    _selectedIndex =
-                                        _schedule.indexOf(filteredSchedule[index]);
+                                    _selectedIndex = originalIndex;
                                   });
                                 },
                               ),
@@ -567,11 +602,10 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                   padding: const EdgeInsets.all(8),
                   alignment: Alignment.topLeft,
                   child: _selectedIndex == null
-                      ? const Text('Выберите занятие',
-                          style: TextStyle(color: Colors.white))
+                      ? const Text('Выберите занятие', style: TextStyle(color: Colors.white))
                       : SingleChildScrollView(
                           child: Text(
-                            _schedule[_selectedIndex!]['note'] ?? '',
+                            _schedule[_selectedIndex!].note ?? '',
                             style: const TextStyle(color: Colors.white70),
                           ),
                         ),
@@ -585,237 +619,241 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   }
 
   void _addScheduleEntry() {
-  final TextEditingController timeController = TextEditingController();
-  // Изначально добавляем одно динамическое поле "Предмет"
-  List<DynamicFieldEntry> dynamicFields = [DynamicFieldEntry(key: 'Предмет', value: '')];
-  String? timeError;
+    final TextEditingController timeController = TextEditingController();
+    final TextEditingController noteController = TextEditingController();
+    List<DynamicFieldEntry> dynamicFields = [DynamicFieldEntry(key: 'Предмет', value: '')];
+    String? timeError;
 
-  showDialog(
-    context: context,
-    builder: (context) {
-      return StatefulBuilder(
-        builder: (context, setStateDialog) {
-          return AlertDialog(
-            title: const Text('Добавить занятие'),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: timeController,
-                    decoration: InputDecoration(
-                      labelText: 'Время (Формат HH:MM - HH:MM)',
-                      errorText: timeError,
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (context, setStateDialog) {
+            return AlertDialog(
+              title: const Text('Добавить занятие'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: timeController,
+                      decoration: InputDecoration(
+                        labelText: 'Время (Формат HH:MM - HH:MM)',
+                        errorText: timeError,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  Column(
-                    children: dynamicFields.map((field) {
-                      int fieldIndex = dynamicFields.indexOf(field);
-                      return Row(
-                        children: [
-                          Expanded(
-                            flex: 3,
-                            child: TextField(
-                              controller: field.keyController,
-                              decoration: const InputDecoration(labelText: 'Поле'),
+                    const SizedBox(height: 10),
+                    Column(
+                      children: dynamicFields.map((field) {
+                        int fieldIndex = dynamicFields.indexOf(field);
+                        return Row(
+                          children: [
+                            Expanded(
+                              flex: 3,
+                              child: TextField(
+                                controller: field.keyController,
+                                decoration: const InputDecoration(labelText: 'Поле'),
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            flex: 4,
-                            child: TextField(
-                              controller: field.valueController,
-                              decoration: const InputDecoration(labelText: 'Значение'),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              flex: 4,
+                              child: TextField(
+                                controller: field.valueController,
+                                decoration: const InputDecoration(labelText: 'Значение'),
+                              ),
                             ),
-                          ),
-                          IconButton(
-                            onPressed: () {
-                              setStateDialog(() {
-                                dynamicFields.removeAt(fieldIndex);
-                              });
-                            },
-                            icon: const Icon(Icons.delete),
-                          ),
-                        ],
-                      );
-                    }).toList(),
-                  ),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton(
-                      onPressed: () {
-                        setStateDialog(() {
-                          dynamicFields.add(DynamicFieldEntry(key: 'Новое поле', value: ''));
-                        });
-                      },
-                      child: const Text('Добавить поле'),
+                            IconButton(
+                              onPressed: () {
+                                setStateDialog(() {
+                                  dynamicFields.removeAt(fieldIndex);
+                                });
+                              },
+                              icon: const Icon(Icons.delete),
+                            ),
+                          ],
+                        );
+                      }).toList(),
                     ),
-                  ),
-                ],
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton(
+                        onPressed: () {
+                          setStateDialog(() {
+                            dynamicFields.add(DynamicFieldEntry(key: 'Новое поле', value: ''));
+                          });
+                        },
+                        child: const Text('Добавить поле'),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  // Проверка формата времени
-                  RegExp timeRegExp = RegExp(r'^([01]\d|2[0-3]):[0-5]\d\s*-\s*([01]\d|2[0-3]):[0-5]\d$');
-                  if (!timeRegExp.hasMatch(timeController.text.trim())) {
-                    setStateDialog(() {
-                      timeError = 'Неверный формат времени. Используйте HH:MM - HH:MM';
-                    });
-                    return;
-                  }
-                  // Формируем новый пункт расписания с автоматически добавленной датой
-                  Map<String, String> newEntry = {
-                    'time': timeController.text.trim(),
-                    'date': DateFormat('yyyy-MM-dd').format(_selectedDate),
-                  };
-                  for (var field in dynamicFields) {
-                    String key = field.keyController.text.trim();
-                    if (key.isNotEmpty) {
-                      newEntry[key] = field.valueController.text;
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    RegExp timeRegExp = RegExp(r'^([01]\d|2[0-3]):[0-5]\d\s*-\s*([01]\d|2[0-3]):[0-5]\d$');
+                    if (!timeRegExp.hasMatch(timeController.text.trim())) {
+                      setStateDialog(() {
+                        timeError = 'Неверный формат времени. Используйте HH:MM - HH:MM';
+                      });
+                      return;
                     }
-                  }
-                  setState(() {
-                    _schedule.add(newEntry);
-                  });
-                  Navigator.of(context).pop();
-                },
-                child: const Text('Сохранить'),
-              ),
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Отмена'),
-              ),
-            ],
-          );
-        },
-      );
-    },
-  );
-}
+                    Map<String, String> dynamicMap = {};
+                    for (var field in dynamicFields) {
+                      String key = field.keyController.text.trim();
+                      if (key.isNotEmpty) {
+                        dynamicMap[key] = field.valueController.text;
+                      }
+                    }
+                    ScheduleEntry newEntry = ScheduleEntry(
+                      time: timeController.text.trim(),
+                      date: DateFormat('yyyy-MM-dd').format(_selectedDate),
+                      note: jsonEncode(dynamicMap),
+                    );
+                    DatabaseHelper().insertScheduleEntry(newEntry).then((id) {
+                      newEntry.id = id;
+                      setState(() {
+                        _schedule.add(newEntry);
+                      });
+                    });
+                    Navigator.of(context).pop();
+                  },
+                  child: const Text('Сохранить'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Отмена'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
 
   void _editSchedule(int index) {
-  TextEditingController timeController = TextEditingController(text: _schedule[index]['time']);
-  TextEditingController noteController = TextEditingController(text: _schedule[index]['note'] ?? '');
-  List<DynamicFieldEntry> dynamicFields = [];
-
-  // Итерируемся по ключам, исключая 'time' и 'note'
-  _schedule[index].forEach((key, value) {
-    if (key != 'time' && key != 'note') {
-      dynamicFields.add(DynamicFieldEntry(key: key, value: value));
+    ScheduleEntry entry = _schedule[index];
+    TextEditingController timeController = TextEditingController(text: entry.time);
+    TextEditingController noteController = TextEditingController(text: entry.note ?? '');
+    List<DynamicFieldEntry> dynamicFields = [];
+    if (entry.note != null && entry.note!.isNotEmpty) {
+      Map<String, dynamic> decoded = jsonDecode(entry.note!);
+      decoded.forEach((key, value) {
+        dynamicFields.add(DynamicFieldEntry(key: key, value: value));
+      });
     }
-  });
-
-  showDialog(
-    context: context,
-    builder: (context) {
-      return StatefulBuilder(
-        builder: (context, setStateDialog) {
-          return AlertDialog(
-            title: const Text('Редактировать занятие'),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: timeController,
-                    decoration: const InputDecoration(labelText: 'Время'),
-                  ),
-                  const SizedBox(height: 10),
-                  // Отображаем все динамические поля, включая поле "Предмет", если оно существует
-                  Column(
-                    children: dynamicFields.map((field) {
-                      int fieldIndex = dynamicFields.indexOf(field);
-                      return Row(
-                        children: [
-                          Expanded(
-                            flex: 3,
-                            child: TextField(
-                              controller: field.keyController,
-                              decoration: const InputDecoration(labelText: 'Поле'),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            flex: 4,
-                            child: TextField(
-                              controller: field.valueController,
-                              decoration: const InputDecoration(labelText: 'Значение'),
-                            ),
-                          ),
-                          IconButton(
-                            onPressed: () {
-                              setStateDialog(() {
-                                dynamicFields.removeAt(fieldIndex);
-                              });
-                            },
-                            icon: const Icon(Icons.delete),
-                          ),
-                        ],
-                      );
-                    }).toList(),
-                  ),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton(
-                      onPressed: () {
-                        setStateDialog(() {
-                          dynamicFields.add(DynamicFieldEntry(key: 'Новое поле', value: ''));
-                        });
-                      },
-                      child: const Text('Добавить поле'),
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (context, setStateDialog) {
+            return AlertDialog(
+              title: const Text('Редактировать занятие'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: timeController,
+                      decoration: const InputDecoration(labelText: 'Время'),
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: noteController,
-                    decoration: const InputDecoration(labelText: 'Заметка'),
-                    maxLines: 3,
-                  ),
-                ],
+                    const SizedBox(height: 10),
+                    Column(
+                      children: dynamicFields.map((field) {
+                        int fieldIndex = dynamicFields.indexOf(field);
+                        return Row(
+                          children: [
+                            Expanded(
+                              flex: 3,
+                              child: TextField(
+                                controller: field.keyController,
+                                decoration: const InputDecoration(labelText: 'Поле'),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              flex: 4,
+                              child: TextField(
+                                controller: field.valueController,
+                                decoration: const InputDecoration(labelText: 'Значение'),
+                              ),
+                            ),
+                            IconButton(
+                              onPressed: () {
+                                setStateDialog(() {
+                                  dynamicFields.removeAt(fieldIndex);
+                                });
+                              },
+                              icon: const Icon(Icons.delete),
+                            ),
+                          ],
+                        );
+                      }).toList(),
+                    ),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton(
+                        onPressed: () {
+                          setStateDialog(() {
+                            dynamicFields.add(DynamicFieldEntry(key: 'Новое поле', value: ''));
+                          });
+                        },
+                        child: const Text('Добавить поле'),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: noteController,
+                      decoration: const InputDecoration(labelText: 'Заметка'),
+                      maxLines: 3,
+                    ),
+                  ],
+                ),
               ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Map<String, String> dynamicMap = {};
-                  for (var field in dynamicFields) {
-                    String key = field.keyController.text.trim();
-                    if (key.isNotEmpty) {
-                      dynamicMap[key] = field.valueController.text;
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Map<String, String> dynamicMap = {};
+                    for (var field in dynamicFields) {
+                      String key = field.keyController.text.trim();
+                      if (key.isNotEmpty) {
+                        dynamicMap[key] = field.valueController.text;
+                      }
                     }
-                  }
-                  setState(() {
-                    _schedule[index] = {
-                      'time': timeController.text,
-                      'note': noteController.text,
-                      ...dynamicMap,
-                    };
-                  });
-                  Navigator.of(context).pop();
-                },
-                child: const Text('Сохранить'),
-              ),
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Отмена'),
-              ),
-            ],
-          );
-        },
-      );
-    },
-  );
-}
+                    entry.time = timeController.text;
+                    entry.note = jsonEncode(dynamicMap);
+                    DatabaseHelper().updateScheduleEntry(entry).then((_) {
+                      setState(() {
+                        _schedule[index] = entry;
+                      });
+                    });
+                    Navigator.of(context).pop();
+                  },
+                  child: const Text('Сохранить'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Отмена'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
 
   void _deleteScheduleEntry(int index) {
-    setState(() {
-      _schedule.removeAt(index);
-      _selectedIndex = null;
+    DatabaseHelper().deleteScheduleEntry(_schedule[index].id!).then((_) {
+      setState(() {
+        _schedule.removeAt(index);
+        _selectedIndex = null;
+      });
     });
   }
+
   void _showScheduleContextMenu(BuildContext context, int index, Offset position) async {
     final RenderBox? overlay = Overlay.of(context)?.context.findRenderObject() as RenderBox?;
     if (overlay == null) return;
@@ -833,9 +871,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   }
 }
 
-//
-// Окно заметок и папок
-//
+/// Экран заметок и папок с использованием БД для заметок
 class NotesScreen extends StatefulWidget {
   NotesScreen({Key? key}) : super(key: key);
   @override
@@ -863,7 +899,6 @@ class _NotesScreenState extends State<NotesScreen> {
 
   void _addNote() async {
     Note newNote = Note();
-    // Сохраняем заметку в БД и получаем присвоенный id
     int id = await DatabaseHelper().insertNote(newNote);
     newNote.id = id;
     setState(() {
@@ -873,7 +908,6 @@ class _NotesScreenState extends State<NotesScreen> {
   }
 
   void _deleteNote(int index) async {
-    // Удаляем заметку по id
     await DatabaseHelper().deleteNote(_notes[index].id!);
     setState(() {
       _notes.removeAt(index);
@@ -886,7 +920,6 @@ class _NotesScreenState extends State<NotesScreen> {
       Note updatedNote = _notes[_selectedNoteIndex!];
       updatedNote.title = title;
       updatedNote.content = content;
-      // Обновляем запись в БД
       await DatabaseHelper().updateNote(updatedNote);
       setState(() {
         _notes[_selectedNoteIndex!] = updatedNote;
@@ -894,7 +927,6 @@ class _NotesScreenState extends State<NotesScreen> {
     }
   }
 
-  // Удаление заметки через контекстное меню (правый клик)
   void _showNoteContextMenu(BuildContext context, int index, Offset position) async {
     final RenderBox? overlay = Overlay.of(context)?.context.findRenderObject() as RenderBox?;
     if (overlay == null) return;
@@ -916,11 +948,12 @@ class _NotesScreenState extends State<NotesScreen> {
       _contentController.text = _notes[_selectedNoteIndex!].content;
     });
   }
+
   void _addFolder() {
     TextEditingController folderController = TextEditingController();
     showDialog(
       context: context,
-      builder: (context) {
+      builder: (BuildContext context) {
         return AlertDialog(
           title: const Text('Создать папку'),
           content: TextField(
@@ -934,7 +967,7 @@ class _NotesScreenState extends State<NotesScreen> {
                   setState(() {
                     _folders.add(Folder(
                       name: folderController.text.trim(),
-                      backgroundColor: Colors.grey[700]!,
+                      backgroundColor: Colors.grey[700]!.value,
                     ));
                   });
                 }
@@ -949,7 +982,6 @@ class _NotesScreenState extends State<NotesScreen> {
     );
   }
   void _deleteFolder(int index) {
-    // При удалении папки все заметки из неё становятся "без папки"
     String folderName = _folders[index].name;
     setState(() {
       for (var note in _notes) {
@@ -964,7 +996,7 @@ class _NotesScreenState extends State<NotesScreen> {
     TextEditingController nameController = TextEditingController(text: _folders[index].name);
     showDialog(
       context: context,
-      builder: (context) {
+      builder: (BuildContext context) {
         return AlertDialog(
           title: const Text('Редактировать папку'),
           content: Column(
@@ -973,9 +1005,9 @@ class _NotesScreenState extends State<NotesScreen> {
               TextField(controller: nameController, decoration: const InputDecoration(labelText: 'Название папки')),
               const SizedBox(height: 10),
               ColorPicker(
-                color: _folders[index].backgroundColor,
+                color: Color(_folders[index].backgroundColor),
                 onChanged: (color) {
-                  setState(() { _folders[index].backgroundColor = color; });
+                  setState(() { _folders[index].backgroundColor = color.value; });
                 },
               ),
             ],
@@ -994,7 +1026,6 @@ class _NotesScreenState extends State<NotesScreen> {
       },
     );
   }
-  // Контекстное меню для папок через правый клик
   void _showFolderContextMenu(BuildContext context, int index, Offset position) async {
     final RenderBox? overlay = Overlay.of(context)?.context.findRenderObject() as RenderBox?;
     if (overlay == null) return;
@@ -1018,7 +1049,6 @@ class _NotesScreenState extends State<NotesScreen> {
   }
   @override
   Widget build(BuildContext context) {
-    // Формируем список виджетов: сначала заметки без папки, затем группируем заметки по папкам.
     List<Widget> noteItems = [];
     List<Note> ungrouped = _notes.where((note) => note.folder == null).toList();
     if (ungrouped.isNotEmpty) {
@@ -1043,7 +1073,7 @@ class _NotesScreenState extends State<NotesScreen> {
           onLongPressStart: (details) { _showFolderContextMenu(context, _folders.indexOf(folder), details.globalPosition); },
           onSecondaryTapDown: (details) { _showFolderContextMenu(context, _folders.indexOf(folder), details.globalPosition); },
           child: Container(
-            color: folder.backgroundColor.withOpacity(0.3),
+            color: Color(folder.backgroundColor).withOpacity(0.3),
             padding: const EdgeInsets.all(8),
             child: Text(folder.name, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
           ),
@@ -1065,7 +1095,6 @@ class _NotesScreenState extends State<NotesScreen> {
     }
     return Row(
       children: [
-        // Левый блок: список заметок с группировкой по папкам.
         Container(
           width: 250,
           color: Colors.grey[900],
@@ -1087,7 +1116,6 @@ class _NotesScreenState extends State<NotesScreen> {
           ),
         ),
         const VerticalDivider(width: 1, color: Colors.cyan),
-        // Правый блок: редактирование выбранной заметки.
         Expanded(
           child: Container(
             color: Colors.grey[850],
@@ -1162,55 +1190,58 @@ class _NotesScreenState extends State<NotesScreen> {
   }
 }
 
-//
-// Окно доски (Pinboard)
-//
-class PinboardNote {
-  final int id;
-  String title;
-  String content;
-  Offset position;
-  Color backgroundColor;
-  PinboardNote({
-    required this.id,
-    this.title = 'Без названия',
-    this.content = '',
-    this.position = const Offset(20, 20),
-    Color? backgroundColor,
-  }) : backgroundColor = backgroundColor ?? Colors.grey[700]!;
-}
-class Connection {
-  final int fromId;
-  final int toId;
-  Connection({required this.fromId, required this.toId});
-}
+/// Экран доски с использованием БД для заметок и соединений
 class PinboardScreen extends StatefulWidget {
   PinboardScreen({Key? key}) : super(key: key);
   @override
   _PinboardScreenState createState() => _PinboardScreenState();
 }
 class _PinboardScreenState extends State<PinboardScreen> {
-  final List<PinboardNote> _pinboardNotes = [];
-  final List<Connection> _connections = [];
-  int _nextId = 0;
+  List<PinboardNoteDB> _pinboardNotes = [];
+  List<ConnectionDB> _connections = [];
   int? _selectedForConnection;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPinboardData();
+  }
+
+  Future<void> _loadPinboardData() async {
+    List<PinboardNoteDB> notes = await DatabaseHelper().getPinboardNotes();
+    List<ConnectionDB> connections = await DatabaseHelper().getConnections();
+    setState(() {
+      _pinboardNotes = notes;
+      _connections = connections;
+    });
+  }
+
   void _addPinboardNote() {
-    setState(() {
-      _pinboardNotes.add(PinboardNote(
-        id: _nextId++,
-        title: 'Новая заметка',
-        content: 'Содержимое заметки',
-        position: const Offset(20, 20),
-      ));
+    PinboardNoteDB newNote = PinboardNoteDB(
+      posX: 20,
+      posY: 20,
+      title: 'Новая заметка',
+      content: 'Содержимое заметки',
+      backgroundColor: Colors.grey[700]!.value,
+    );
+    DatabaseHelper().insertPinboardNote(newNote).then((id) {
+      newNote.id = id;
+      setState(() {
+        _pinboardNotes.add(newNote);
+      });
     });
   }
+
   void _deletePinboardNote(int id) {
-    setState(() {
-      _pinboardNotes.removeWhere((note) => note.id == id);
-      _connections.removeWhere((connection) => connection.fromId == id || connection.toId == id);
-      if (_selectedForConnection == id) { _selectedForConnection = null; }
+    DatabaseHelper().deletePinboardNote(id).then((_) {
+      setState(() {
+        _pinboardNotes.removeWhere((note) => note.id == id);
+        _connections.removeWhere((conn) => conn.fromId == id || conn.toId == id);
+        if (_selectedForConnection == id) { _selectedForConnection = null; }
+      });
     });
   }
+
   void _selectForConnection(int id) {
     setState(() {
       if (_selectedForConnection == id) {
@@ -1221,7 +1252,10 @@ class _PinboardScreenState extends State<PinboardScreen> {
             !_connections.any((conn) =>
                 (conn.fromId == _selectedForConnection! && conn.toId == id) ||
                 (conn.fromId == id && conn.toId == _selectedForConnection!))) {
-          _connections.add(Connection(fromId: _selectedForConnection!, toId: id));
+          ConnectionDB newConn = ConnectionDB(fromId: _selectedForConnection!, toId: id);
+          DatabaseHelper().insertConnection(newConn).then((_) {
+            _loadPinboardData();
+          });
           _selectedForConnection = null;
         } else {
           _selectedForConnection = id;
@@ -1229,18 +1263,7 @@ class _PinboardScreenState extends State<PinboardScreen> {
       }
     });
   }
-  void _updatePosition(int id, Offset newPosition) {
-    try {
-      setState(() {
-        int index = _pinboardNotes.indexWhere((note) => note.id == id);
-        if (index != -1) {
-          _pinboardNotes[index].position = newPosition;
-        }
-      });
-    } catch (e) {
-      print('Ошибка при обновлении позиции заметки: $e');
-    }
-  }
+
   void _editPinboardNote(int id) {
     int index = _pinboardNotes.indexWhere((note) => note.id == id);
     if (index == -1) {
@@ -1249,10 +1272,10 @@ class _PinboardScreenState extends State<PinboardScreen> {
     }
     TextEditingController editTitleController = TextEditingController(text: _pinboardNotes[index].title);
     TextEditingController editContentController = TextEditingController(text: _pinboardNotes[index].content);
-    Color selectedColor = _pinboardNotes[index].backgroundColor;
+    Color selectedColor = Color(_pinboardNotes[index].backgroundColor);
     showDialog(
       context: context,
-      builder: (context) {
+      builder: (BuildContext context) {
         return StatefulBuilder(builder: (context, setStateDialog) {
           return AlertDialog(
             title: const Text('Редактировать заметку'),
@@ -1275,10 +1298,11 @@ class _PinboardScreenState extends State<PinboardScreen> {
             actions: [
               TextButton(
                 onPressed: () {
-                  setState(() {
-                    _pinboardNotes[index].title = editTitleController.text.isEmpty ? 'Без названия' : editTitleController.text;
-                    _pinboardNotes[index].content = editContentController.text;
-                    _pinboardNotes[index].backgroundColor = selectedColor;
+                  _pinboardNotes[index].title = editTitleController.text.isEmpty ? 'Без названия' : editTitleController.text;
+                  _pinboardNotes[index].content = editContentController.text;
+                  _pinboardNotes[index].backgroundColor = selectedColor.value;
+                  DatabaseHelper().updatePinboardNote(_pinboardNotes[index]).then((_) {
+                    setState(() {});
                   });
                   Navigator.of(context).pop();
                 },
@@ -1291,7 +1315,8 @@ class _PinboardScreenState extends State<PinboardScreen> {
       },
     );
   }
-  void _showNoteContextMenu(BuildContext context, PinboardNote note, Offset position) async {
+
+  void _showNoteContextMenu(BuildContext context, PinboardNoteDB note, Offset position) async {
     final overlay = Overlay.of(context);
     if (overlay == null) return;
     final RenderBox overlayBox = overlay.context.findRenderObject() as RenderBox;
@@ -1304,13 +1329,14 @@ class _PinboardScreenState extends State<PinboardScreen> {
           PopupMenuItem<String>(value: 'delete', child: const Text('Удалить')),
         ],
       ).then((value) {
-        if (value == 'edit') { _editPinboardNote(note.id); }
-        else if (value == 'delete') { _deletePinboardNote(note.id); }
+        if (value == 'edit') { _editPinboardNote(note.id!); }
+        else if (value == 'delete') { _deletePinboardNote(note.id!); }
       });
     } catch (e) {
       print('Ошибка при вызове контекстного меню: $e');
     }
   }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1324,19 +1350,17 @@ class _PinboardScreenState extends State<PinboardScreen> {
           ..._pinboardNotes.map((note) {
             return Positioned(
               key: ValueKey(note.id),
-              left: note.position.dx,
-              top: note.position.dy,
+              left: note.posX,
+              top: note.posY,
               child: GestureDetector(
                 onPanUpdate: (details) {
                   setState(() {
-                    note.position += details.delta;
-                    note.position = Offset(
-                      note.position.dx.clamp(0.0, MediaQuery.of(context).size.width - 150),
-                      note.position.dy.clamp(0.0, MediaQuery.of(context).size.height - 150),
-                    );
+                    note.posX += details.delta.dx;
+                    note.posY += details.delta.dy;
                   });
+                  DatabaseHelper().updatePinboardNote(note);
                 },
-                onTap: () => _selectForConnection(note.id),
+                onTap: () => _selectForConnection(note.id!),
                 onSecondaryTapDown: (details) => _showNoteContextMenu(context, note, details.globalPosition),
                 child: _buildNoteWidget(note, isSelected: _selectedForConnection == note.id),
               ),
@@ -1351,13 +1375,14 @@ class _PinboardScreenState extends State<PinboardScreen> {
       ),
     );
   }
-  Widget _buildNoteWidget(PinboardNote note, {bool isSelected = false}) {
+
+  Widget _buildNoteWidget(PinboardNoteDB note, {bool isSelected = false}) {
     return Container(
       width: 150,
       height: 150,
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
-        color: note.backgroundColor,
+        color: Color(note.backgroundColor),
         borderRadius: BorderRadius.circular(8),
         border: isSelected ? Border.all(color: Colors.cyan, width: 2) : null,
         boxShadow: [
@@ -1379,24 +1404,25 @@ class _PinboardScreenState extends State<PinboardScreen> {
   }
 }
 
+/// Класс для отрисовки соединений между заметками на доске
 class ConnectionPainter extends CustomPainter {
-  final List<PinboardNote> notes;
-  final List<Connection> connections;
+  final List<PinboardNoteDB> notes;
+  final List<ConnectionDB> connections;
   ConnectionPainter({required this.notes, required this.connections});
   @override
   void paint(Canvas canvas, Size size) {
     try {
-      final Map<int, PinboardNote> notesMap = { for (var note in notes) note.id: note };
+      final Map<int, PinboardNoteDB> notesMap = { for (var note in notes) note.id!: note };
       final paint = Paint()
         ..color = Colors.cyan
         ..strokeWidth = 2
         ..style = PaintingStyle.stroke;
       for (var connection in connections) {
-        PinboardNote? fromNote = notesMap[connection.fromId];
-        PinboardNote? toNote = notesMap[connection.toId];
+        PinboardNoteDB? fromNote = notesMap[connection.fromId];
+        PinboardNoteDB? toNote = notesMap[connection.toId];
         if (fromNote != null && toNote != null) {
-          Offset from = fromNote.position + const Offset(75, 75);
-          Offset to = toNote.position + const Offset(75, 75);
+          Offset from = Offset(fromNote.posX, fromNote.posY) + const Offset(75, 75);
+          Offset to = Offset(toNote.posX, toNote.posY) + const Offset(75, 75);
           canvas.drawLine(from, to, paint);
         }
       }

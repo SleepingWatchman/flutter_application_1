@@ -2,6 +2,79 @@ import 'package:flutter/material.dart';
 import 'dart:math';
 import 'package:intl/intl.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:sqflite/sqflite.dart';
+import 'package:path/path.dart';
+
+class DatabaseHelper {
+  static final DatabaseHelper _instance = DatabaseHelper._internal();
+  factory DatabaseHelper() => _instance;
+  DatabaseHelper._internal();
+
+  Database? _database;
+
+  Future<Database> get database async {
+    if (_database != null) return _database!;
+    _database = await _initDatabase();
+    return _database!;
+  }
+
+  Future<Database> _initDatabase() async {
+    final databasePath = await getDatabasesPath();
+    final path = join(databasePath, 'notes_app.db');
+
+    return await openDatabase(
+      path,
+      version: 1,
+      onCreate: _onCreate,
+    );
+  }
+
+  Future<void> _onCreate(Database db, int version) async {
+    // Пример создания таблицы для заметок.
+    await db.execute('''
+      CREATE TABLE notes(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT,
+        content TEXT,
+        folder TEXT
+      )
+    ''');
+  }
+
+    // Метод для вставки новой заметки
+  Future<int> insertNote(Note note) async {
+    final db = await database;
+    return await db.insert('notes', note.toMap());
+  }
+
+  // Метод для получения всех заметок
+  Future<List<Note>> getNotes() async {
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query('notes');
+    return List.generate(maps.length, (i) => Note.fromMap(maps[i]));
+  }
+
+  // Метод для обновления существующей заметки
+  Future<int> updateNote(Note note) async {
+    final db = await database;
+    return await db.update(
+      'notes',
+      note.toMap(),
+      where: 'id = ?',
+      whereArgs: [note.id],
+    );
+  }
+
+  // Метод для удаления заметки по идентификатору
+  Future<int> deleteNote(int id) async {
+    final db = await database;
+    return await db.delete(
+      'notes',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+}
 
 class WeeklyScheduleGrid extends StatelessWidget {
   final DateTime selectedDay;
@@ -151,22 +224,170 @@ class DynamicFieldEntry {
 
 /// Модель заметки.
 class Note {
+  int? id;
   String title;
   String content;
   String? folder;
-  Note({this.title = 'Без названия', this.content = '', this.folder});
+
+  Note({this.id, this.title = 'Без названия', this.content = '', this.folder});
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'title': title,
+      'content': content,
+      'folder': folder,
+    };
+  }
+
+  factory Note.fromMap(Map<String, dynamic> map) {
+    return Note(
+      id: map['id'],
+      title: map['title'],
+      content: map['content'],
+      folder: map['folder'],
+    );
+  }
 }
+
 
 /// Модель папки.
 class Folder {
+  int? id;
   String name;
-  Color backgroundColor;
-  List<Note> notes;
-  Folder({required this.name, required this.backgroundColor, this.notes = const []});
+  int backgroundColor; // сохраняется в виде int (ARGB)
+
+  Folder({
+    this.id,
+    required this.name,
+    required this.backgroundColor,
+  });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'name': name,
+      'backgroundColor': backgroundColor,
+    };
+  }
+
+  factory Folder.fromMap(Map<String, dynamic> map) {
+    return Folder(
+      id: map['id'],
+      name: map['name'],
+      backgroundColor: map['backgroundColor'],
+    );
+  }
 }
+
+class ScheduleEntry {
+  int? id;
+  String time; // время в формате, например, "HH:MM - HH:MM"
+  String date; // дата в формате "yyyy-MM-dd"
+  String? note;
+  String? dynamicFieldsJson; // дополнительные поля, сериализованные в JSON
+
+  ScheduleEntry({
+    this.id,
+    required this.time,
+    required this.date,
+    this.note,
+    this.dynamicFieldsJson,
+  });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'time': time,
+      'date': date,
+      'note': note,
+      'dynamicFields': dynamicFieldsJson,
+    };
+  }
+
+  factory ScheduleEntry.fromMap(Map<String, dynamic> map) {
+    return ScheduleEntry(
+      id: map['id'],
+      time: map['time'],
+      date: map['date'],
+      note: map['note'],
+      dynamicFieldsJson: map['dynamicFields'],
+    );
+  }
+}
+
+class PinboardNote {
+  int? id;
+  String title;
+  String content;
+  double posX;
+  double posY;
+  int backgroundColor; // сохраняется в виде int (ARGB)
+
+  PinboardNote({
+    this.id,
+    this.title = 'Без названия',
+    this.content = '',
+    required this.posX,
+    required this.posY,
+    required this.backgroundColor,
+  });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'title': title,
+      'content': content,
+      'posX': posX,
+      'posY': posY,
+      'backgroundColor': backgroundColor,
+    };
+  }
+
+  factory PinboardNote.fromMap(Map<String, dynamic> map) {
+    return PinboardNote(
+      id: map['id'],
+      title: map['title'],
+      content: map['content'],
+      posX: map['posX'],
+      posY: map['posY'],
+      backgroundColor: map['backgroundColor'],
+    );
+  }
+}
+
+class Connection {
+  int? id;
+  int fromId;
+  int toId;
+
+  Connection({
+    this.id,
+    required this.fromId,
+    required this.toId,
+  });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'fromId': fromId,
+      'toId': toId,
+    };
+  }
+
+  factory Connection.fromMap(Map<String, dynamic> map) {
+    return Connection(
+      id: map['id'],
+      fromId: map['fromId'],
+      toId: map['toId'],
+    );
+  }
+}
+
 
 void main() async{
   WidgetsFlutterBinding.ensureInitialized();
+  await DatabaseHelper().database; // Инициализация базы данных
   await initializeDateFormatting('ru', null); // Инициализация данных для русской локали
   runApp(const NotesApp());
 }
@@ -235,9 +456,24 @@ class ScheduleScreen extends StatefulWidget {
   _ScheduleScreenState createState() => _ScheduleScreenState();
 }
 class _ScheduleScreenState extends State<ScheduleScreen> {
-  final List<Map<String, String>> _schedule = [];
+  List<ScheduleEntry> _schedule = [];
   DateTime _selectedDate = DateTime.now();
   int? _selectedIndex;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSchedule();
+  }
+
+  Future<void> _loadSchedule() async {
+    // Формируем ключ даты для выборки записей
+    String dateKey = DateFormat('yyyy-MM-dd').format(_selectedDate);
+    List<ScheduleEntry> entries = await DatabaseHelper().getScheduleEntries(dateKey);
+    setState(() {
+      _schedule = entries;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -611,31 +847,53 @@ class _NotesScreenState extends State<NotesScreen> {
   List<Folder> _folders = [];
   TextEditingController _titleController = TextEditingController();
   TextEditingController _contentController = TextEditingController();
-  void _addNote() {
+
+  @override
+  void initState() {
+    super.initState();
+    _loadNotes();
+  }
+
+  Future<void> _loadNotes() async {
+    List<Note> notesFromDb = await DatabaseHelper().getNotes();
     setState(() {
-      _notes.add(Note());
-      _selectedNoteIndex = _notes.length - 1;
-      _titleController.text = _notes[_selectedNoteIndex!].title;
-      _contentController.text = _notes[_selectedNoteIndex!].content;
+      _notes = notesFromDb;
     });
   }
-  void _deleteNote(int index) {
+
+  void _addNote() async {
+    Note newNote = Note();
+    // Сохраняем заметку в БД и получаем присвоенный id
+    int id = await DatabaseHelper().insertNote(newNote);
+    newNote.id = id;
+    setState(() {
+      _notes.add(newNote);
+      _selectedNoteIndex = _notes.length - 1;
+    });
+  }
+
+  void _deleteNote(int index) async {
+    // Удаляем заметку по id
+    await DatabaseHelper().deleteNote(_notes[index].id!);
     setState(() {
       _notes.removeAt(index);
-      if (_notes.isEmpty) {
-        _selectedNoteIndex = null;
-        _titleController.clear();
-        _contentController.clear();
-      } else if (_selectedNoteIndex != null) {
-        if (index < _notes.length) { _selectedNoteIndex = index; }
-        else { _selectedNoteIndex = _notes.length - 1; }
-        if (_selectedNoteIndex != null) {
-          _titleController.text = _notes[_selectedNoteIndex!].title;
-          _contentController.text = _notes[_selectedNoteIndex!].content;
-        }
-      }
+      _selectedNoteIndex = null;
     });
   }
+
+  void _updateSelectedNote(String title, String content) async {
+    if (_selectedNoteIndex != null) {
+      Note updatedNote = _notes[_selectedNoteIndex!];
+      updatedNote.title = title;
+      updatedNote.content = content;
+      // Обновляем запись в БД
+      await DatabaseHelper().updateNote(updatedNote);
+      setState(() {
+        _notes[_selectedNoteIndex!] = updatedNote;
+      });
+    }
+  }
+
   // Удаление заметки через контекстное меню (правый клик)
   void _showNoteContextMenu(BuildContext context, int index, Offset position) async {
     final RenderBox? overlay = Overlay.of(context)?.context.findRenderObject() as RenderBox?;
@@ -650,6 +908,7 @@ class _NotesScreenState extends State<NotesScreen> {
       if (value == 'delete') { _deleteNote(index); }
     });
   }
+
   void _selectNote(int index) {
     setState(() {
       _selectedNoteIndex = index;

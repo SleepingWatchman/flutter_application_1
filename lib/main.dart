@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:intl/intl.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:sqflite/sqflite.dart';
-import 'package:path/path.dart';
+import 'package:path/path.dart' as p;
 
 /// Класс для работы с базой данных, реализующий CRUD-операции для всех сущностей.
 class DatabaseHelper {
@@ -21,7 +21,7 @@ class DatabaseHelper {
 
   Future<Database> _initDatabase() async {
     final databasePath = await getDatabasesPath();
-    final path = join(databasePath, 'notes_app.db');
+    final path = p.join(databasePath, 'notes_app.db');
     return await openDatabase(
       path,
       version: 1,
@@ -626,9 +626,9 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
 
     showDialog(
       context: context,
-      builder: (BuildContext context) {
+      builder: (BuildContext outerContext) {
         return StatefulBuilder(
-          builder: (context, setStateDialog) {
+          builder: (BuildContext innerContext, void Function(void Function()) setStateDialog) {
             return AlertDialog(
               title: const Text('Добавить занятие'),
               content: SingleChildScrollView(
@@ -717,12 +717,12 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                         _schedule.add(newEntry);
                       });
                     });
-                    Navigator.of(context).pop();
+                    Navigator.of(outerContext).pop();
                   },
                   child: const Text('Сохранить'),
                 ),
                 TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
+                  onPressed: () => Navigator.of(outerContext).pop(),
                   child: const Text('Отмена'),
                 ),
               ],

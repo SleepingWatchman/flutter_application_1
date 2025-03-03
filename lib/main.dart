@@ -40,6 +40,7 @@ class DatabaseHelper {
         folder TEXT
       )
     ''');
+
     // Таблица расписания
     await db.execute('''
       CREATE TABLE schedule(
@@ -50,6 +51,7 @@ class DatabaseHelper {
         dynamicFields TEXT
       )
     ''');
+
     // Таблица заметок на доске
     await db.execute('''
       CREATE TABLE pinboard_notes(
@@ -61,6 +63,7 @@ class DatabaseHelper {
         backgroundColor INTEGER
       )
     ''');
+
     // Таблица соединений заметок
     await db.execute('''
       CREATE TABLE connections(
@@ -69,9 +72,18 @@ class DatabaseHelper {
         toId INTEGER
       )
     ''');
+
+    // Таблица папок
+    await db.execute('''
+      CREATE TABLE folders(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT,
+        backgroundColor INTEGER
+      )
+    ''');
   }
 
-  // Методы для заметок
+  // Методы для работы с заметками
   Future<int> insertNote(Note note) async {
     final db = await database;
     return await db.insert('notes', note.toMap());
@@ -85,7 +97,8 @@ class DatabaseHelper {
 
   Future<int> updateNote(Note note) async {
     final db = await database;
-    return await db.update('notes', note.toMap(), where: 'id = ?', whereArgs: [note.id]);
+    return await db.update('notes', note.toMap(),
+        where: 'id = ?', whereArgs: [note.id]);
   }
 
   Future<int> deleteNote(int id) async {
@@ -93,7 +106,7 @@ class DatabaseHelper {
     return await db.delete('notes', where: 'id = ?', whereArgs: [id]);
   }
 
-  // Методы для расписания
+  // Методы для работы с расписанием
   Future<int> insertScheduleEntry(ScheduleEntry entry) async {
     final db = await database;
     return await db.insert('schedule', entry.toMap());
@@ -101,13 +114,15 @@ class DatabaseHelper {
 
   Future<List<ScheduleEntry>> getScheduleEntries(String date) async {
     final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query('schedule', where: 'date = ?', whereArgs: [date]);
+    final List<Map<String, dynamic>> maps =
+        await db.query('schedule', where: 'date = ?', whereArgs: [date]);
     return List.generate(maps.length, (i) => ScheduleEntry.fromMap(maps[i]));
   }
 
   Future<int> updateScheduleEntry(ScheduleEntry entry) async {
     final db = await database;
-    return await db.update('schedule', entry.toMap(), where: 'id = ?', whereArgs: [entry.id]);
+    return await db.update('schedule', entry.toMap(),
+        where: 'id = ?', whereArgs: [entry.id]);
   }
 
   Future<int> deleteScheduleEntry(int id) async {
@@ -115,7 +130,7 @@ class DatabaseHelper {
     return await db.delete('schedule', where: 'id = ?', whereArgs: [id]);
   }
 
-  // Методы для заметок на доске
+  // Методы для работы с заметками на доске
   Future<int> insertPinboardNote(PinboardNoteDB note) async {
     final db = await database;
     return await db.insert('pinboard_notes', note.toMap());
@@ -129,7 +144,8 @@ class DatabaseHelper {
 
   Future<int> updatePinboardNote(PinboardNoteDB note) async {
     final db = await database;
-    return await db.update('pinboard_notes', note.toMap(), where: 'id = ?', whereArgs: [note.id]);
+    return await db.update('pinboard_notes', note.toMap(),
+        where: 'id = ?', whereArgs: [note.id]);
   }
 
   Future<int> deletePinboardNote(int id) async {
@@ -137,7 +153,7 @@ class DatabaseHelper {
     return await db.delete('pinboard_notes', where: 'id = ?', whereArgs: [id]);
   }
 
-  // Методы для соединений заметок
+  // Методы для работы с соединениями заметок
   Future<int> insertConnection(ConnectionDB connection) async {
     final db = await database;
     return await db.insert('connections', connection.toMap());
@@ -152,6 +168,29 @@ class DatabaseHelper {
   Future<int> deleteConnection(int id) async {
     final db = await database;
     return await db.delete('connections', where: 'id = ?', whereArgs: [id]);
+  }
+
+  // Методы для работы с папками
+  Future<int> insertFolder(Folder folder) async {
+    final db = await database;
+    return await db.insert('folders', folder.toMap());
+  }
+
+  Future<List<Folder>> getFolders() async {
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query('folders');
+    return List.generate(maps.length, (i) => Folder.fromMap(maps[i]));
+  }
+
+  Future<int> updateFolder(Folder folder) async {
+    final db = await database;
+    return await db.update('folders', folder.toMap(),
+        where: 'id = ?', whereArgs: [folder.id]);
+  }
+
+  Future<int> deleteFolder(int id) async {
+    final db = await database;
+    return await db.delete('folders', where: 'id = ?', whereArgs: [id]);
   }
 }
 
@@ -522,6 +561,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     List<ScheduleEntry> entries = await DatabaseHelper().getScheduleEntries(dateKey);
     setState(() {
       _schedule = entries;
+      _selectedIndex = null; // сброс выбранного элемента при загрузке нового расписания
     });
   }
 
@@ -542,7 +582,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Ввод времени
                     TextField(
                       controller: timeController,
                       decoration: InputDecoration(
@@ -551,7 +590,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                       ),
                     ),
                     const SizedBox(height: 10),
-                    // Динамические поля
+                    // Динамические поля (отображаются в списке расписания)
                     Column(
                       children: dynamicFields.map((field) {
                         int fieldIndex = dynamicFields.indexOf(field);
@@ -596,7 +635,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                       ),
                     ),
                     const SizedBox(height: 10),
-                    // Многострочное поле для краткой заметки, расположенное ниже динамических полей
+                    // Многострочное поле для краткой заметки (для предпросмотра)
                     TextField(
                       controller: shortNoteController,
                       decoration: const InputDecoration(labelText: 'Краткая заметка'),
@@ -617,7 +656,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                       });
                       return;
                     }
-                    // Формирование динамических полей в виде JSON
                     Map<String, String> dynamicMap = {};
                     for (var field in dynamicFields) {
                       String key = field.keyController.text.trim();
@@ -628,8 +666,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                     ScheduleEntry newEntry = ScheduleEntry(
                       time: timeController.text.trim(),
                       date: DateFormat('yyyy-MM-dd').format(_selectedDate),
-                      note: shortNoteController.text.trim(), // краткая заметка для предпросмотра
-                      dynamicFieldsJson: jsonEncode(dynamicMap), // динамические поля для списка
+                      note: shortNoteController.text.trim(), // краткая заметка
+                      dynamicFieldsJson: jsonEncode(dynamicMap), // динамические поля
                     );
                     DatabaseHelper().insertScheduleEntry(newEntry).then((id) {
                       newEntry.id = id;
@@ -785,9 +823,9 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     await showMenu(
       context: context,
       position: RelativeRect.fromRect(position & const Size(40, 40), Offset.zero & overlay.size),
-      items: [
-        const PopupMenuItem<String>(value: 'edit', child: Text('Редактировать')),
-        const PopupMenuItem<String>(value: 'delete', child: Text('Удалить')),
+      items: const [
+        PopupMenuItem<String>(value: 'edit', child: Text('Редактировать')),
+        PopupMenuItem<String>(value: 'delete', child: Text('Удалить')),
       ],
     ).then((value) {
       if (value == 'edit') {
@@ -801,8 +839,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   @override
   Widget build(BuildContext context) {
     String selectedDateKey = DateFormat('yyyy-MM-dd').format(_selectedDate);
-    // Фильтрация расписания по выбранной дате
-    List<ScheduleEntry> filteredSchedule = _schedule.where((entry) => entry.date == selectedDateKey).toList();
+    List<ScheduleEntry> filteredSchedule =
+        _schedule.where((entry) => entry.date == selectedDateKey).toList();
 
     return Column(
       children: [
@@ -811,8 +849,9 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
           onDaySelected: (day) {
             setState(() {
               _selectedDate = day;
-              _loadSchedule();
+              _selectedIndex = null; // сбрасываем выбранный элемент при смене дня
             });
+            _loadSchedule();
           },
         ),
         Expanded(
@@ -838,9 +877,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                             String dynamicFieldsDisplay = '';
                             if (entry.dynamicFieldsJson != null && entry.dynamicFieldsJson!.isNotEmpty) {
                               Map<String, dynamic> decoded = jsonDecode(entry.dynamicFieldsJson!);
-                              dynamicFieldsDisplay = decoded.entries
-                                  .map((e) => "${e.key}: ${e.value}")
-                                  .join(", ");
+                              dynamicFieldsDisplay = decoded.entries.map((e) => "${e.key}: ${e.value}").join(", ");
                             }
                             return GestureDetector(
                               onSecondaryTapDown: (details) {
@@ -890,7 +927,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                   color: Colors.grey[850],
                   padding: const EdgeInsets.all(8),
                   alignment: Alignment.topLeft,
-                  child: _selectedIndex == null
+                  child: (_selectedIndex == null || _selectedIndex! >= _schedule.length)
                       ? const Text('Выберите занятие', style: TextStyle(color: Colors.white))
                       : SingleChildScrollView(
                           child: Text(
@@ -909,6 +946,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
 }
 
 
+
 /// Экран заметок и папок с использованием БД для заметок
 class NotesScreen extends StatefulWidget {
   NotesScreen({Key? key}) : super(key: key);
@@ -917,8 +955,8 @@ class NotesScreen extends StatefulWidget {
 }
 class _NotesScreenState extends State<NotesScreen> {
   List<Note> _notes = [];
-  int? _selectedNoteIndex;
   List<Folder> _folders = [];
+  int? _selectedNoteIndex;
   TextEditingController _titleController = TextEditingController();
   TextEditingController _contentController = TextEditingController();
 
@@ -926,12 +964,20 @@ class _NotesScreenState extends State<NotesScreen> {
   void initState() {
     super.initState();
     _loadNotes();
+    _loadFolders();
   }
 
   Future<void> _loadNotes() async {
     List<Note> notesFromDb = await DatabaseHelper().getNotes();
     setState(() {
       _notes = notesFromDb;
+    });
+  }
+
+  Future<void> _loadFolders() async {
+    List<Folder> foldersFromDb = await DatabaseHelper().getFolders();
+    setState(() {
+      _folders = foldersFromDb;
     });
   }
 
@@ -946,23 +992,175 @@ class _NotesScreenState extends State<NotesScreen> {
   }
 
   void _deleteNote(int index) async {
-    await DatabaseHelper().deleteNote(_notes[index].id!);
-    setState(() {
-      _notes.removeAt(index);
-      _selectedNoteIndex = null;
-    });
+    if (_notes[index].id != null) {
+      await DatabaseHelper().deleteNote(_notes[index].id!);
+      setState(() {
+        _notes.removeAt(index);
+        _selectedNoteIndex = null;
+      });
+    }
   }
 
-  void _updateSelectedNote(String title, String content) async {
+  void _updateSelectedNote(String title, String content, [String? folder]) async {
     if (_selectedNoteIndex != null) {
       Note updatedNote = _notes[_selectedNoteIndex!];
       updatedNote.title = title;
       updatedNote.content = content;
+      updatedNote.folder = folder;
       await DatabaseHelper().updateNote(updatedNote);
       setState(() {
         _notes[_selectedNoteIndex!] = updatedNote;
       });
     }
+  }
+
+  // Добавление новой папки через диалог
+  void _addFolder() {
+    TextEditingController folderController = TextEditingController();
+    Color selectedColor = Colors.grey[700]!;
+    showDialog(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return StatefulBuilder(
+          builder: (BuildContext innerContext, void Function(void Function()) setStateDialog) {
+            return AlertDialog(
+              title: const Text('Создать папку'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: folderController,
+                    decoration: const InputDecoration(labelText: 'Название папки'),
+                  ),
+                  const SizedBox(height: 10),
+                  ColorPicker(
+                    color: selectedColor,
+                    onChanged: (color) {
+                      setStateDialog(() {
+                        selectedColor = color;
+                      });
+                    },
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () async {
+                    if (folderController.text.trim().isNotEmpty) {
+                      Folder newFolder = Folder(
+                        name: folderController.text.trim(),
+                        backgroundColor: selectedColor.value,
+                      );
+                      int id = await DatabaseHelper().insertFolder(newFolder);
+                      newFolder.id = id;
+                      setState(() {
+                        _folders.add(newFolder);
+                      });
+                    }
+                    Navigator.of(dialogContext).pop();
+                  },
+                  child: const Text('Создать'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('Отмена'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _deleteFolder(int index) async {
+    Folder folderToDelete = _folders[index];
+    if (folderToDelete.id != null) {
+      await DatabaseHelper().deleteFolder(folderToDelete.id!);
+      setState(() {
+        _folders.removeAt(index);
+        // Обновляем заметки: если заметка принадлежала удалённой папке, сбрасываем значение
+        for (var note in _notes) {
+          if (note.folder == folderToDelete.name) {
+            note.folder = null;
+            DatabaseHelper().updateNote(note);
+          }
+        }
+      });
+    }
+  }
+
+  void _editFolder(int index) {
+    Folder folderToEdit = _folders[index];
+    TextEditingController nameController = TextEditingController(text: folderToEdit.name);
+    Color selectedColor = Color(folderToEdit.backgroundColor);
+    showDialog(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return StatefulBuilder(
+          builder: (BuildContext innerContext, void Function(void Function()) setStateDialog) {
+            return AlertDialog(
+              title: const Text('Редактировать папку'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: nameController,
+                    decoration: const InputDecoration(labelText: 'Название папки'),
+                  ),
+                  const SizedBox(height: 10),
+                  ColorPicker(
+                    color: selectedColor,
+                    onChanged: (color) {
+                      setStateDialog(() {
+                        selectedColor = color;
+                      });
+                    },
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () async {
+                    folderToEdit.name = nameController.text.trim();
+                    folderToEdit.backgroundColor = selectedColor.value;
+                    await DatabaseHelper().updateFolder(folderToEdit);
+                    setState(() {
+                      _folders[index] = folderToEdit;
+                    });
+                    Navigator.of(dialogContext).pop();
+                  },
+                  child: const Text('Сохранить'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('Отмена'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showFolderContextMenu(BuildContext context, int index, Offset position) async {
+    final RenderBox? overlay = Overlay.of(context)?.context.findRenderObject() as RenderBox?;
+    if (overlay == null) return;
+    await showMenu(
+      context: context,
+      position: RelativeRect.fromRect(position & const Size(40, 40), Offset.zero & overlay.size),
+      items: [
+        const PopupMenuItem<String>(value: 'edit', child: Text('Редактировать папку')),
+        const PopupMenuItem<String>(value: 'delete', child: Text('Удалить папку')),
+      ],
+    ).then((value) {
+      if (value == 'edit') {
+        _editFolder(index);
+      } else if (value == 'delete') {
+        _deleteFolder(index);
+      }
+    });
   }
 
   void _showNoteContextMenu(BuildContext context, int index, Offset position) async {
@@ -975,7 +1173,9 @@ class _NotesScreenState extends State<NotesScreen> {
         const PopupMenuItem<String>(value: 'delete', child: Text('Удалить заметку')),
       ],
     ).then((value) {
-      if (value == 'delete') { _deleteNote(index); }
+      if (value == 'delete') {
+        _deleteNote(index);
+      }
     });
   }
 
@@ -987,106 +1187,9 @@ class _NotesScreenState extends State<NotesScreen> {
     });
   }
 
-  void _addFolder() {
-    TextEditingController folderController = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('Создать папку'),
-          content: TextField(
-            controller: folderController,
-            decoration: const InputDecoration(labelText: 'Название папки'),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                if (folderController.text.trim().isNotEmpty) {
-                  setState(() {
-                    _folders.add(Folder(
-                      name: folderController.text.trim(),
-                      backgroundColor: Colors.grey[700]!.value,
-                    ));
-                  });
-                }
-                Navigator.of(context).pop();
-              },
-              child: const Text('Создать'),
-            ),
-            TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Отмена')),
-          ],
-        );
-      },
-    );
-  }
-  void _deleteFolder(int index) {
-    String folderName = _folders[index].name;
-    setState(() {
-      for (var note in _notes) {
-        if (note.folder == folderName) {
-          note.folder = null;
-        }
-      }
-      _folders.removeAt(index);
-    });
-  }
-  void _editFolder(int index) {
-    TextEditingController nameController = TextEditingController(text: _folders[index].name);
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('Редактировать папку'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(controller: nameController, decoration: const InputDecoration(labelText: 'Название папки')),
-              const SizedBox(height: 10),
-              ColorPicker(
-                color: Color(_folders[index].backgroundColor),
-                onChanged: (color) {
-                  setState(() { _folders[index].backgroundColor = color.value; });
-                },
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                setState(() { _folders[index].name = nameController.text.trim(); });
-                Navigator.of(context).pop();
-              },
-              child: const Text('Сохранить'),
-            ),
-            TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Отмена')),
-          ],
-        );
-      },
-    );
-  }
-  void _showFolderContextMenu(BuildContext context, int index, Offset position) async {
-    final RenderBox? overlay = Overlay.of(context)?.context.findRenderObject() as RenderBox?;
-    if (overlay == null) return;
-    await showMenu(
-      context: context,
-      position: RelativeRect.fromRect(position & const Size(40, 40), Offset.zero & overlay.size),
-      items: [
-        const PopupMenuItem<String>(value: 'edit', child: Text('Редактировать папку')),
-        const PopupMenuItem<String>(value: 'delete', child: Text('Удалить папку')),
-      ],
-    ).then((value) {
-      if (value == 'edit') { _editFolder(index); }
-      else if (value == 'delete') { _deleteFolder(index); }
-    });
-  }
-  @override
-  void dispose() {
-    _titleController.dispose();
-    _contentController.dispose();
-    super.dispose();
-  }
   @override
   Widget build(BuildContext context) {
+    // Формируем список заметок: сначала без папок, затем группируем по папкам
     List<Widget> noteItems = [];
     List<Note> ungrouped = _notes.where((note) => note.folder == null).toList();
     if (ungrouped.isNotEmpty) {
@@ -1097,7 +1200,7 @@ class _NotesScreenState extends State<NotesScreen> {
       noteItems.addAll(ungrouped.map((note) {
         int index = _notes.indexOf(note);
         return GestureDetector(
-          onSecondaryTapDown: (details) { _showNoteContextMenu(context, index, details.globalPosition); },
+          onSecondaryTapDown: (details) => _showNoteContextMenu(context, index, details.globalPosition),
           child: ListTile(
             title: Text(note.title, style: const TextStyle(color: Colors.white70)),
             onTap: () => _selectNote(index),
@@ -1108,8 +1211,8 @@ class _NotesScreenState extends State<NotesScreen> {
     for (var folder in _folders) {
       noteItems.add(
         GestureDetector(
-          onLongPressStart: (details) { _showFolderContextMenu(context, _folders.indexOf(folder), details.globalPosition); },
-          onSecondaryTapDown: (details) { _showFolderContextMenu(context, _folders.indexOf(folder), details.globalPosition); },
+          onLongPressStart: (details) => _showFolderContextMenu(context, _folders.indexOf(folder), details.globalPosition),
+          onSecondaryTapDown: (details) => _showFolderContextMenu(context, _folders.indexOf(folder), details.globalPosition),
           child: Container(
             color: Color(folder.backgroundColor).withOpacity(0.3),
             padding: const EdgeInsets.all(8),
@@ -1122,7 +1225,7 @@ class _NotesScreenState extends State<NotesScreen> {
         noteItems.addAll(groupNotes.map((note) {
           int index = _notes.indexOf(note);
           return GestureDetector(
-            onSecondaryTapDown: (details) { _showNoteContextMenu(context, index, details.globalPosition); },
+            onSecondaryTapDown: (details) => _showNoteContextMenu(context, index, details.globalPosition),
             child: ListTile(
               title: Text(note.title, style: const TextStyle(color: Colors.white70)),
               onTap: () => _selectNote(index),
@@ -1133,6 +1236,7 @@ class _NotesScreenState extends State<NotesScreen> {
     }
     return Row(
       children: [
+        // Левый блок: список заметок с группировкой по папкам
         Container(
           width: 250,
           color: Colors.grey[900],
@@ -1145,15 +1249,29 @@ class _NotesScreenState extends State<NotesScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
-                  ElevatedButton.icon(onPressed: _addNote, icon: const Icon(Icons.add), label: const Text('Добавить')),
-                  ElevatedButton.icon(onPressed: _addFolder, icon: const Icon(Icons.create_new_folder), label: const Text('Папка')),
+                  ElevatedButton.icon(
+                    onPressed: _addNote,
+                    icon: const Icon(Icons.add),
+                    label: const Text('Добавить'),
+                  ),
+                  ElevatedButton.icon(
+                    onPressed: _addFolder,
+                    icon: const Icon(Icons.create_new_folder),
+                    label: const Text('Папка'),
+                  ),
                 ],
               ),
-              Expanded(child: ListView(padding: const EdgeInsets.all(8), children: noteItems)),
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.all(8),
+                  children: noteItems,
+                ),
+              ),
             ],
           ),
         ),
         const VerticalDivider(width: 1, color: Colors.cyan),
+        // Правый блок: редактирование выбранной заметки
         Expanded(
           child: Container(
             color: Colors.grey[850],
@@ -1190,12 +1308,20 @@ class _NotesScreenState extends State<NotesScreen> {
                             dropdownColor: Colors.grey[800],
                             items: [
                               const DropdownMenuItem<String?>(value: null, child: Text("Без папки")),
-                              ..._folders.map((folder) => DropdownMenuItem<String?>(value: folder.name, child: Text(folder.name))),
+                              ..._folders.map((folder) => DropdownMenuItem<String?>(
+                                    value: folder.name,
+                                    child: Text(folder.name),
+                                  )),
                             ],
                             onChanged: (value) {
                               setState(() {
                                 _notes[_selectedNoteIndex!].folder = value;
                               });
+                              _updateSelectedNote(
+                                _notes[_selectedNoteIndex!].title,
+                                _notes[_selectedNoteIndex!].content,
+                                value,
+                              );
                             },
                           ),
                         ],
@@ -1216,6 +1342,11 @@ class _NotesScreenState extends State<NotesScreen> {
                             setState(() {
                               _notes[_selectedNoteIndex!].content = value;
                             });
+                            _updateSelectedNote(
+                              _notes[_selectedNoteIndex!].title,
+                              value,
+                              _notes[_selectedNoteIndex!].folder,
+                            );
                           },
                         ),
                       ),

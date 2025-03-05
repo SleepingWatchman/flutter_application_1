@@ -492,6 +492,7 @@ class NotesApp extends StatelessWidget {
       title: 'Notes App',
       theme: ThemeData.dark(),
       home: const MainScreen(),
+      debugShowCheckedModeBanner: false,
     );
   }
 }

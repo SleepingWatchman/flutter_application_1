@@ -12,7 +12,6 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      # Установим Flutter (если требуется, можно использовать кэширование)
       - name: Install Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -21,21 +20,25 @@ jobs:
       - name: Flutter Doctor
         run: flutter doctor
 
-      # Включение поддержки macOS Desktop
       - name: Enable macOS Desktop
         run: flutter config --enable-macos-desktop
 
-      # Получаем зависимости
       - name: Get Flutter packages
         run: flutter pub get
 
-      # Собираем релизную сборку для macOS
       - name: Build macOS Release
         run: flutter build macos --release
 
-      # Сохраним артефакт сборки
-      - name: Upload artifact
+      - name: Create DMG
+        run: |
+          # Замените "MyApp" на фактическое имя вашего приложения (без расширения .app)
+          APP_NAME="Daily Planner DB"
+          APP_PATH="build/macos/Build/Products/Release/${APP_NAME}.app"
+          DMG_NAME="${APP_NAME}.dmg"
+          hdiutil create -volname "$APP_NAME" -srcfolder "$APP_PATH" -ov -format UDZO "$DMG_NAME"
+
+      - name: Upload DMG Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: macos-app
-          path: build/macos/Build/Products/Release/*.app
+          name: macos-dmg
+          path: MyApp.dmg

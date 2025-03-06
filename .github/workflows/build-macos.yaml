@@ -32,7 +32,7 @@ jobs:
       - name: Create DMG
         run: |
           # Замените "MyApp" на фактическое имя вашего приложения (без расширения .app)
-          APP_NAME="Daily Planner DB"
+          APP_NAME="flutter_application_1"
           APP_PATH="build/macos/Build/Products/Release/${APP_NAME}.app"
           DMG_NAME="${APP_NAME}.dmg"
           hdiutil create -volname "$APP_NAME" -srcfolder "$APP_PATH" -ov -format UDZO "$DMG_NAME"

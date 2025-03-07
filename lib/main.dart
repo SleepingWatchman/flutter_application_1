@@ -5,6 +5,25 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:path/path.dart' as p;
+import 'package:fluttertoast/fluttertoast.dart';
+
+// Добавьте этот фрагмент в начало файла main.dart (после импортов),
+// чтобы функция была доступна во всём приложении.
+void showToastWithDelay(String message) {
+  Future.delayed(const Duration(milliseconds: 300), () {
+    try {
+      Fluttertoast.showToast(
+        msg: message,
+        toastLength: Toast.LENGTH_SHORT,
+        gravity: ToastGravity.BOTTOM,
+        backgroundColor: Colors.grey[800],
+        textColor: Colors.white,
+      );
+    } catch (e) {
+      debugPrint("Ошибка при показе toast: $e");
+    }
+  });
+}
 
 /// Класс для работы с базой данных, реализующий CRUD-операции для всех сущностей.
 class DatabaseHelper {
@@ -675,6 +694,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                       setState(() {
                         _schedule.add(newEntry);
                       });
+                      showToastWithDelay("Занятие успешно создано");
                     });
                     Navigator.of(outerContext).pop();
                   },
@@ -765,7 +785,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                       ),
                     ),
                     const SizedBox(height: 10),
-                    // Многострочное поле для краткой заметки, расположенное ниже динамических полей
+                    // Многострочное поле для краткой заметки
                     TextField(
                       controller: shortNoteController,
                       decoration: const InputDecoration(labelText: 'Краткая заметка'),
@@ -792,6 +812,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                       setState(() {
                         _schedule[index] = entry;
                       });
+                      showToastWithDelay("Занятие успешно обновлено");
                     });
                     Navigator.of(outerContext).pop();
                   },
@@ -815,6 +836,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         _schedule.removeAt(index);
         _selectedIndex = null;
       });
+      showToastWithDelay("Занятие успешно удалено");
     });
   }
 
@@ -946,8 +968,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   }
 }
 
-
-
 /// Экран заметок и папок с использованием БД для заметок
 class NotesScreen extends StatefulWidget {
   NotesScreen({Key? key}) : super(key: key);
@@ -990,6 +1010,7 @@ class _NotesScreenState extends State<NotesScreen> {
       _notes.add(newNote);
       _selectedNoteIndex = _notes.length - 1;
     });
+    showToastWithDelay("Заметка успешно создана");
   }
 
   void _deleteNote(int index) async {
@@ -999,6 +1020,7 @@ class _NotesScreenState extends State<NotesScreen> {
         _notes.removeAt(index);
         _selectedNoteIndex = null;
       });
+      showToastWithDelay("Заметка успешно удалена");
     }
   }
 
@@ -1012,6 +1034,7 @@ class _NotesScreenState extends State<NotesScreen> {
       setState(() {
         _notes[_selectedNoteIndex!] = updatedNote;
       });
+      showToastWithDelay("Заметка успешно обновлена");
     }
   }
 
@@ -1057,6 +1080,7 @@ class _NotesScreenState extends State<NotesScreen> {
                       setState(() {
                         _folders.add(newFolder);
                       });
+                      showToastWithDelay("Папка успешно создана");
                     }
                     Navigator.of(dialogContext).pop();
                   },
@@ -1088,6 +1112,7 @@ class _NotesScreenState extends State<NotesScreen> {
           }
         }
       });
+      showToastWithDelay("Папка успешно удалена");
     }
   }
 
@@ -1129,6 +1154,7 @@ class _NotesScreenState extends State<NotesScreen> {
                     setState(() {
                       _folders[index] = folderToEdit;
                     });
+                    showToastWithDelay("Папка успешно обновлена");
                     Navigator.of(dialogContext).pop();
                   },
                   child: const Text('Сохранить'),
@@ -1399,6 +1425,7 @@ class _PinboardScreenState extends State<PinboardScreen> {
       setState(() {
         _pinboardNotes.add(newNote);
       });
+      showToastWithDelay("Заметка на доске успешно создана");
     });
   }
 
@@ -1409,6 +1436,7 @@ class _PinboardScreenState extends State<PinboardScreen> {
         _connections.removeWhere((conn) => conn.fromId == id || conn.toId == id);
         if (_selectedForConnection == id) { _selectedForConnection = null; }
       });
+      showToastWithDelay("Заметка на доске успешно удалена");
     });
   }
 
@@ -1445,8 +1473,8 @@ class _PinboardScreenState extends State<PinboardScreen> {
     Color selectedColor = Color(_pinboardNotes[index].backgroundColor);
     showDialog(
       context: context,
-      builder: (BuildContext context) {
-        return StatefulBuilder(builder: (context, setStateDialog) {
+      builder: (BuildContext outerContext) {
+        return StatefulBuilder(builder: (BuildContext innerContext, void Function(void Function()) setStateDialog) {
           return AlertDialog(
             title: const Text('Редактировать заметку'),
             content: SingleChildScrollView(
@@ -1474,11 +1502,12 @@ class _PinboardScreenState extends State<PinboardScreen> {
                   DatabaseHelper().updatePinboardNote(_pinboardNotes[index]).then((_) {
                     setState(() {});
                   });
-                  Navigator.of(context).pop();
+                  Navigator.of(outerContext).pop();
+                  showToastWithDelay("Заметка на доске успешно обновлена");
                 },
                 child: const Text('Сохранить'),
               ),
-              TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Отмена')),
+              TextButton(onPressed: () => Navigator.of(outerContext).pop(), child: const Text('Отмена')),
             ],
           );
         });

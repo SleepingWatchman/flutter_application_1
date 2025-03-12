@@ -9,22 +9,56 @@ import 'package:oktoast/oktoast.dart';
 
 // Добавьте этот фрагмент в начало файла main.dart (после импортов),
 // чтобы функция была доступна во всём приложении.
-void showToastWithDelay(String message) {
+void showCustomToast(String message,
+    {Color accentColor = Colors.green, double fontSize = 14.0}) {  // fontSize изменен на 14.0
   Future.delayed(const Duration(milliseconds: 300), () {
     try {
-      // Используем функцию showToast из oktoast
-      showToast(
-        message,
+      showToastWidget(
+        Align(
+          alignment: Alignment.bottomRight,
+          child: Container(
+            margin: const EdgeInsets.only(right: 20, bottom: 20),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8), // уменьшены отступы
+            decoration: BoxDecoration(
+              color: const Color.fromARGB(255, 40, 40, 40).withOpacity(0.8), // фон с opacity 0.6 для более светлого фона
+              borderRadius: BorderRadius.circular(8),
+            ),
+            constraints: const BoxConstraints(maxWidth: 250), // можно уменьшить ширину
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Верхняя полоса с акцентным цветом
+                Container(
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: accentColor,
+                    borderRadius: const BorderRadius.only(
+                      topLeft: Radius.circular(8),
+                      topRight: Radius.circular(8),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  message,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: fontSize, color: Colors.white),
+                ),
+              ],
+            ),
+          ),
+        ),
         duration: const Duration(seconds: 2),
-        position: ToastPosition.bottom,
-        backgroundColor: Colors.grey[800],
-        textStyle: const TextStyle(color: Colors.white),
+        dismissOtherToast: true,
       );
     } catch (e) {
       debugPrint("Ошибка при показе toast: $e");
     }
   });
 }
+
+
 
 
 /// Класс для работы с базой данных, реализующий CRUD-операции для всех сущностей.
@@ -509,7 +543,7 @@ class NotesApp extends StatelessWidget {
   const NotesApp({Key? key}) : super(key: key);
   @override
   Widget build(BuildContext context) {
-    return OKToast(  // Оборачиваем всё приложение в OKToast
+    return OKToast(
       child: MaterialApp(
         title: 'Notes App',
         theme: ThemeData.dark(),
@@ -698,7 +732,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                       setState(() {
                         _schedule.add(newEntry);
                       });
-                      showToastWithDelay("Занятие успешно создано");
+                        showCustomToast("Занятие успешно создано", accentColor: Colors.green, fontSize: 18.0);
+                        Navigator.of(outerContext).pop();
                     });
                     Navigator.of(outerContext).pop();
                   },
@@ -816,7 +851,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                       setState(() {
                         _schedule[index] = entry;
                       });
-                      showToastWithDelay("Занятие успешно обновлено");
+                        showCustomToast("Занятие успешно обновлено", accentColor: Colors.yellow, fontSize: 18.0);
+                        Navigator.of(outerContext).pop();
                     });
                     Navigator.of(outerContext).pop();
                   },
@@ -840,7 +876,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         _schedule.removeAt(index);
         _selectedIndex = null;
       });
-      showToastWithDelay("Занятие успешно удалено");
+      showCustomToast("Занятие успешно удалено", accentColor: Colors.red, fontSize: 18.0);
     });
   }
 
@@ -1014,7 +1050,7 @@ class _NotesScreenState extends State<NotesScreen> {
       _notes.add(newNote);
       _selectedNoteIndex = _notes.length - 1;
     });
-    showToastWithDelay("Заметка успешно создана");
+    showCustomToast("Заметка успешно создана", accentColor: Colors.green, fontSize: 18.0);
   }
 
   void _deleteNote(int index) async {
@@ -1024,7 +1060,7 @@ class _NotesScreenState extends State<NotesScreen> {
         _notes.removeAt(index);
         _selectedNoteIndex = null;
       });
-      showToastWithDelay("Заметка успешно удалена");
+      showCustomToast("Заметка успешно удалена", accentColor: Colors.red, fontSize: 18.0);
     }
   }
 
@@ -1038,7 +1074,6 @@ class _NotesScreenState extends State<NotesScreen> {
       setState(() {
         _notes[_selectedNoteIndex!] = updatedNote;
       });
-      showToastWithDelay("Заметка успешно обновлена");
     }
   }
 
@@ -1084,7 +1119,7 @@ class _NotesScreenState extends State<NotesScreen> {
                       setState(() {
                         _folders.add(newFolder);
                       });
-                      showToastWithDelay("Папка успешно создана");
+                      showCustomToast("Папка успешно создана", accentColor: Colors.green, fontSize: 18.0);
                     }
                     Navigator.of(dialogContext).pop();
                   },
@@ -1116,7 +1151,7 @@ class _NotesScreenState extends State<NotesScreen> {
           }
         }
       });
-      showToastWithDelay("Папка успешно удалена");
+      showCustomToast("Папка успешно удалена", accentColor: Colors.red, fontSize: 18.0);
     }
   }
 
@@ -1158,7 +1193,7 @@ class _NotesScreenState extends State<NotesScreen> {
                     setState(() {
                       _folders[index] = folderToEdit;
                     });
-                    showToastWithDelay("Папка успешно обновлена");
+                    showCustomToast("Папка успешно обновлена", accentColor: Colors.yellow, fontSize: 18.0);
                     Navigator.of(dialogContext).pop();
                   },
                   child: const Text('Сохранить'),
@@ -1429,7 +1464,7 @@ class _PinboardScreenState extends State<PinboardScreen> {
       setState(() {
         _pinboardNotes.add(newNote);
       });
-      showToastWithDelay("Заметка на доске успешно создана");
+      showCustomToast("Заметка на доске успешно создана", accentColor: Colors.green, fontSize: 18.0);
     });
   }
 
@@ -1440,7 +1475,7 @@ class _PinboardScreenState extends State<PinboardScreen> {
         _connections.removeWhere((conn) => conn.fromId == id || conn.toId == id);
         if (_selectedForConnection == id) { _selectedForConnection = null; }
       });
-      showToastWithDelay("Заметка на доске успешно удалена");
+      showCustomToast("Заметка на доске успешно удалена", accentColor: Colors.red, fontSize: 18.0);
     });
   }
 
@@ -1506,8 +1541,8 @@ class _PinboardScreenState extends State<PinboardScreen> {
                   DatabaseHelper().updatePinboardNote(_pinboardNotes[index]).then((_) {
                     setState(() {});
                   });
+                  showCustomToast("Заметка на доске успешно обновлена", accentColor: Colors.yellow, fontSize: 18.0);
                   Navigator.of(outerContext).pop();
-                  showToastWithDelay("Заметка на доске успешно обновлена");
                 },
                 child: const Text('Сохранить'),
               ),

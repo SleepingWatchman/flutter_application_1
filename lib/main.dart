@@ -5,25 +5,27 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:path/path.dart' as p;
-import 'package:fluttertoast/fluttertoast.dart';
+import 'package:oktoast/oktoast.dart';
 
 // Добавьте этот фрагмент в начало файла main.dart (после импортов),
 // чтобы функция была доступна во всём приложении.
 void showToastWithDelay(String message) {
   Future.delayed(const Duration(milliseconds: 300), () {
     try {
-      Fluttertoast.showToast(
-        msg: message,
-        toastLength: Toast.LENGTH_SHORT,
-        gravity: ToastGravity.BOTTOM,
+      // Используем функцию showToast из oktoast
+      showToast(
+        message,
+        duration: const Duration(seconds: 2),
+        position: ToastPosition.bottom,
         backgroundColor: Colors.grey[800],
-        textColor: Colors.white,
+        textStyle: const TextStyle(color: Colors.white),
       );
     } catch (e) {
       debugPrint("Ошибка при показе toast: $e");
     }
   });
 }
+
 
 /// Класс для работы с базой данных, реализующий CRUD-операции для всех сущностей.
 class DatabaseHelper {
@@ -507,11 +509,13 @@ class NotesApp extends StatelessWidget {
   const NotesApp({Key? key}) : super(key: key);
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Notes App',
-      theme: ThemeData.dark(),
-      home: const MainScreen(),
-      debugShowCheckedModeBanner: false,
+    return OKToast(  // Оборачиваем всё приложение в OKToast
+      child: MaterialApp(
+        title: 'Notes App',
+        theme: ThemeData.dark(),
+        home: const MainScreen(),
+        debugShowCheckedModeBanner: false,
+      ),
     );
   }
 }

@@ -9,7 +9,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  fluttertoast: ^8.2.1
+  oktoast: ^3.3.2
   intl: ^0.17.0
   sqflite: ^2.0.0+4
   sqflite_common_ffi: ^2.0.0

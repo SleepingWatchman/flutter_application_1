@@ -5,6 +5,8 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:path/path.dart' as p;
 import 'package:oktoast/oktoast.dart';
+import 'package:mask_text_input_formatter/mask_text_input_formatter.dart';
+
 
 // Добавьте этот фрагмент в начало файла main.dart (после импортов),
 // чтобы функция была доступна во всём приложении.
@@ -732,14 +734,14 @@ class ScheduleScreen extends StatefulWidget {
 }
 
 class _ScheduleScreenState extends State<ScheduleScreen> {
-  DateTime? _selectedDate; // Если null, показываем календарь
+  DateTime? _selectedDate; // Если null – показываем календарь
   List<ScheduleEntry> _schedule = [];
   int? _selectedIndex;
 
   @override
   void initState() {
     super.initState();
-    // При запуске день не выбран, значит показываем календарь
+    // При запуске ни один день не выбран – отображается календарь.
     _selectedDate = null;
   }
 
@@ -760,12 +762,10 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     });
   }
 
-  // Загрузка интервалов для выбранного дня
   Future<void> _loadSchedule() async {
     if (_selectedDate != null) {
       String dateKey = DateFormat('yyyy-MM-dd').format(_selectedDate!);
-      List<ScheduleEntry> entries =
-          await DatabaseHelper().getScheduleEntries(dateKey);
+      List<ScheduleEntry> entries = await DatabaseHelper().getScheduleEntries(dateKey);
       setState(() {
         _schedule = entries;
         _selectedIndex = null;
@@ -773,21 +773,22 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     }
   }
 
-  // Добавление нового интервала
+  // Метод добавления нового интервала с предустановленной маской для поля времени.
   void _addScheduleEntry() {
     final TextEditingController timeController = TextEditingController();
     final TextEditingController shortNoteController = TextEditingController();
-    List<DynamicFieldEntry> dynamicFields = [
-      DynamicFieldEntry(key: 'Предмет', value: '')
-    ];
+    final timeMaskFormatter = MaskTextInputFormatter(
+      mask: '##:## - ##:##',
+      filter: { '#': RegExp(r'[0-9]') },
+    );
+    List<DynamicFieldEntry> dynamicFields = [DynamicFieldEntry(key: 'Предмет', value: '')];
     String? timeError;
 
     showDialog(
       context: context,
       builder: (BuildContext outerContext) {
         return StatefulBuilder(
-          builder: (BuildContext innerContext,
-              void Function(void Function()) setStateDialog) {
+          builder: (BuildContext innerContext, void Function(void Function()) setStateDialog) {
             return AlertDialog(
               title: const Text('Добавить интервал'),
               content: SingleChildScrollView(
@@ -796,8 +797,10 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                   children: [
                     TextField(
                       controller: timeController,
+                      inputFormatters: [timeMaskFormatter],
+                      keyboardType: TextInputType.number,
                       decoration: InputDecoration(
-                        labelText: 'Время (Формат HH:MM - HH:MM)',
+                        labelText: 'Время (HH:MM - HH:MM)',
                         errorText: timeError,
                       ),
                     ),
@@ -812,8 +815,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                               flex: 3,
                               child: TextField(
                                 controller: field.keyController,
-                                decoration:
-                                    const InputDecoration(labelText: 'Поле'),
+                                decoration: const InputDecoration(labelText: 'Поле'),
                               ),
                             ),
                             const SizedBox(width: 8),
@@ -821,8 +823,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                               flex: 4,
                               child: TextField(
                                 controller: field.valueController,
-                                decoration:
-                                    const InputDecoration(labelText: 'Значение'),
+                                decoration: const InputDecoration(labelText: 'Значение'),
                               ),
                             ),
                             IconButton(
@@ -842,8 +843,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                       child: TextButton(
                         onPressed: () {
                           setStateDialog(() {
-                            dynamicFields.add(
-                                DynamicFieldEntry(key: 'Новое поле', value: ''));
+                            dynamicFields.add(DynamicFieldEntry(key: 'Новое поле', value: ''));
                           });
                         },
                         child: const Text('Добавить поле'),
@@ -853,8 +853,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                     // Многострочное поле для краткой заметки
                     TextField(
                       controller: shortNoteController,
-                      decoration:
-                          const InputDecoration(labelText: 'Краткая заметка'),
+                      decoration: const InputDecoration(labelText: 'Краткая заметка'),
                       maxLines: null,
                       keyboardType: TextInputType.multiline,
                     ),
@@ -864,16 +863,13 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
               actions: [
                 TextButton(
                   onPressed: () {
-                    RegExp timeRegExp = RegExp(
-                        r'^([01]\d|2[0-3]):[0-5]\d\s*-\s*([01]\d|2[0-3]):[0-5]\d$');
-                    if (!timeRegExp.hasMatch(timeController.text.trim())) {
+                    // Проверка: если маска не заполнена полностью (т.е. меньше 8 цифр)
+                    if (timeMaskFormatter.getUnmaskedText().length < 8) {
                       setStateDialog(() {
-                        timeError =
-                            'Неверный формат времени. Используйте HH:MM - HH:MM';
+                        timeError = 'Заполните время полностью';
                       });
                       return;
                     }
-                    // Формируем динамические поля
                     Map<String, String> dynamicMap = {};
                     for (var field in dynamicFields) {
                       String key = field.keyController.text.trim();
@@ -881,7 +877,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                         dynamicMap[key] = field.valueController.text;
                       }
                     }
-                    // Создаём новую запись расписания
                     ScheduleEntry newEntry = ScheduleEntry(
                       time: timeController.text.trim(),
                       date: DateFormat('yyyy-MM-dd').format(_selectedDate!),
@@ -916,12 +911,20 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     );
   }
 
-  // Редактирование интервала
+  // Метод редактирования интервала с использованием маски для поля времени.
   void _editSchedule(int index) {
     ScheduleEntry entry = _schedule[index];
     TextEditingController timeController = TextEditingController(text: entry.time);
-    TextEditingController shortNoteController =
-        TextEditingController(text: entry.note ?? '');
+    TextEditingController shortNoteController = TextEditingController(text: entry.note ?? '');
+    final timeMaskFormatter = MaskTextInputFormatter(
+      mask: '##:## - ##:##',
+      filter: { '#': RegExp(r'[0-9]') },
+    );
+    // Применяем форматирование к существующему значению
+    timeMaskFormatter.formatEditUpdate(
+      const TextEditingValue(text: ''),
+      TextEditingValue(text: entry.time),
+    );
     List<DynamicFieldEntry> dynamicFields = [];
     if (entry.dynamicFieldsJson != null && entry.dynamicFieldsJson!.isNotEmpty) {
       Map<String, dynamic> decoded = jsonDecode(entry.dynamicFieldsJson!);
@@ -933,8 +936,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       context: context,
       builder: (BuildContext outerContext) {
         return StatefulBuilder(
-          builder:
-              (BuildContext innerContext, void Function(void Function()) setStateDialog) {
+          builder: (BuildContext innerContext, void Function(void Function()) setStateDialog) {
             return AlertDialog(
               title: const Text('Редактировать интервал'),
               content: SingleChildScrollView(
@@ -943,7 +945,9 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                   children: [
                     TextField(
                       controller: timeController,
-                      decoration: const InputDecoration(labelText: 'Время'),
+                      inputFormatters: [timeMaskFormatter],
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: 'Время (HH:MM - HH:MM)'),
                     ),
                     const SizedBox(height: 10),
                     Column(
@@ -955,8 +959,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                               flex: 3,
                               child: TextField(
                                 controller: field.keyController,
-                                decoration:
-                                    const InputDecoration(labelText: 'Поле'),
+                                decoration: const InputDecoration(labelText: 'Поле'),
                               ),
                             ),
                             const SizedBox(width: 8),
@@ -964,8 +967,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                               flex: 4,
                               child: TextField(
                                 controller: field.valueController,
-                                decoration:
-                                    const InputDecoration(labelText: 'Значение'),
+                                decoration: const InputDecoration(labelText: 'Значение'),
                               ),
                             ),
                             IconButton(
@@ -985,8 +987,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                       child: TextButton(
                         onPressed: () {
                           setStateDialog(() {
-                            dynamicFields.add(
-                                DynamicFieldEntry(key: 'Новое поле', value: ''));
+                            dynamicFields.add(DynamicFieldEntry(key: 'Новое поле', value: ''));
                           });
                         },
                         child: const Text('Добавить поле'),
@@ -995,8 +996,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                     const SizedBox(height: 10),
                     TextField(
                       controller: shortNoteController,
-                      decoration:
-                          const InputDecoration(labelText: 'Краткая заметка'),
+                      decoration: const InputDecoration(labelText: 'Краткая заметка'),
                       maxLines: null,
                       keyboardType: TextInputType.multiline,
                     ),
@@ -1024,8 +1024,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                         "Интервал успешно обновлён",
                         accentColor: Colors.yellow,
                         fontSize: 14.0,
-                        icon: const Icon(Icons.error_outline,
-                            size: 20, color: Colors.yellow),
+                        icon: const Icon(Icons.error_outline, size: 20, color: Colors.yellow),
                       );
                       Navigator.of(outerContext).pop();
                     });
@@ -1062,8 +1061,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
 
   // Контекстное меню для интервала
   void _showScheduleContextMenu(BuildContext context, int index, Offset position) async {
-    final RenderBox? overlay =
-        Overlay.of(context)?.context.findRenderObject() as RenderBox?;
+    final RenderBox? overlay = Overlay.of(context)?.context.findRenderObject() as RenderBox?;
     if (overlay == null) return;
     await showMenu(
       context: context,
@@ -1094,12 +1092,10 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         ),
       );
     }
-    // Если день выбран, показываем детальный вид
+    // Если выбран день, отображаем детальный режим расписания
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          "Расписание на ${DateFormat('dd MMMM yyyy', 'ru').format(_selectedDate!)}",
-        ),
+        title: Text("Расписание на ${DateFormat('dd MMMM yyyy', 'ru').format(_selectedDate!)}"),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: _goBackToCalendar,
@@ -1114,30 +1110,24 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
           Expanded(
             child: Row(
               children: [
-                // Левый блок: список интервалов
+                // Список интервалов
                 Expanded(
                   flex: 2,
                   child: Container(
                     color: Colors.grey[900],
                     child: ListView.separated(
                       itemCount: _schedule.length,
-                      separatorBuilder: (context, index) =>
-                          const Divider(color: Colors.cyan),
+                      separatorBuilder: (context, index) => const Divider(color: Colors.cyan),
                       itemBuilder: (context, index) {
                         ScheduleEntry entry = _schedule[index];
                         String dynamicFieldsDisplay = '';
-                        if (entry.dynamicFieldsJson != null &&
-                            entry.dynamicFieldsJson!.isNotEmpty) {
-                          Map<String, dynamic> decoded =
-                              jsonDecode(entry.dynamicFieldsJson!);
-                          dynamicFieldsDisplay = decoded.entries
-                              .map((e) => "${e.key}: ${e.value}")
-                              .join(", ");
+                        if (entry.dynamicFieldsJson != null && entry.dynamicFieldsJson!.isNotEmpty) {
+                          Map<String, dynamic> decoded = jsonDecode(entry.dynamicFieldsJson!);
+                          dynamicFieldsDisplay = decoded.entries.map((e) => "${e.key}: ${e.value}").join(", ");
                         }
                         return GestureDetector(
                           onSecondaryTapDown: (details) {
-                            _showScheduleContextMenu(
-                                context, index, details.globalPosition);
+                            _showScheduleContextMenu(context, index, details.globalPosition);
                           },
                           child: ListTile(
                             title: Row(
@@ -1152,14 +1142,12 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                                     ),
                                   ),
                                 ),
-                                const VerticalDivider(
-                                    color: Colors.cyan, thickness: 2),
+                                const VerticalDivider(color: Colors.cyan, thickness: 2),
                                 Expanded(
                                   flex: 5,
                                   child: Text(
                                     dynamicFieldsDisplay,
-                                    style:
-                                        const TextStyle(color: Colors.white70),
+                                    style: const TextStyle(color: Colors.white70),
                                   ),
                                 ),
                               ],
@@ -1175,20 +1163,16 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                     ),
                   ),
                 ),
-                // Правый блок: предпросмотр заметки
+                // Окно предпросмотра заметки
                 Expanded(
                   flex: 1,
                   child: Container(
                     color: Colors.grey[850],
                     padding: const EdgeInsets.all(8),
                     alignment: Alignment.topLeft,
-                    child: (_selectedIndex == null ||
-                            _selectedIndex! >= _schedule.length)
+                    child: (_selectedIndex == null || _selectedIndex! >= _schedule.length)
                         ? const Center(
-                            child: Text(
-                              'Выберите интервал',
-                              style: TextStyle(color: Colors.white),
-                            ),
+                            child: Text('Выберите интервал', style: TextStyle(color: Colors.white)),
                           )
                         : SingleChildScrollView(
                             child: Text(
@@ -1206,7 +1190,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     );
   }
 }
-
 
 
 /// Экран заметок и папок с использованием БД для заметок

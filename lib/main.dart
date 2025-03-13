@@ -7,6 +7,24 @@ import 'package:path/path.dart' as p;
 import 'package:oktoast/oktoast.dart';
 import 'package:mask_text_input_formatter/mask_text_input_formatter.dart';
 
+IconData getIconData(String iconKey) {
+  switch (iconKey) {
+    case 'person':
+      return Icons.person;
+    case 'check':
+      return Icons.check;
+    case 'tree':
+      return Icons.park; // или Icons.park – по вашему выбору
+    case 'home':
+      return Icons.home;
+    case 'car':
+      return Icons.directions_car;
+    case 'close':
+      return Icons.close;
+    default:
+      return Icons.help_outline;
+  }
+}
 
 // Добавьте этот фрагмент в начало файла main.dart (после импортов),
 // чтобы функция была доступна во всём приложении.
@@ -116,7 +134,8 @@ class _CalendarGridState extends State<CalendarGrid> {
     DateTime firstDay = DateTime(now.year, now.month, 1);
     DateTime lastDay = DateTime(now.year, now.month + 1, 0);
     int totalDays = lastDay.day;
-    int startingWeekday = firstDay.weekday; // 1 = понедельник, ... 7 = воскресенье
+    int startingWeekday =
+        firstDay.weekday; // 1 = понедельник, ... 7 = воскресенье
 
     // Заголовок дней недели
     List<Widget> headerCells = [];
@@ -192,9 +211,11 @@ class _CalendarGridState extends State<CalendarGrid> {
             Expanded(
               child: Scrollbar(
                 controller: _scrollController, // привязываем ScrollController
-                thumbVisibility: true, // чтобы полоса прокрутки всегда была видна (по желанию)
+                thumbVisibility:
+                    true, // чтобы полоса прокрутки всегда была видна (по желанию)
                 child: GridView.builder(
-                  controller: _scrollController, // передаём контроллер в GridView
+                  controller:
+                      _scrollController, // передаём контроллер в GridView
                   padding: EdgeInsets.zero,
                   gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: 7,
@@ -213,7 +234,6 @@ class _CalendarGridState extends State<CalendarGrid> {
     );
   }
 }
-
 
 /// Класс для работы с базой данных, реализующий CRUD-операции для всех сущностей.
 class DatabaseHelper {
@@ -269,7 +289,8 @@ class DatabaseHelper {
         content TEXT,
         posX REAL,
         posY REAL,
-        backgroundColor INTEGER
+        backgroundColor INTEGER,
+        icon TEXT
       )
     ''');
 
@@ -278,7 +299,9 @@ class DatabaseHelper {
       CREATE TABLE connections(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         fromId INTEGER,
-        toId INTEGER
+        toId INTEGER,
+        name TEXT,
+        connectionColor INTEGER
       )
     ''');
 
@@ -368,6 +391,16 @@ class DatabaseHelper {
     return await db.insert('connections', connection.toMap());
   }
 
+  Future<int> updateConnection(ConnectionDB connection) async {
+    final db = await database;
+    return await db.update(
+      'connections',
+      connection.toMap(),
+      where: 'id = ?',
+      whereArgs: [connection.id],
+    );
+  }
+
   Future<List<ConnectionDB>> getConnections() async {
     final db = await database;
     final List<Map<String, dynamic>> maps = await db.query('connections');
@@ -402,7 +435,6 @@ class DatabaseHelper {
     return await db.delete('folders', where: 'id = ?', whereArgs: [id]);
   }
 }
-
 
 /// Виджет выбора цвета с помощью слайдеров
 class ColorPicker extends StatefulWidget {
@@ -593,6 +625,8 @@ class PinboardNoteDB {
   double posX;
   double posY;
   int backgroundColor;
+  String icon; // новое поле
+
   PinboardNoteDB({
     this.id,
     this.title = 'Без названия',
@@ -600,7 +634,9 @@ class PinboardNoteDB {
     required this.posX,
     required this.posY,
     required this.backgroundColor,
+    this.icon = 'person', // дефолтное значение
   });
+
   Map<String, dynamic> toMap() {
     return {
       'id': id,
@@ -609,6 +645,7 @@ class PinboardNoteDB {
       'posX': posX,
       'posY': posY,
       'backgroundColor': backgroundColor,
+      'icon': icon, // сохраняем значок
     };
   }
 
@@ -620,6 +657,7 @@ class PinboardNoteDB {
       posX: map['posX'],
       posY: map['posY'],
       backgroundColor: map['backgroundColor'],
+      icon: map['icon'] ?? 'person',
     );
   }
 }
@@ -629,12 +667,24 @@ class ConnectionDB {
   int? id;
   int fromId;
   int toId;
-  ConnectionDB({this.id, required this.fromId, required this.toId});
+  String name;
+  int connectionColor; // цвет в формате ARGB
+
+  ConnectionDB({
+    this.id,
+    required this.fromId,
+    required this.toId,
+    this.name = "",
+    this.connectionColor = 0xFF00FFFF, // например, дефолтный – ярко-циановый
+  });
+
   Map<String, dynamic> toMap() {
     return {
       'id': id,
       'fromId': fromId,
       'toId': toId,
+      'name': name,
+      'connectionColor': connectionColor,
     };
   }
 
@@ -643,6 +693,8 @@ class ConnectionDB {
       id: map['id'],
       fromId: map['fromId'],
       toId: map['toId'],
+      name: map['name'] ?? "",
+      connectionColor: map['connectionColor'] ?? 0xFF00FFFF,
     );
   }
 }
@@ -765,7 +817,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   Future<void> _loadSchedule() async {
     if (_selectedDate != null) {
       String dateKey = DateFormat('yyyy-MM-dd').format(_selectedDate!);
-      List<ScheduleEntry> entries = await DatabaseHelper().getScheduleEntries(dateKey);
+      List<ScheduleEntry> entries =
+          await DatabaseHelper().getScheduleEntries(dateKey);
       setState(() {
         _schedule = entries;
         _selectedIndex = null;
@@ -779,16 +832,19 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     final TextEditingController shortNoteController = TextEditingController();
     final timeMaskFormatter = MaskTextInputFormatter(
       mask: '##:## - ##:##',
-      filter: { '#': RegExp(r'[0-9]') },
+      filter: {'#': RegExp(r'[0-9]')},
     );
-    List<DynamicFieldEntry> dynamicFields = [DynamicFieldEntry(key: 'Предмет', value: '')];
+    List<DynamicFieldEntry> dynamicFields = [
+      DynamicFieldEntry(key: 'Предмет', value: '')
+    ];
     String? timeError;
 
     showDialog(
       context: context,
       builder: (BuildContext outerContext) {
         return StatefulBuilder(
-          builder: (BuildContext innerContext, void Function(void Function()) setStateDialog) {
+          builder: (BuildContext innerContext,
+              void Function(void Function()) setStateDialog) {
             return AlertDialog(
               title: const Text('Добавить интервал'),
               content: SingleChildScrollView(
@@ -815,7 +871,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                               flex: 3,
                               child: TextField(
                                 controller: field.keyController,
-                                decoration: const InputDecoration(labelText: 'Поле'),
+                                decoration:
+                                    const InputDecoration(labelText: 'Поле'),
                               ),
                             ),
                             const SizedBox(width: 8),
@@ -823,7 +880,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                               flex: 4,
                               child: TextField(
                                 controller: field.valueController,
-                                decoration: const InputDecoration(labelText: 'Значение'),
+                                decoration: const InputDecoration(
+                                    labelText: 'Значение'),
                               ),
                             ),
                             IconButton(
@@ -843,7 +901,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                       child: TextButton(
                         onPressed: () {
                           setStateDialog(() {
-                            dynamicFields.add(DynamicFieldEntry(key: 'Новое поле', value: ''));
+                            dynamicFields.add(DynamicFieldEntry(
+                                key: 'Новое поле', value: ''));
                           });
                         },
                         child: const Text('Добавить поле'),
@@ -853,7 +912,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                     // Многострочное поле для краткой заметки
                     TextField(
                       controller: shortNoteController,
-                      decoration: const InputDecoration(labelText: 'Краткая заметка'),
+                      decoration:
+                          const InputDecoration(labelText: 'Краткая заметка'),
                       maxLines: null,
                       keyboardType: TextInputType.multiline,
                     ),
@@ -892,7 +952,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                         "Интервал успешно создан",
                         accentColor: Colors.green,
                         fontSize: 14.0,
-                        icon: const Icon(Icons.check, size: 20, color: Colors.green),
+                        icon: const Icon(Icons.check,
+                            size: 20, color: Colors.green),
                       );
                       Navigator.of(outerContext).pop();
                     });
@@ -914,11 +975,13 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   // Метод редактирования интервала с использованием маски для поля времени.
   void _editSchedule(int index) {
     ScheduleEntry entry = _schedule[index];
-    TextEditingController timeController = TextEditingController(text: entry.time);
-    TextEditingController shortNoteController = TextEditingController(text: entry.note ?? '');
+    TextEditingController timeController =
+        TextEditingController(text: entry.time);
+    TextEditingController shortNoteController =
+        TextEditingController(text: entry.note ?? '');
     final timeMaskFormatter = MaskTextInputFormatter(
       mask: '##:## - ##:##',
-      filter: { '#': RegExp(r'[0-9]') },
+      filter: {'#': RegExp(r'[0-9]')},
     );
     // Применяем форматирование к существующему значению
     timeMaskFormatter.formatEditUpdate(
@@ -926,7 +989,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       TextEditingValue(text: entry.time),
     );
     List<DynamicFieldEntry> dynamicFields = [];
-    if (entry.dynamicFieldsJson != null && entry.dynamicFieldsJson!.isNotEmpty) {
+    if (entry.dynamicFieldsJson != null &&
+        entry.dynamicFieldsJson!.isNotEmpty) {
       Map<String, dynamic> decoded = jsonDecode(entry.dynamicFieldsJson!);
       decoded.forEach((key, value) {
         dynamicFields.add(DynamicFieldEntry(key: key, value: value.toString()));
@@ -936,7 +1000,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       context: context,
       builder: (BuildContext outerContext) {
         return StatefulBuilder(
-          builder: (BuildContext innerContext, void Function(void Function()) setStateDialog) {
+          builder: (BuildContext innerContext,
+              void Function(void Function()) setStateDialog) {
             return AlertDialog(
               title: const Text('Редактировать интервал'),
               content: SingleChildScrollView(
@@ -947,7 +1012,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                       controller: timeController,
                       inputFormatters: [timeMaskFormatter],
                       keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(labelText: 'Время (HH:MM - HH:MM)'),
+                      decoration: const InputDecoration(
+                          labelText: 'Время (HH:MM - HH:MM)'),
                     ),
                     const SizedBox(height: 10),
                     Column(
@@ -959,7 +1025,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                               flex: 3,
                               child: TextField(
                                 controller: field.keyController,
-                                decoration: const InputDecoration(labelText: 'Поле'),
+                                decoration:
+                                    const InputDecoration(labelText: 'Поле'),
                               ),
                             ),
                             const SizedBox(width: 8),
@@ -967,7 +1034,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                               flex: 4,
                               child: TextField(
                                 controller: field.valueController,
-                                decoration: const InputDecoration(labelText: 'Значение'),
+                                decoration: const InputDecoration(
+                                    labelText: 'Значение'),
                               ),
                             ),
                             IconButton(
@@ -987,7 +1055,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                       child: TextButton(
                         onPressed: () {
                           setStateDialog(() {
-                            dynamicFields.add(DynamicFieldEntry(key: 'Новое поле', value: ''));
+                            dynamicFields.add(DynamicFieldEntry(
+                                key: 'Новое поле', value: ''));
                           });
                         },
                         child: const Text('Добавить поле'),
@@ -996,7 +1065,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                     const SizedBox(height: 10),
                     TextField(
                       controller: shortNoteController,
-                      decoration: const InputDecoration(labelText: 'Краткая заметка'),
+                      decoration:
+                          const InputDecoration(labelText: 'Краткая заметка'),
                       maxLines: null,
                       keyboardType: TextInputType.multiline,
                     ),
@@ -1024,7 +1094,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                         "Интервал успешно обновлён",
                         accentColor: Colors.yellow,
                         fontSize: 14.0,
-                        icon: const Icon(Icons.error_outline, size: 20, color: Colors.yellow),
+                        icon: const Icon(Icons.error_outline,
+                            size: 20, color: Colors.yellow),
                       );
                       Navigator.of(outerContext).pop();
                     });
@@ -1060,8 +1131,10 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   }
 
   // Контекстное меню для интервала
-  void _showScheduleContextMenu(BuildContext context, int index, Offset position) async {
-    final RenderBox? overlay = Overlay.of(context)?.context.findRenderObject() as RenderBox?;
+  void _showScheduleContextMenu(
+      BuildContext context, int index, Offset position) async {
+    final RenderBox? overlay =
+        Overlay.of(context)?.context.findRenderObject() as RenderBox?;
     if (overlay == null) return;
     await showMenu(
       context: context,
@@ -1095,7 +1168,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     // Если выбран день, отображаем детальный режим расписания
     return Scaffold(
       appBar: AppBar(
-        title: Text("Расписание на ${DateFormat('dd MMMM yyyy', 'ru').format(_selectedDate!)}"),
+        title: Text(
+            "Расписание на ${DateFormat('dd MMMM yyyy', 'ru').format(_selectedDate!)}"),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: _goBackToCalendar,
@@ -1117,17 +1191,23 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                     color: Colors.grey[900],
                     child: ListView.separated(
                       itemCount: _schedule.length,
-                      separatorBuilder: (context, index) => const Divider(color: Colors.cyan),
+                      separatorBuilder: (context, index) =>
+                          const Divider(color: Colors.cyan),
                       itemBuilder: (context, index) {
                         ScheduleEntry entry = _schedule[index];
                         String dynamicFieldsDisplay = '';
-                        if (entry.dynamicFieldsJson != null && entry.dynamicFieldsJson!.isNotEmpty) {
-                          Map<String, dynamic> decoded = jsonDecode(entry.dynamicFieldsJson!);
-                          dynamicFieldsDisplay = decoded.entries.map((e) => "${e.key}: ${e.value}").join(", ");
+                        if (entry.dynamicFieldsJson != null &&
+                            entry.dynamicFieldsJson!.isNotEmpty) {
+                          Map<String, dynamic> decoded =
+                              jsonDecode(entry.dynamicFieldsJson!);
+                          dynamicFieldsDisplay = decoded.entries
+                              .map((e) => "${e.key}: ${e.value}")
+                              .join(", ");
                         }
                         return GestureDetector(
                           onSecondaryTapDown: (details) {
-                            _showScheduleContextMenu(context, index, details.globalPosition);
+                            _showScheduleContextMenu(
+                                context, index, details.globalPosition);
                           },
                           child: ListTile(
                             title: Row(
@@ -1142,12 +1222,14 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                                     ),
                                   ),
                                 ),
-                                const VerticalDivider(color: Colors.cyan, thickness: 2),
+                                const VerticalDivider(
+                                    color: Colors.cyan, thickness: 2),
                                 Expanded(
                                   flex: 5,
                                   child: Text(
                                     dynamicFieldsDisplay,
-                                    style: const TextStyle(color: Colors.white70),
+                                    style:
+                                        const TextStyle(color: Colors.white70),
                                   ),
                                 ),
                               ],
@@ -1170,9 +1252,11 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                     color: Colors.grey[850],
                     padding: const EdgeInsets.all(8),
                     alignment: Alignment.topLeft,
-                    child: (_selectedIndex == null || _selectedIndex! >= _schedule.length)
+                    child: (_selectedIndex == null ||
+                            _selectedIndex! >= _schedule.length)
                         ? const Center(
-                            child: Text('Выберите интервал', style: TextStyle(color: Colors.white)),
+                            child: Text('Выберите интервал',
+                                style: TextStyle(color: Colors.white)),
                           )
                         : SingleChildScrollView(
                             child: Text(
@@ -1190,7 +1274,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     );
   }
 }
-
 
 /// Экран заметок и папок с использованием БД для заметок
 class NotesScreen extends StatefulWidget {
@@ -1785,69 +1868,103 @@ class _PinboardScreenState extends State<PinboardScreen> {
         TextEditingController(text: _pinboardNotes[index].title);
     TextEditingController editContentController =
         TextEditingController(text: _pinboardNotes[index].content);
+    // Значение выбранного значка
+    String selectedIcon = _pinboardNotes[index].icon;
+    // Выбор цвета заметки осуществляется с помощью существующего ColorPicker
     Color selectedColor = Color(_pinboardNotes[index].backgroundColor);
     showDialog(
       context: context,
       builder: (BuildContext outerContext) {
-        return StatefulBuilder(builder: (BuildContext innerContext,
-            void Function(void Function()) setStateDialog) {
-          return AlertDialog(
-            title: const Text('Редактировать заметку'),
-            content: SingleChildScrollView(
-              child: Column(
-                children: [
-                  TextField(
+        return StatefulBuilder(
+          builder: (BuildContext innerContext,
+              void Function(void Function()) setStateDialog) {
+            return AlertDialog(
+              title: const Text('Редактировать заметку'),
+              content: SingleChildScrollView(
+                child: Column(
+                  children: [
+                    TextField(
                       controller: editTitleController,
-                      decoration:
-                          const InputDecoration(labelText: 'Заголовок')),
-                  TextField(
+                      decoration: const InputDecoration(labelText: 'Заголовок'),
+                    ),
+                    TextField(
                       controller: editContentController,
                       decoration:
                           const InputDecoration(labelText: 'Содержимое'),
-                      maxLines: 5),
-                  const SizedBox(height: 10),
-                  const Text('Цвет фона:'),
-                  ColorPicker(
-                    color: selectedColor,
-                    onChanged: (color) {
-                      setStateDialog(() {
-                        selectedColor = color;
-                      });
-                    },
-                  ),
-                ],
+                      maxLines: 5,
+                    ),
+                    const SizedBox(height: 10),
+                    const Text('Выберите значок:'),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        'person',
+                        'check',
+                        'tree',
+                        'home',
+                        'car',
+                        'close'
+                      ].map((iconKey) {
+                        return ChoiceChip(
+                          label: Icon(getIconData(iconKey),
+                              size: 20, color: Colors.white),
+                          selected: selectedIcon == iconKey,
+                          onSelected: (selected) {
+                            setStateDialog(() {
+                              selectedIcon = iconKey;
+                            });
+                          },
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 10),
+                    const Text('Выберите цвет заметки:'),
+                    ColorPicker(
+                      color: selectedColor,
+                      onChanged: (color) {
+                        setStateDialog(() {
+                          selectedColor = color;
+                        });
+                      },
+                    ),
+                  ],
+                ),
               ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  _pinboardNotes[index].title = editTitleController.text.isEmpty
-                      ? 'Без названия'
-                      : editTitleController.text;
-                  _pinboardNotes[index].content = editContentController.text;
-                  _pinboardNotes[index].backgroundColor = selectedColor.value;
-                  DatabaseHelper()
-                      .updatePinboardNote(_pinboardNotes[index])
-                      .then((_) {
-                    setState(() {});
-                  });
-                  showCustomToastWithIcon(
-                    "Заметка на доске успешно обновлена",
-                    accentColor: Colors.yellow,
-                    fontSize: 14.0,
-                    icon: const Icon(Icons.error_outline,
-                        size: 20, color: Colors.yellow),
-                  );
-                  Navigator.of(outerContext).pop();
-                },
-                child: const Text('Сохранить'),
-              ),
-              TextButton(
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    _pinboardNotes[index].title =
+                        editTitleController.text.isEmpty
+                            ? 'Без названия'
+                            : editTitleController.text;
+                    _pinboardNotes[index].content = editContentController.text;
+                    _pinboardNotes[index].backgroundColor = selectedColor.value;
+                    _pinboardNotes[index].icon =
+                        selectedIcon; // сохраняем выбранный значок
+                    DatabaseHelper()
+                        .updatePinboardNote(_pinboardNotes[index])
+                        .then((_) {
+                      setState(() {});
+                    });
+                    showCustomToastWithIcon(
+                      "Заметка на доске успешно обновлена",
+                      accentColor: Colors.yellow,
+                      fontSize: 14.0,
+                      icon: const Icon(Icons.error_outline,
+                          size: 20, color: Colors.yellow),
+                    );
+                    Navigator.of(outerContext).pop();
+                  },
+                  child: const Text('Сохранить'),
+                ),
+                TextButton(
                   onPressed: () => Navigator.of(outerContext).pop(),
-                  child: const Text('Отмена')),
-            ],
-          );
-        });
+                  child: const Text('Отмена'),
+                ),
+              ],
+            );
+          },
+        );
       },
     );
   }
@@ -1891,6 +2008,7 @@ class _PinboardScreenState extends State<PinboardScreen> {
             painter: ConnectionPainter(
                 notes: _pinboardNotes, connections: _connections),
           ),
+          // Заметки на доске (как ранее)
           ..._pinboardNotes.map((note) {
             return Positioned(
               key: ValueKey(note.id),
@@ -1912,6 +2030,8 @@ class _PinboardScreenState extends State<PinboardScreen> {
               ),
             );
           }).toList(),
+          // Оверлеи для редактирования связей
+          ..._buildConnectionOverlays(),
         ],
       ),
       floatingActionButton: FloatingActionButton(
@@ -1924,34 +2044,176 @@ class _PinboardScreenState extends State<PinboardScreen> {
 
   Widget _buildNoteWidget(PinboardNoteDB note, {bool isSelected = false}) {
     return Container(
-      width: 150,
+      width: 180,
       height: 150,
-      padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
-        color: Color(note.backgroundColor),
+        border: Border.all(
+          color: isSelected ? Colors.cyan : Colors.transparent,
+          width: 2,
+        ),
         borderRadius: BorderRadius.circular(8),
-        border: isSelected ? Border.all(color: Colors.cyan, width: 2) : null,
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black54, blurRadius: 4, offset: const Offset(2, 2)),
-        ],
       ),
-      child: Column(
+      child: Row(
         children: [
-          Text(note.title,
-              style: const TextStyle(
-                  color: Colors.white, fontWeight: FontWeight.bold),
-              textAlign: TextAlign.center),
-          const SizedBox(height: 4),
+          // Левая панель для значка с фиксированным темным фоном
+          Container(
+            width: 30,
+            height: double.infinity,
+            margin: const EdgeInsets.all(4),
+            decoration: BoxDecoration(
+              color: Colors.black, // фиксированный темный фон
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Center(
+              child: Icon(
+                getIconData(note.icon),
+                size: 20,
+                color: Color(note
+                    .backgroundColor), // значок окрашивается по выбранному цвету
+              ),
+            ),
+          ),
+          // Правая панель с основным содержимым заметки и фоном, равным выбранному цвету
           Expanded(
-            child: SingleChildScrollView(
-              child: Text(note.content,
-                  style: const TextStyle(color: Colors.white70),
-                  textAlign: TextAlign.center),
+            child: Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color:
+                    Color(note.backgroundColor), // фон заметки – выбранный цвет
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    note.title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      child: Text(
+                        note.content,
+                        style: const TextStyle(color: Colors.white70),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ],
       ),
+    );
+  }
+
+  List<Widget> _buildConnectionOverlays() {
+    List<Widget> overlays = [];
+    final Map<int, PinboardNoteDB> notesMap = {
+      for (var note in _pinboardNotes) note.id!: note
+    };
+    for (var connection in _connections) {
+      PinboardNoteDB? fromNote = notesMap[connection.fromId];
+      PinboardNoteDB? toNote = notesMap[connection.toId];
+      if (fromNote != null && toNote != null) {
+        Offset from =
+            Offset(fromNote.posX, fromNote.posY) + const Offset(75, 75);
+        Offset to = Offset(toNote.posX, toNote.posY) + const Offset(75, 75);
+        Offset midpoint = Offset((from.dx + to.dx) / 2, (from.dy + to.dy) / 2);
+        overlays.add(
+          Positioned(
+            // Располагаем контейнер так, чтобы его центр был в середине линии связи
+            left: midpoint.dx,
+            top: midpoint.dy,
+            child: GestureDetector(
+              onTap: () => _editConnection(connection),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.5),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  connection.name,
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ),
+          ),
+        );
+      }
+    }
+    return overlays;
+  }
+
+  void _editConnection(ConnectionDB connection) {
+    TextEditingController nameController =
+        TextEditingController(text: connection.name);
+    Color selectedColor = Color(connection.connectionColor);
+    showDialog(
+      context: context,
+      builder: (BuildContext outerContext) {
+        return StatefulBuilder(
+          builder: (BuildContext innerContext,
+              void Function(void Function()) setStateDialog) {
+            return AlertDialog(
+              title: const Text('Редактировать связь'),
+              content: SingleChildScrollView(
+                child: Column(
+                  children: [
+                    TextField(
+                      controller: nameController,
+                      decoration:
+                          const InputDecoration(labelText: 'Название связи'),
+                    ),
+                    const SizedBox(height: 10),
+                    const Text('Выберите цвет связи:'),
+                    ColorPicker(
+                      color: selectedColor,
+                      onChanged: (color) {
+                        setStateDialog(() {
+                          selectedColor = color;
+                        });
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    connection.name = nameController.text.trim();
+                    connection.connectionColor = selectedColor.value;
+                    DatabaseHelper().updateConnection(connection).then((_) {
+                      _loadPinboardData();
+                    });
+                    Navigator.of(outerContext).pop();
+                  },
+                  child: const Text('Сохранить'),
+                ),
+                TextButton(
+                  onPressed: () {
+                    DatabaseHelper().deleteConnection(connection.id!).then((_) {
+                      _loadPinboardData();
+                    });
+                    Navigator.of(outerContext).pop();
+                  },
+                  child: const Text('Удалить'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(outerContext).pop(),
+                  child: const Text('Отмена'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 }
@@ -1967,14 +2229,14 @@ class ConnectionPainter extends CustomPainter {
       final Map<int, PinboardNoteDB> notesMap = {
         for (var note in notes) note.id!: note
       };
-      final paint = Paint()
-        ..color = Colors.cyan
-        ..strokeWidth = 2
-        ..style = PaintingStyle.stroke;
       for (var connection in connections) {
         PinboardNoteDB? fromNote = notesMap[connection.fromId];
         PinboardNoteDB? toNote = notesMap[connection.toId];
         if (fromNote != null && toNote != null) {
+          final Paint paint = Paint()
+            ..color = Color(connection.connectionColor)
+            ..strokeWidth = 2
+            ..style = PaintingStyle.stroke;
           Offset from =
               Offset(fromNote.posX, fromNote.posY) + const Offset(75, 75);
           Offset to = Offset(toNote.posX, toNote.posY) + const Offset(75, 75);

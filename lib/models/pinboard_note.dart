@@ -8,16 +8,16 @@ class PinboardNoteDB {
   double posX;
   double posY;
   int backgroundColor;
-  String icon; // новое поле
+  String icon;
 
   PinboardNoteDB({
     this.id,
-    this.title = 'Без названия',
+    this.title = '',
     this.content = '',
     required this.posX,
     required this.posY,
-    required this.backgroundColor,
-    this.icon = 'person', // дефолтное значение
+    this.backgroundColor = 0xFF424242, // Темно-серый по умолчанию
+    this.icon = 'person',
   });
 
   Map<String, dynamic> toMap() {
@@ -25,22 +25,53 @@ class PinboardNoteDB {
       'id': id,
       'title': title,
       'content': content,
-      'posX': posX,
-      'posY': posY,
-      'backgroundColor': backgroundColor,
-      'icon': icon, // сохраняем значок
+      'position_x': posX,
+      'position_y': posY,
+      'background_color': backgroundColor,
+      'icon': _getIconCodePoint(icon), // Сохраняем codePoint иконки
     };
   }
 
   factory PinboardNoteDB.fromMap(Map<String, dynamic> map) {
     return PinboardNoteDB(
       id: map['id'],
-      title: map['title'],
-      content: map['content'],
-      posX: map['posX'],
-      posY: map['posY'],
-      backgroundColor: map['backgroundColor'],
-      icon: map['icon'] ?? 'person',
+      title: map['title'] ?? '',
+      content: map['content'] ?? '',
+      posX: map['position_x'] ?? 0.0,
+      posY: map['position_y'] ?? 0.0,
+      backgroundColor: map['background_color'] ?? 0xFF424242,
+      icon: _getIconKey(map['icon'] ?? Icons.person.codePoint), // Преобразуем codePoint в ключ
     );
+  }
+
+  // Преобразование строкового ключа в codePoint иконки
+  int _getIconCodePoint(String iconKey) {
+    switch (iconKey) {
+      case 'person':
+        return Icons.person.codePoint;
+      case 'check':
+        return Icons.check_circle.codePoint;
+      case 'tree':
+        return Icons.forest.codePoint;
+      case 'home':
+        return Icons.home.codePoint;
+      case 'car':
+        return Icons.directions_car.codePoint;
+      case 'close':
+        return Icons.close.codePoint;
+      default:
+        return Icons.person.codePoint;
+    }
+  }
+
+  // Преобразование codePoint в строковый ключ
+  static String _getIconKey(int codePoint) {
+    if (codePoint == Icons.person.codePoint) return 'person';
+    if (codePoint == Icons.check_circle.codePoint) return 'check';
+    if (codePoint == Icons.forest.codePoint) return 'tree';
+    if (codePoint == Icons.home.codePoint) return 'home';
+    if (codePoint == Icons.directions_car.codePoint) return 'car';
+    if (codePoint == Icons.close.codePoint) return 'close';
+    return 'person';
   }
 } 

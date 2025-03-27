@@ -14,24 +14,33 @@ class NotesScreen extends StatefulWidget {
 }
 
 class _NotesScreenState extends State<NotesScreen> {
-  List<Note> _notes = [];
   List<Folder> _folders = [];
-  int? _selectedNoteIndex;
-  TextEditingController _titleController = TextEditingController();
-  TextEditingController _contentController = TextEditingController();
+  List<Note> _notes = [];
+  Folder? _selectedFolder;
+  Note? _selectedNote;
+  bool _isFolderExpanded = true;
+  double _previewWidth = 0.3; // Default width ratio for preview window
+  final TextEditingController _noteTitleController = TextEditingController();
+  final TextEditingController _noteContentController = TextEditingController();
+  // Виртуальная папка для заметок без папки
+  final Folder _noFolderCategory = Folder(
+    id: -1, // Специальный ID для виртуальной папки
+    name: "Без папки",
+    backgroundColor: Colors.grey[600]!.value,
+  );
 
   @override
   void initState() {
     super.initState();
-    _loadNotes();
     _loadFolders();
+    _loadAllNotes();
   }
 
-  Future<void> _loadNotes() async {
-    List<Note> notesFromDb = await DatabaseHelper().getNotes();
-    setState(() {
-      _notes = notesFromDb;
-    });
+  @override
+  void dispose() {
+    _noteTitleController.dispose();
+    _noteContentController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadFolders() async {
@@ -41,14 +50,47 @@ class _NotesScreenState extends State<NotesScreen> {
     });
   }
 
+  Future<void> _loadAllNotes() async {
+    List<Note> notesFromDb = await DatabaseHelper().getAllNotes();
+    setState(() {
+      _notes = notesFromDb;
+      // Выбираем папку "Без папки" по умолчанию, если папка не выбрана
+      if (_selectedFolder == null) {
+        _selectedFolder = _noFolderCategory;
+        _isFolderExpanded = true;
+      }
+    });
+  }
+
+  Future<void> _loadNotes(int folderId) async {
+    List<Note> notesFromDb;
+    if (folderId == _noFolderCategory.id) {
+      // Загружаем все заметки и фильтруем без папки
+      notesFromDb = await DatabaseHelper().getAllNotes();
+    } else {
+      // Загружаем заметки для выбранной папки
+      notesFromDb = await DatabaseHelper().getNotesByFolder(folderId);
+    }
+    setState(() {
+      _notes = notesFromDb;
+    });
+  }
+
   void _addNote() async {
-    Note newNote = Note();
+    Note newNote = Note(
+      title: '',
+      content: '',
+      folder: _selectedFolder?.id == _noFolderCategory.id ? null : _selectedFolder?.name,
+    );
     int id = await DatabaseHelper().insertNote(newNote);
     newNote.id = id;
     setState(() {
       _notes.add(newNote);
-      _selectedNoteIndex = _notes.length - 1;
+      _selectedNote = newNote;
+      _noteTitleController.text = newNote.title;
+      _noteContentController.text = newNote.content ?? '';
     });
+    
     showCustomToastWithIcon(
       "Заметка успешно создана",
       accentColor: Colors.green,
@@ -62,7 +104,7 @@ class _NotesScreenState extends State<NotesScreen> {
       await DatabaseHelper().deleteNote(_notes[index].id!);
       setState(() {
         _notes.removeAt(index);
-        _selectedNoteIndex = null;
+        _selectedNote = null;
       });
       showCustomToastWithIcon(
         "Заметка успешно удалена",
@@ -73,21 +115,19 @@ class _NotesScreenState extends State<NotesScreen> {
     }
   }
 
-  void _updateSelectedNote(String title, String content,
-      [String? folder]) async {
-    if (_selectedNoteIndex != null) {
-      Note updatedNote = _notes[_selectedNoteIndex!];
+  void _updateSelectedNote(String title, String content, [String? folder]) async {
+    if (_selectedNote != null) {
+      Note updatedNote = _selectedNote!;
       updatedNote.title = title;
       updatedNote.content = content;
       updatedNote.folder = folder;
       await DatabaseHelper().updateNote(updatedNote);
       setState(() {
-        _notes[_selectedNoteIndex!] = updatedNote;
+        _notes[_notes.indexOf(updatedNote)] = updatedNote;
       });
     }
   }
 
-  // Добавление новой папки через диалог
   void _addFolder() {
     TextEditingController folderController = TextEditingController();
     Color selectedColor = Colors.grey[700]!;
@@ -161,7 +201,6 @@ class _NotesScreenState extends State<NotesScreen> {
       await DatabaseHelper().deleteFolder(folderToDelete.id!);
       setState(() {
         _folders.removeAt(index);
-        // Обновляем заметки: если заметка принадлежала удалённой папке, сбрасываем значение
         for (var note in _notes) {
           if (note.folder == folderToDelete.name) {
             note.folder = null;
@@ -242,258 +281,429 @@ class _NotesScreenState extends State<NotesScreen> {
     );
   }
 
-  void _showFolderContextMenu(
-      BuildContext context, int index, Offset position) async {
-    final RenderBox? overlay =
-        Overlay.of(context)?.context.findRenderObject() as RenderBox?;
-    if (overlay == null) return;
-    await showMenu(
-      context: context,
-      position: RelativeRect.fromRect(
-          position & const Size(40, 40), Offset.zero & overlay.size),
-      items: [
-        const PopupMenuItem<String>(
-            value: 'edit', child: Text('Редактировать папку')),
-        const PopupMenuItem<String>(
-            value: 'delete', child: Text('Удалить папку')),
-      ],
-    ).then((value) {
-      if (value == 'edit') {
-        _editFolder(index);
-      } else if (value == 'delete') {
-        _deleteFolder(index);
-      }
-    });
-  }
-
-  void _showNoteContextMenu(
-      BuildContext context, int index, Offset position) async {
-    final RenderBox? overlay =
-        Overlay.of(context)?.context.findRenderObject() as RenderBox?;
-    if (overlay == null) return;
-    await showMenu(
-      context: context,
-      position: RelativeRect.fromRect(
-          position & const Size(40, 40), Offset.zero & overlay.size),
-      items: [
-        const PopupMenuItem<String>(
-            value: 'delete', child: Text('Удалить заметку')),
-      ],
-    ).then((value) {
-      if (value == 'delete') {
-        _deleteNote(index);
-      }
-    });
-  }
-
-  void _selectNote(int index) {
+  void _moveNoteToFolder(Note note, Folder folder) async {
+    if (folder.id == _noFolderCategory.id) {
+      // Если перетаскиваем в папку "Без папки", то очищаем поле folder
+      note.folder = null;
+    } else if (note.folder != folder.name) {
+      // Если перетаскиваем в обычную папку
+      note.folder = folder.name;
+    }
+    
+    await DatabaseHelper().updateNote(note);
     setState(() {
-      _selectedNoteIndex = index;
-      _titleController.text = _notes[_selectedNoteIndex!].title;
-      _contentController.text = _notes[_selectedNoteIndex!].content;
+      _notes[_notes.indexOf(note)] = note;
+    });
+  }
+
+  void _toggleFolderExpansion(Folder folder) {
+    setState(() {
+      if (_selectedFolder?.id == folder.id) {
+        _isFolderExpanded = !_isFolderExpanded;
+      } else {
+        _selectedFolder = folder;
+        _isFolderExpanded = true;
+        _loadAllNotes(); // Загружаем все заметки вместо только тех, которые в папке
+      }
+    });
+  }
+
+  Widget _buildCombinedList() {
+    return ListView.builder(
+      itemCount: _folders.length + 1, // +1 для виртуальной папки "Без папки"
+      itemBuilder: (context, index) {
+        if (index == 0) {
+          // Всегда показываем виртуальную папку "Без папки"
+          final isSelected = _selectedFolder?.id == _noFolderCategory.id;
+          // Получаем заметки без папки
+          final notesWithoutFolder = _notes.where((note) => note.folder == null).toList();
+          
+          return Column(
+            children: [
+              DragTarget<Note>(
+                onAccept: (note) {
+                  _moveNoteToFolder(note, _noFolderCategory);
+                },
+                builder: (context, candidates, rejects) {
+                  return Container(
+                    decoration: BoxDecoration(
+                      color: isSelected
+                          ? Colors.cyan.withOpacity(0.2)
+                          : candidates.isNotEmpty
+                              ? Colors.cyan.withOpacity(0.1)
+                              : null,
+                      border: Border(
+                        left: BorderSide(
+                          color: isSelected
+                              ? Colors.cyan
+                              : Colors.transparent,
+                          width: 3,
+                        ),
+                      ),
+                    ),
+                    child: ListTile(
+                      leading: Container(
+                        width: 24,
+                        height: 24,
+                        decoration: BoxDecoration(
+                          color: Color(_noFolderCategory.backgroundColor),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                      ),
+                      title: Text(_noFolderCategory.name),
+                      selected: isSelected,
+                      onTap: () => _selectVirtualFolder(),
+                      trailing: Icon(
+                        isSelected && _isFolderExpanded
+                            ? Icons.expand_less
+                            : Icons.expand_more,
+                      ),
+                    ),
+                  );
+                },
+              ),
+              if (isSelected && _isFolderExpanded)
+                ...notesWithoutFolder.map((note) {
+                  final isNoteSelected = _selectedNote?.id == note.id;
+                  return Draggable<Note>(
+                    data: note,
+                    feedback: Material(
+                      child: Container(
+                        padding: const EdgeInsets.all(8),
+                        color: Colors.cyan.withOpacity(0.2),
+                        child: Text(note.title),
+                      ),
+                    ),
+                    childWhenDragging: Container(
+                      color: Colors.grey[800],
+                      child: ListTile(
+                        title: Text(note.title),
+                      ),
+                    ),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: isNoteSelected
+                            ? Colors.cyan.withOpacity(0.2)
+                            : Colors.grey[850],
+                        border: Border(
+                          left: BorderSide(
+                            color: isNoteSelected
+                                ? Colors.cyan
+                                : Colors.transparent,
+                            width: 3,
+                          ),
+                        ),
+                      ),
+                      child: ListTile(
+                        title: Text(note.title),
+                        selected: isNoteSelected,
+                        onTap: () {
+                          setState(() {
+                            _selectedNote = note;
+                            _noteTitleController.text = note.title;
+                            _noteContentController.text = note.content ?? '';
+                          });
+                        },
+                        trailing: IconButton(
+                          icon: const Icon(Icons.delete),
+                          onPressed: () => _deleteNote(_notes.indexOf(note)),
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+            ],
+          );
+        }
+
+        // Показываем обычные папки
+        final folderIndex = index - 1;
+        final folder = _folders[folderIndex];
+        final isSelected = _selectedFolder?.id == folder.id;
+        // Фильтруем заметки по выбранной папке
+        final folderNotes = _notes.where((note) => note.folder == folder.name).toList();
+        
+        return Column(
+          children: [
+            DragTarget<Note>(
+              onAccept: (note) {
+                _moveNoteToFolder(note, folder);
+              },
+              builder: (context, candidates, rejects) {
+                return Container(
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? Colors.cyan.withOpacity(0.2)
+                        : candidates.isNotEmpty
+                            ? Colors.cyan.withOpacity(0.1)
+                            : null,
+                    border: Border(
+                      left: BorderSide(
+                        color: isSelected
+                            ? Colors.cyan
+                            : Colors.transparent,
+                        width: 3,
+                      ),
+                    ),
+                  ),
+                  child: ListTile(
+                    leading: Container(
+                      width: 24,
+                      height: 24,
+                      decoration: BoxDecoration(
+                        color: Color(folder.backgroundColor),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    ),
+                    title: Text(folder.name),
+                    selected: isSelected,
+                    onTap: () => _toggleFolderExpansion(folder),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: Icon(
+                            isSelected && _isFolderExpanded
+                                ? Icons.expand_less
+                                : Icons.expand_more,
+                          ),
+                          onPressed: () => _toggleFolderExpansion(folder),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.edit),
+                          onPressed: () => _editFolder(folderIndex),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete),
+                          onPressed: () => _deleteFolder(folderIndex),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+            if (isSelected && _isFolderExpanded)
+              ...folderNotes.map((note) {
+                final isNoteSelected = _selectedNote?.id == note.id;
+                return Draggable<Note>(
+                  data: note,
+                  feedback: Material(
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      color: Colors.cyan.withOpacity(0.2),
+                      child: Text(note.title),
+                    ),
+                  ),
+                  childWhenDragging: Container(
+                    color: Colors.grey[800],
+                    child: ListTile(
+                      title: Text(note.title),
+                    ),
+                  ),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: isNoteSelected
+                          ? Colors.cyan.withOpacity(0.2)
+                          : Colors.grey[850],
+                      border: Border(
+                        left: BorderSide(
+                          color: isNoteSelected
+                              ? Colors.cyan
+                              : Colors.transparent,
+                          width: 3,
+                        ),
+                      ),
+                    ),
+                    child: ListTile(
+                      title: Text(note.title),
+                      selected: isNoteSelected,
+                      onTap: () {
+                        setState(() {
+                          _selectedNote = note;
+                          _noteTitleController.text = note.title;
+                          _noteContentController.text = note.content ?? '';
+                        });
+                      },
+                      trailing: IconButton(
+                        icon: const Icon(Icons.delete),
+                        onPressed: () => _deleteNote(_notes.indexOf(note)),
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+          ],
+        );
+      },
+    );
+  }
+
+  void _selectVirtualFolder() {
+    setState(() {
+      if (_selectedFolder?.id == _noFolderCategory.id) {
+        _isFolderExpanded = !_isFolderExpanded;
+      } else {
+        _selectedFolder = _noFolderCategory;
+        _isFolderExpanded = true;
+      }
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    // Формируем список заметок: сначала без папок, затем группируем по папкам
-    List<Widget> noteItems = [];
-    List<Note> ungrouped = _notes.where((note) => note.folder == null).toList();
-    if (ungrouped.isNotEmpty) {
-      noteItems.add(const Padding(
-        padding: EdgeInsets.all(8.0),
-        child: Text('Без папки',
-            style: TextStyle(color: Colors.white70, fontSize: 16)),
-      ));
-      noteItems.addAll(ungrouped.map((note) {
-        int index = _notes.indexOf(note);
-        return GestureDetector(
-          onSecondaryTapDown: (details) =>
-              _showNoteContextMenu(context, index, details.globalPosition),
-          child: ListTile(
-            title:
-                Text(note.title, style: const TextStyle(color: Colors.white70)),
-            onTap: () => _selectNote(index),
-          ),
-        );
-      }));
-    }
-    for (var folder in _folders) {
-      noteItems.add(
-        GestureDetector(
-          onLongPressStart: (details) => _showFolderContextMenu(
-              context, _folders.indexOf(folder), details.globalPosition),
-          onSecondaryTapDown: (details) => _showFolderContextMenu(
-              context, _folders.indexOf(folder), details.globalPosition),
-          child: Container(
-            color: Color(folder.backgroundColor).withOpacity(0.3),
-            padding: const EdgeInsets.all(8),
-            child: Text(folder.name,
-                style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold)),
-          ),
-        ),
-      );
-      List<Note> groupNotes =
-          _notes.where((note) => note.folder == folder.name).toList();
-      if (groupNotes.isNotEmpty) {
-        noteItems.addAll(groupNotes.map((note) {
-          int index = _notes.indexOf(note);
-          return GestureDetector(
-            onSecondaryTapDown: (details) =>
-                _showNoteContextMenu(context, index, details.globalPosition),
-            child: ListTile(
-              title: Text(note.title,
-                  style: const TextStyle(color: Colors.white70)),
-              onTap: () => _selectNote(index),
-            ),
-          );
-        }));
-      }
-    }
-    return Row(
-      children: [
-        // Левый блок: список заметок с группировкой по папкам
-        Container(
-          width: 250,
-          color: Colors.grey[900],
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: Text('Заметки',
-                    style: TextStyle(
-                        color: Colors.cyan[200],
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold)),
-              ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  ElevatedButton.icon(
-                    onPressed: _addNote,
-                    icon: const Icon(Icons.add),
-                    label: const Text('Добавить'),
-                  ),
-                  ElevatedButton.icon(
-                    onPressed: _addFolder,
-                    icon: const Icon(Icons.create_new_folder),
-                    label: const Text('Папка'),
-                  ),
-                ],
-              ),
-              Expanded(
-                child: ListView(
-                  padding: const EdgeInsets.all(8),
-                  children: noteItems,
-                ),
-              ),
-            ],
-          ),
-        ),
-        const VerticalDivider(width: 1, color: Colors.cyan),
-        // Правый блок: редактирование выбранной заметки
-        Expanded(
-          child: Container(
-            color: Colors.grey[850],
-            padding: const EdgeInsets.all(16),
-            child: _selectedNoteIndex == null
-                ? const Center(
-                    child: Text('Выберите заметку или добавьте новую',
-                        style: TextStyle(color: Colors.white70, fontSize: 18)))
-                : Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+    return Scaffold(
+      body: Row(
+        children: [
+          // Combined folders and notes list with resizable width
+          SizedBox(
+            width: MediaQuery.of(context).size.width * _previewWidth,
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      TextField(
-                        controller: _titleController,
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold),
-                        decoration: const InputDecoration(
-                          labelText: 'Заголовок',
-                          labelStyle:
-                              TextStyle(color: Colors.cyan, fontSize: 16),
-                          border: UnderlineInputBorder(),
+                      const Text(
+                        'Папки и заметки',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
                         ),
-                        onChanged: (value) {
-                          setState(() {
-                            _notes[_selectedNoteIndex!].title =
-                                value.isEmpty ? 'Без названия' : value;
-                          });
-                        },
                       ),
-                      const SizedBox(height: 10),
                       Row(
                         children: [
-                          const Text('Папка:',
-                              style:
-                                  TextStyle(color: Colors.cyan, fontSize: 16)),
-                          const SizedBox(width: 10),
-                          DropdownButton<String?>(
-                            value: _folders.any((folder) =>
-                                    folder.name ==
-                                    _notes[_selectedNoteIndex!].folder)
-                                ? _notes[_selectedNoteIndex!].folder
-                                : null,
-                            hint: const Text("Без папки",
-                                style: TextStyle(color: Colors.white70)),
-                            dropdownColor: Colors.grey[800],
-                            items: [
-                              const DropdownMenuItem<String?>(
-                                  value: null, child: Text("Без папки")),
-                              ..._folders
-                                  .map((folder) => DropdownMenuItem<String?>(
-                                        value: folder.name,
-                                        child: Text(folder.name),
-                                      )),
-                            ],
-                            onChanged: (value) {
-                              setState(() {
-                                _notes[_selectedNoteIndex!].folder = value;
-                              });
-                              _updateSelectedNote(
-                                _notes[_selectedNoteIndex!].title,
-                                _notes[_selectedNoteIndex!].content,
-                                value,
-                              );
-                            },
+                          IconButton(
+                            icon: const Icon(Icons.add),
+                            onPressed: _addNote,
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.create_new_folder),
+                            onPressed: _addFolder,
                           ),
                         ],
                       ),
-                      const SizedBox(height: 10),
-                      Expanded(
-                        child: TextField(
-                          controller: _contentController,
-                          style: const TextStyle(
-                              color: Colors.white70, fontSize: 16),
-                          decoration: const InputDecoration(
-                            labelText: 'Содержимое',
-                            labelStyle:
-                                TextStyle(color: Colors.cyan, fontSize: 16),
-                            border: InputBorder.none,
-                          ),
-                          maxLines: null,
-                          expands: true,
-                          onChanged: (value) {
-                            setState(() {
-                              _notes[_selectedNoteIndex!].content = value;
-                            });
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: _buildCombinedList(),
+                ),
+              ],
+            ),
+          ),
+          // Resize handle
+          GestureDetector(
+            onHorizontalDragUpdate: (details) {
+              setState(() {
+                _previewWidth = (_previewWidth + details.delta.dx / MediaQuery.of(context).size.width)
+                    .clamp(0.2, 0.5);
+              });
+            },
+            child: Container(
+              width: 8,
+              color: Colors.transparent,
+              child: Center(
+                child: Container(
+                  width: 2,
+                  height: 40,
+                  color: Colors.cyan.withOpacity(0.3),
+                ),
+              ),
+            ),
+          ),
+          // Note content section
+          Expanded(
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    children: [
+                      TextField(
+                        controller: _noteTitleController,
+                        decoration: const InputDecoration(
+                          labelText: 'Заголовок',
+                          hintText: 'Новая заметка',
+                          border: OutlineInputBorder(),
+                        ),
+                        onChanged: (value) {
+                          if (_selectedNote != null) {
                             _updateSelectedNote(
-                              _notes[_selectedNoteIndex!].title,
                               value,
-                              _notes[_selectedNoteIndex!].folder,
+                              _noteContentController.text,
                             );
-                          },
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      DropdownButtonFormField<String?>(
+                        value: _selectedNote?.folder,
+                        decoration: const InputDecoration(
+                          labelText: 'Папка',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: [
+                          DropdownMenuItem(
+                            value: null,
+                            child: Text(_noFolderCategory.name),
+                          ),
+                          ..._folders.map((folder) {
+                            return DropdownMenuItem(
+                              value: folder.name,
+                              child: Text(folder.name),
+                            );
+                          }).toList(),
+                        ],
+                        onChanged: (value) {
+                          if (_selectedNote != null) {
+                            _updateSelectedNote(
+                              _noteTitleController.text,
+                              _noteContentController.text,
+                              value,
+                            );
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'Содержимое',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
                     ],
                   ),
+                ),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: TextField(
+                      controller: _noteContentController,
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                      ),
+                      maxLines: null,
+                      expands: true,
+                      textAlignVertical: TextAlignVertical.top,
+                      onChanged: (value) {
+                        if (_selectedNote != null) {
+                          _updateSelectedNote(
+                            _noteTitleController.text,
+                            value,
+                          );
+                        }
+                      },
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 } 

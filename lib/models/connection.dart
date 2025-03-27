@@ -19,20 +19,20 @@ class ConnectionDB {
   Map<String, dynamic> toMap() {
     return {
       'id': id,
-      'fromId': fromId,
-      'toId': toId,
+      'from_note_id': fromId,
+      'to_note_id': toId,
       'name': name,
-      'connectionColor': connectionColor,
+      'connection_color': connectionColor,
     };
   }
 
   factory ConnectionDB.fromMap(Map<String, dynamic> map) {
     return ConnectionDB(
       id: map['id'],
-      fromId: map['fromId'],
-      toId: map['toId'],
+      fromId: map['from_note_id'] ?? 0,
+      toId: map['to_note_id'] ?? 0,
       name: map['name'] ?? "",
-      connectionColor: map['connectionColor'] ?? 0xFF00FFFF,
+      connectionColor: map['connection_color'] ?? 0xFF00FFFF,
     );
   }
 } 

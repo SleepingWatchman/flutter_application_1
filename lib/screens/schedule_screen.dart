@@ -19,6 +19,7 @@ class ScheduleScreen extends StatefulWidget {
 
 class _ScheduleScreenState extends State<ScheduleScreen> {
   DateTime? _selectedDate; // Если null – показываем календарь
+  DateTime? _highlightedDate; // Дата, выбранная первым кликом
   List<ScheduleEntry> _schedule = [];
   int? _selectedIndex;
 
@@ -27,12 +28,21 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     super.initState();
     // При запуске ни один день не выбран – отображается календарь.
     _selectedDate = null;
+    _highlightedDate = null;
   }
 
-  // Вызывается при выборе дня из календарной сетки
+  // Вызывается при первом клике на день в календарной сетке
+  void _onDateHighlighted(DateTime date) {
+    setState(() {
+      _highlightedDate = date;
+    });
+  }
+
+  // Вызывается при выборе дня из календарной сетки - второй клик или нажатие кнопки
   void _onDateSelected(DateTime date) {
     setState(() {
       _selectedDate = date;
+      _highlightedDate = null;
     });
     _loadSchedule();
   }
@@ -41,6 +51,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   void _goBackToCalendar() {
     setState(() {
       _selectedDate = null;
+      _highlightedDate = null;
       _schedule.clear();
       _selectedIndex = null;
     });
@@ -90,6 +101,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                       decoration: InputDecoration(
                         labelText: 'Время (HH:MM - HH:MM)',
                         errorText: timeError,
+                        helperText: 'Допустимые значения: 00:00 - 23:59',
                       ),
                     ),
                     const SizedBox(height: 10),
@@ -162,6 +174,66 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                       });
                       return;
                     }
+
+                    // Проверка корректности времени
+                    String timeStr = timeController.text.trim();
+                    List<String> timeParts = timeStr.split(' - ');
+                    if (timeParts.length != 2) {
+                      setStateDialog(() {
+                        timeError = 'Неверный формат времени';
+                      });
+                      return;
+                    }
+
+                    // Проверка начального времени
+                    List<String> startTimeParts = timeParts[0].split(':');
+                    if (startTimeParts.length != 2) {
+                      setStateDialog(() {
+                        timeError = 'Неверный формат времени начала';
+                      });
+                      return;
+                    }
+
+                    int startHour = int.tryParse(startTimeParts[0]) ?? -1;
+                    int startMinute = int.tryParse(startTimeParts[1]) ?? -1;
+                    
+                    if (startHour < 0 || startHour > 23 || startMinute < 0 || startMinute > 59) {
+                      setStateDialog(() {
+                        timeError = 'Время начала должно быть от 00:00 до 23:59';
+                      });
+                      return;
+                    }
+
+                    // Проверка конечного времени
+                    List<String> endTimeParts = timeParts[1].split(':');
+                    if (endTimeParts.length != 2) {
+                      setStateDialog(() {
+                        timeError = 'Неверный формат времени окончания';
+                      });
+                      return;
+                    }
+
+                    int endHour = int.tryParse(endTimeParts[0]) ?? -1;
+                    int endMinute = int.tryParse(endTimeParts[1]) ?? -1;
+                    
+                    if (endHour < 0 || endHour > 23 || endMinute < 0 || endMinute > 59) {
+                      setStateDialog(() {
+                        timeError = 'Время окончания должно быть от 00:00 до 23:59';
+                      });
+                      return;
+                    }
+
+                    // Сравнение начального и конечного времени
+                    final startTimeMinutes = startHour * 60 + startMinute;
+                    final endTimeMinutes = endHour * 60 + endMinute;
+                    
+                    if (startTimeMinutes >= endTimeMinutes) {
+                      setStateDialog(() {
+                        timeError = 'Время начала должно быть раньше времени окончания';
+                      });
+                      return;
+                    }
+
                     Map<String, String> dynamicMap = {};
                     for (var field in dynamicFields) {
                       String key = field.keyController.text.trim();
@@ -228,6 +300,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         dynamicFields.add(DynamicFieldEntry(key: key, value: value.toString()));
       });
     }
+    String? timeError;
+    
     showDialog(
       context: context,
       builder: (BuildContext outerContext) {
@@ -244,8 +318,11 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                       controller: timeController,
                       inputFormatters: [timeMaskFormatter],
                       keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                          labelText: 'Время (HH:MM - HH:MM)'),
+                      decoration: InputDecoration(
+                        labelText: 'Время (HH:MM - HH:MM)',
+                        errorText: timeError,
+                        helperText: 'Допустимые значения: 00:00 - 23:59',
+                      ),
                     ),
                     const SizedBox(height: 10),
                     Column(
@@ -308,6 +385,73 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
               actions: [
                 TextButton(
                   onPressed: () {
+                    // Проверка: если маска не заполнена полностью (т.е. меньше 8 цифр)
+                    if (timeMaskFormatter.getUnmaskedText().length < 8) {
+                      setStateDialog(() {
+                        timeError = 'Заполните время полностью';
+                      });
+                      return;
+                    }
+
+                    // Проверка корректности времени
+                    String timeStr = timeController.text.trim();
+                    List<String> timeParts = timeStr.split(' - ');
+                    if (timeParts.length != 2) {
+                      setStateDialog(() {
+                        timeError = 'Неверный формат времени';
+                      });
+                      return;
+                    }
+
+                    // Проверка начального времени
+                    List<String> startTimeParts = timeParts[0].split(':');
+                    if (startTimeParts.length != 2) {
+                      setStateDialog(() {
+                        timeError = 'Неверный формат времени начала';
+                      });
+                      return;
+                    }
+
+                    int startHour = int.tryParse(startTimeParts[0]) ?? -1;
+                    int startMinute = int.tryParse(startTimeParts[1]) ?? -1;
+                    
+                    if (startHour < 0 || startHour > 23 || startMinute < 0 || startMinute > 59) {
+                      setStateDialog(() {
+                        timeError = 'Время начала должно быть от 00:00 до 23:59';
+                      });
+                      return;
+                    }
+
+                    // Проверка конечного времени
+                    List<String> endTimeParts = timeParts[1].split(':');
+                    if (endTimeParts.length != 2) {
+                      setStateDialog(() {
+                        timeError = 'Неверный формат времени окончания';
+                      });
+                      return;
+                    }
+
+                    int endHour = int.tryParse(endTimeParts[0]) ?? -1;
+                    int endMinute = int.tryParse(endTimeParts[1]) ?? -1;
+                    
+                    if (endHour < 0 || endHour > 23 || endMinute < 0 || endMinute > 59) {
+                      setStateDialog(() {
+                        timeError = 'Время окончания должно быть от 00:00 до 23:59';
+                      });
+                      return;
+                    }
+
+                    // Сравнение начального и конечного времени
+                    final startTimeMinutes = startHour * 60 + startMinute;
+                    final endTimeMinutes = endHour * 60 + endMinute;
+                    
+                    if (startTimeMinutes >= endTimeMinutes) {
+                      setStateDialog(() {
+                        timeError = 'Время начала должно быть раньше времени окончания';
+                      });
+                      return;
+                    }
+                    
                     Map<String, String> dynamicMap = {};
                     for (var field in dynamicFields) {
                       String key = field.keyController.text.trim();
@@ -394,6 +538,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         body: CalendarGrid(
           selectedDate: DateTime.now(),
           onDateSelected: _onDateSelected,
+          highlightedDate: _highlightedDate,
+          onDateHighlighted: _onDateHighlighted,
         ),
       );
     }
@@ -409,10 +555,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       ),
       body: Column(
         children: [
-          ElevatedButton(
-            onPressed: _addScheduleEntry,
-            child: const Text('Добавить интервал'),
-          ),
           Expanded(
             child: Row(
               children: [
@@ -420,82 +562,136 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                 Expanded(
                   flex: 2,
                   child: Container(
-                    color: Colors.grey[900],
-                    child: ListView.separated(
-                      itemCount: _schedule.length,
-                      separatorBuilder: (context, index) =>
-                          const Divider(color: Colors.cyan),
-                      itemBuilder: (context, index) {
-                        ScheduleEntry entry = _schedule[index];
-                        String dynamicFieldsDisplay = '';
-                        if (entry.dynamicFieldsJson != null &&
-                            entry.dynamicFieldsJson!.isNotEmpty) {
-                          Map<String, dynamic> decoded =
-                              jsonDecode(entry.dynamicFieldsJson!);
-                          dynamicFieldsDisplay = decoded.entries
-                              .map((e) => "${e.key}: ${e.value}")
-                              .join(", ");
-                        }
-                        return GestureDetector(
-                          onSecondaryTapDown: (details) {
-                            _showScheduleContextMenu(
-                                context, index, details.globalPosition);
-                          },
-                          child: ListTile(
-                            title: Row(
-                              children: [
-                                Expanded(
-                                  flex: 2,
-                                  child: Text(
-                                    entry.time,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.bold,
+                    decoration: BoxDecoration(
+                      color: Colors.grey[900],
+                      border: Border.all(color: Colors.cyan.withOpacity(0.3)),
+                    ),
+                    child: Column(
+                      children: [
+                        // Кнопка добавления интервала в верхней части списка
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          child: ElevatedButton.icon(
+                            onPressed: _addScheduleEntry,
+                            icon: const Icon(Icons.add),
+                            label: const Text('Добавить интервал'),
+                          ),
+                        ),
+                        Expanded(
+                          child: ListView.separated(
+                            padding: const EdgeInsets.all(8),
+                            itemCount: _schedule.length,
+                            separatorBuilder: (context, index) =>
+                                const Divider(color: Colors.cyan),
+                            itemBuilder: (context, index) {
+                              ScheduleEntry entry = _schedule[index];
+                              String dynamicFieldsDisplay = '';
+                              if (entry.dynamicFieldsJson != null &&
+                                  entry.dynamicFieldsJson!.isNotEmpty) {
+                                Map<String, dynamic> decoded =
+                                    jsonDecode(entry.dynamicFieldsJson!);
+                                dynamicFieldsDisplay = decoded.entries
+                                    .map((e) => "${e.key}: ${e.value}")
+                                    .join(", ");
+                              }
+                              return GestureDetector(
+                                onSecondaryTapDown: (details) {
+                                  _showScheduleContextMenu(
+                                      context, index, details.globalPosition);
+                                },
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: _selectedIndex == index
+                                        ? Colors.cyan.withOpacity(0.2)
+                                        : null,
+                                    border: Border.all(
+                                      color: _selectedIndex == index
+                                          ? Colors.cyan
+                                          : Colors.transparent,
+                                      width: 2,
                                     ),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: ListTile(
+                                    title: Row(
+                                      children: [
+                                        Expanded(
+                                          flex: 2,
+                                          child: Text(
+                                            entry.time,
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                        const VerticalDivider(
+                                            color: Colors.cyan, thickness: 2),
+                                        Expanded(
+                                          flex: 5,
+                                          child: Text(
+                                            dynamicFieldsDisplay,
+                                            style:
+                                                const TextStyle(color: Colors.white70),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    onTap: () {
+                                      setState(() {
+                                        _selectedIndex = index;
+                                      });
+                                    },
                                   ),
                                 ),
-                                const VerticalDivider(
-                                    color: Colors.cyan, thickness: 2),
-                                Expanded(
-                                  flex: 5,
-                                  child: Text(
-                                    dynamicFieldsDisplay,
-                                    style:
-                                        const TextStyle(color: Colors.white70),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            onTap: () {
-                              setState(() {
-                                _selectedIndex = index;
-                              });
+                              );
                             },
                           ),
-                        );
-                      },
+                        ),
+                      ],
                     ),
                   ),
                 ),
-                // Окно предпросмотра заметки
+                // Окно предпросмотра заметки с возможностью изменения размера
                 Expanded(
                   flex: 1,
                   child: Container(
-                    color: Colors.grey[850],
-                    padding: const EdgeInsets.all(8),
-                    alignment: Alignment.topLeft,
-                    child: (_selectedIndex == null ||
-                            _selectedIndex! >= _schedule.length)
-                        ? const Center(
-                            child: Text('Выберите интервал',
-                                style: TextStyle(color: Colors.white)),
-                          )
-                        : SingleChildScrollView(
-                            child: Text(
-                              _schedule[_selectedIndex!].note ?? '',
-                              style: const TextStyle(color: Colors.white70),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[850],
+                      border: Border.all(color: Colors.cyan.withOpacity(0.3)),
+                    ),
+                    child: Column(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          child: const Text(
+                            'Предпросмотр заметки',
+                            style: TextStyle(
+                              color: Colors.cyan,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
                             ),
                           ),
+                        ),
+                        Expanded(
+                          child: Container(
+                            padding: const EdgeInsets.all(8),
+                            child: (_selectedIndex == null ||
+                                    _selectedIndex! >= _schedule.length)
+                                ? const Center(
+                                    child: Text('Выберите интервал',
+                                        style: TextStyle(color: Colors.white)),
+                                  )
+                                : SingleChildScrollView(
+                                    child: Text(
+                                      _schedule[_selectedIndex!].note ?? '',
+                                      style: const TextStyle(color: Colors.white70),
+                                    ),
+                                  ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ],

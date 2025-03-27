@@ -19,6 +19,7 @@ class _PinboardScreenState extends State<PinboardScreen> {
   List<PinboardNoteDB> _pinboardNotes = [];
   List<ConnectionDB> _connections = [];
   int? _selectedForConnection;
+  List<String> _availableIcons = ['person', 'check', 'tree', 'home', 'car', 'close'];
 
   @override
   void initState() {
@@ -35,21 +36,20 @@ class _PinboardScreenState extends State<PinboardScreen> {
     });
   }
 
-  void _addPinboardNote() {
-    PinboardNoteDB newNote = PinboardNoteDB(
-      posX: 20,
-      posY: 20,
-      title: 'Новая заметка',
-      content: 'Содержимое заметки',
-      backgroundColor: Colors.grey[700]!.value,
+  void _addNote() {
+    final newNote = PinboardNoteDB(
+      title: '',
+      content: '',
+      posX: 100,
+      posY: 100,
+      backgroundColor: 0xFF424242,
+      icon: 'person',
     );
-    DatabaseHelper().insertPinboardNote(newNote).then((id) {
-      newNote.id = id;
-      setState(() {
-        _pinboardNotes.add(newNote);
-      });
+
+    DatabaseHelper().insertPinboardNote(newNote).then((_) {
+      _loadPinboardData();
       showCustomToastWithIcon(
-        "Заметка на доске успешно создана",
+        "Заметка успешно создана",
         accentColor: Colors.green,
         fontSize: 14.0,
         icon: const Icon(Icons.check, size: 20, color: Colors.green),
@@ -68,10 +68,10 @@ class _PinboardScreenState extends State<PinboardScreen> {
         }
       });
       showCustomToastWithIcon(
-        "Заметка на доске успешно удалена",
+        "Заметка успешно удалена",
         accentColor: Colors.red,
         fontSize: 14.0,
-        icon: const Icon(Icons.close, size: 20, color: Colors.red),
+        icon: const Icon(Icons.delete, size: 20, color: Colors.red),
       );
     });
   }
@@ -99,143 +99,214 @@ class _PinboardScreenState extends State<PinboardScreen> {
     });
   }
 
-  void _editPinboardNote(int id) {
-    int index = _pinboardNotes.indexWhere((note) => note.id == id);
-    if (index == -1) {
-      print('Заметка с id $id не найдена для редактирования');
-      return;
+  IconData getIconData(String iconKey) {
+    switch (iconKey) {
+      case 'person':
+        return Icons.person;
+      case 'check':
+        return Icons.check_circle;
+      case 'tree':
+        return Icons.forest;
+      case 'home':
+        return Icons.home;
+      case 'car':
+        return Icons.directions_car;
+      case 'close':
+        return Icons.close;
+      default:
+        return Icons.person;
     }
-    TextEditingController editTitleController =
-        TextEditingController(text: _pinboardNotes[index].title);
-    TextEditingController editContentController =
-        TextEditingController(text: _pinboardNotes[index].content);
-    // Значение выбранного значка
-    String selectedIcon = _pinboardNotes[index].icon;
-    // Выбор цвета заметки осуществляется с помощью существующего ColorPicker
-    Color selectedColor = Color(_pinboardNotes[index].backgroundColor);
+  }
+
+  void _selectIcon(PinboardNoteDB note) {
     showDialog(
       context: context,
-      builder: (BuildContext outerContext) {
-        return StatefulBuilder(
-          builder: (BuildContext innerContext,
-              void Function(void Function()) setStateDialog) {
-            return AlertDialog(
-              title: const Text('Редактировать заметку'),
-              content: SingleChildScrollView(
-                child: Column(
-                  children: [
-                    TextField(
-                      controller: editTitleController,
-                      decoration: const InputDecoration(labelText: 'Заголовок'),
-                    ),
-                    TextField(
-                      controller: editContentController,
-                      decoration:
-                          const InputDecoration(labelText: 'Содержимое'),
-                      maxLines: 5,
-                    ),
-                    const SizedBox(height: 10),
-                    const Text('Выберите значок:'),
-                    Wrap(
-                      spacing: 8,
-                      children: [
-                        'person',
-                        'check',
-                        'tree',
-                        'home',
-                        'car',
-                        'close'
-                      ].map((iconKey) {
-                        return ChoiceChip(
-                          label: Icon(getIconData(iconKey),
-                              size: 20, color: Colors.white),
-                          selected: selectedIcon == iconKey,
-                          onSelected: (selected) {
-                            setStateDialog(() {
-                              selectedIcon = iconKey;
-                            });
-                          },
-                        );
-                      }).toList(),
-                    ),
-                    const SizedBox(height: 10),
-                    const Text('Выберите цвет заметки:'),
-                    ColorPicker(
-                      color: selectedColor,
-                      onChanged: (color) {
-                        setStateDialog(() {
-                          selectedColor = color;
-                        });
-                      },
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () {
-                    _pinboardNotes[index].title =
-                        editTitleController.text.isEmpty
-                            ? 'Без названия'
-                            : editTitleController.text;
-                    _pinboardNotes[index].content = editContentController.text;
-                    _pinboardNotes[index].backgroundColor = selectedColor.value;
-                    _pinboardNotes[index].icon =
-                        selectedIcon; // сохраняем выбранный значок
-                    DatabaseHelper()
-                        .updatePinboardNote(_pinboardNotes[index])
-                        .then((_) {
-                      setState(() {});
+      builder: (context) => AlertDialog(
+        title: const Text('Выберите иконку'),
+        content: SizedBox(
+          height: 60,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            itemCount: _availableIcons.length,
+            itemBuilder: (context, index) {
+              final iconKey = _availableIcons[index];
+              final isSelected = note.icon == iconKey;
+              return Padding(
+                padding: const EdgeInsets.all(4),
+                child: InkWell(
+                  onTap: () {
+                    setState(() {
+                      note.icon = iconKey;
                     });
-                    showCustomToastWithIcon(
-                      "Заметка на доске успешно обновлена",
-                      accentColor: Colors.yellow,
-                      fontSize: 14.0,
-                      icon: const Icon(Icons.error_outline,
-                          size: 20, color: Colors.yellow),
-                    );
-                    Navigator.of(outerContext).pop();
+                    _updateNote(note);
+                    Navigator.pop(context);
                   },
-                  child: const Text('Сохранить'),
+                  child: Container(
+                    width: 50,
+                    height: 50,
+                    decoration: BoxDecoration(
+                      border: Border.all(
+                        color: isSelected ? Colors.blue : Colors.transparent,
+                        width: 2,
+                      ),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(getIconData(iconKey)),
+                  ),
                 ),
-                TextButton(
-                  onPressed: () => Navigator.of(outerContext).pop(),
-                  child: const Text('Отмена'),
-                ),
-              ],
-            );
-          },
-        );
-      },
+              );
+            },
+          ),
+        ),
+      ),
     );
   }
 
-  void _showNoteContextMenu(
-      BuildContext context, PinboardNoteDB note, Offset position) async {
-    final overlay = Overlay.of(context);
-    if (overlay == null) return;
-    final RenderBox overlayBox =
-        overlay.context.findRenderObject() as RenderBox;
-    try {
-      await showMenu(
-        context: context,
-        position: RelativeRect.fromRect(
-            position & const Size(40, 40), Offset.zero & overlayBox.size),
-        items: [
-          PopupMenuItem<String>(
-              value: 'edit', child: const Text('Редактировать')),
-          PopupMenuItem<String>(value: 'delete', child: const Text('Удалить')),
-        ],
-      ).then((value) {
-        if (value == 'edit') {
-          _editPinboardNote(note.id!);
-        } else if (value == 'delete') {
-          _deletePinboardNote(note.id!);
-        }
-      });
-    } catch (e) {
-      print('Ошибка при вызове контекстного меню: $e');
-    }
+  void _editPinboardNote(PinboardNoteDB note) {
+    final titleController = TextEditingController(text: note.title);
+    final contentController = TextEditingController(text: note.content);
+    String selectedIcon = note.icon;
+    Color selectedColor = Color(note.backgroundColor);
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: const Text('Редактировать заметку'),
+          content: SingleChildScrollView(
+            child: SizedBox(
+              width: 400,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: titleController,
+                    decoration: const InputDecoration(
+                      labelText: 'Заголовок',
+                      hintText: 'Введите заголовок',
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: contentController,
+                    decoration: const InputDecoration(
+                      labelText: 'Содержимое',
+                      hintText: 'Введите содержимое заметки',
+                    ),
+                    maxLines: 5,
+                  ),
+                  const SizedBox(height: 16),
+                  const Text('Выберите иконку:'),
+                  SizedBox(
+                    height: 60,
+                    child: ListView.builder(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: _availableIcons.length,
+                      itemBuilder: (context, index) {
+                        final iconKey = _availableIcons[index];
+                        final isSelected = selectedIcon == iconKey;
+                        return Padding(
+                          padding: const EdgeInsets.all(4),
+                          child: InkWell(
+                            onTap: () {
+                              setState(() {
+                                selectedIcon = iconKey;
+                              });
+                            },
+                            child: Container(
+                              width: 50,
+                              height: 50,
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                  color: isSelected ? Colors.blue : Colors.transparent,
+                                  width: 2,
+                                ),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Icon(getIconData(iconKey)),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text('Выберите цвет заметки:'),
+                  ColorPicker(
+                    color: selectedColor,
+                    onChanged: (color) {
+                      setState(() {
+                        selectedColor = color;
+                      });
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Отмена'),
+            ),
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  note.title = titleController.text;
+                  note.content = contentController.text;
+                  note.icon = selectedIcon;
+                  note.backgroundColor = selectedColor.value;
+                });
+                _updateNote(note);
+                Navigator.pop(context);
+              },
+              child: const Text('Сохранить'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showNoteContextMenu(BuildContext context, PinboardNoteDB note, Offset position) {
+    final RenderBox overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final RelativeRect positionRect = RelativeRect.fromRect(
+      Rect.fromPoints(position, position),
+      Offset.zero & overlay.size,
+    );
+
+    showMenu(
+      context: context,
+      position: positionRect,
+      items: [
+        PopupMenuItem(
+          value: 'edit',
+          child: Row(
+            children: [
+              const Icon(Icons.edit),
+              const SizedBox(width: 8),
+              const Text('Редактировать'),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'delete',
+          child: Row(
+            children: [
+              const Icon(Icons.delete),
+              const SizedBox(width: 8),
+              const Text('Удалить'),
+            ],
+          ),
+        ),
+      ],
+    ).then((value) {
+      if (value == 'edit') {
+        _editPinboardNote(note);
+      } else if (value == 'delete') {
+        _deletePinboardNote(note.id!);
+      }
+    });
   }
 
   @override
@@ -276,7 +347,7 @@ class _PinboardScreenState extends State<PinboardScreen> {
         ],
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: _addPinboardNote,
+        onPressed: _addNote,
         tooltip: 'Добавить заметку на доску',
         child: const Icon(Icons.add),
       ),
@@ -361,17 +432,15 @@ class _PinboardScreenState extends State<PinboardScreen> {
       PinboardNoteDB? fromNote = notesMap[connection.fromId];
       PinboardNoteDB? toNote = notesMap[connection.toId];
       if (fromNote != null && toNote != null) {
-        Offset from =
-            Offset(fromNote.posX, fromNote.posY) + const Offset(75, 75);
+        Offset from = Offset(fromNote.posX, fromNote.posY) + const Offset(75, 75);
         Offset to = Offset(toNote.posX, toNote.posY) + const Offset(75, 75);
         Offset midpoint = Offset((from.dx + to.dx) / 2, (from.dy + to.dy) / 2);
         overlays.add(
           Positioned(
-            // Располагаем контейнер так, чтобы его центр был в середине линии связи
             left: midpoint.dx,
             top: midpoint.dy,
             child: GestureDetector(
-              onTap: () => _editConnection(connection),
+              onSecondaryTapDown: (details) => _showConnectionContextMenu(context, connection, details.globalPosition),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
@@ -392,69 +461,132 @@ class _PinboardScreenState extends State<PinboardScreen> {
     return overlays;
   }
 
+  void _showConnectionContextMenu(BuildContext context, ConnectionDB connection, Offset position) {
+    final RenderBox overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final RelativeRect positionRect = RelativeRect.fromRect(
+      Rect.fromPoints(position, position),
+      Offset.zero & overlay.size,
+    );
+
+    showMenu(
+      context: context,
+      position: positionRect,
+      items: [
+        PopupMenuItem(
+          value: 'edit',
+          child: Row(
+            children: [
+              const Icon(Icons.edit),
+              const SizedBox(width: 8),
+              const Text('Редактировать'),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'delete',
+          child: Row(
+            children: [
+              const Icon(Icons.delete),
+              const SizedBox(width: 8),
+              const Text('Удалить'),
+            ],
+          ),
+        ),
+      ],
+    ).then((value) {
+      if (value == 'edit') {
+        _editConnection(connection);
+      } else if (value == 'delete') {
+        _deleteConnection(connection.id!);
+      }
+    });
+  }
+
+  void _deleteConnection(int id) {
+    DatabaseHelper().deleteConnection(id).then((_) {
+      _loadPinboardData();
+      showCustomToastWithIcon(
+        "Связь успешно удалена",
+        accentColor: Colors.red,
+        fontSize: 14.0,
+        icon: const Icon(Icons.delete, size: 20, color: Colors.red),
+      );
+    });
+  }
+
   void _editConnection(ConnectionDB connection) {
-    TextEditingController nameController =
-        TextEditingController(text: connection.name);
+    final nameController = TextEditingController(text: connection.name);
     Color selectedColor = Color(connection.connectionColor);
+
     showDialog(
       context: context,
-      builder: (BuildContext outerContext) {
-        return StatefulBuilder(
-          builder: (BuildContext innerContext,
-              void Function(void Function()) setStateDialog) {
-            return AlertDialog(
-              title: const Text('Редактировать связь'),
-              content: SingleChildScrollView(
-                child: Column(
-                  children: [
-                    TextField(
-                      controller: nameController,
-                      decoration:
-                          const InputDecoration(labelText: 'Название связи'),
-                    ),
-                    const SizedBox(height: 10),
-                    const Text('Выберите цвет связи:'),
-                    ColorPicker(
-                      color: selectedColor,
-                      onChanged: (color) {
-                        setStateDialog(() {
-                          selectedColor = color;
-                        });
-                      },
-                    ),
-                  ],
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: const Text('Редактировать связь'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameController,
+                decoration: const InputDecoration(
+                  labelText: 'Название связи',
+                  hintText: 'Введите название связи',
                 ),
               ),
-              actions: [
-                TextButton(
-                  onPressed: () {
-                    connection.name = nameController.text.trim();
-                    connection.connectionColor = selectedColor.value;
-                    DatabaseHelper().updateConnection(connection).then((_) {
-                      _loadPinboardData();
-                    });
-                    Navigator.of(outerContext).pop();
-                  },
-                  child: const Text('Сохранить'),
-                ),
-                TextButton(
-                  onPressed: () {
-                    DatabaseHelper().deleteConnection(connection.id!).then((_) {
-                      _loadPinboardData();
-                    });
-                    Navigator.of(outerContext).pop();
-                  },
-                  child: const Text('Удалить'),
-                ),
-                TextButton(
-                  onPressed: () => Navigator.of(outerContext).pop(),
-                  child: const Text('Отмена'),
-                ),
-              ],
-            );
-          },
-        );
-      },
+              const SizedBox(height: 16),
+              const Text('Выберите цвет связи:'),
+              ColorPicker(
+                color: selectedColor,
+                onChanged: (color) {
+                  setState(() {
+                    selectedColor = color;
+                  });
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Отмена'),
+            ),
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  connection.name = nameController.text;
+                  connection.connectionColor = selectedColor.value;
+                });
+                DatabaseHelper().updateConnection(connection).then((_) {
+                  _loadPinboardData();
+                  showCustomToastWithIcon(
+                    "Связь успешно обновлена",
+                    accentColor: const Color.fromARGB(255, 255, 255, 0),
+                    fontSize: 14.0,
+                    icon: const Icon(Icons.edit, size: 20, color: Color.fromARGB(255, 255, 255, 0)),
+                  );
+                });
+              },
+              child: const Text('Сохранить'),
+            ),
+          ],
+        ),
+      ),
     );
+  }
+
+  void _updateNote(PinboardNoteDB note) {
+    DatabaseHelper().updatePinboardNote(note).then((_) {
+      _loadPinboardData();
+      showCustomToastWithIcon(
+        "Заметка успешно обновлена",
+        accentColor: const Color.fromARGB(255, 255, 255, 0),
+        fontSize: 14.0,
+        icon: const Icon(Icons.edit, size: 20, color: Color.fromARGB(255, 255, 255, 0),),
+      );
+    });
+  }
+
+  void _selectColor(PinboardNoteDB note) {
+    // Implementation of _selectColor method
   }
 } 

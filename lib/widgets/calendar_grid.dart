@@ -1,141 +1,150 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 /// Виджет для отображения календарной сетки, масштабируемой под размер окна.
-class CalendarGrid extends StatefulWidget {
+class CalendarGrid extends StatelessWidget {
   final DateTime selectedDate;
-  final ValueChanged<DateTime> onDateSelected;
+  final Function(DateTime) onDateSelected;
+  final DateTime? highlightedDate;
+  final Function(DateTime)? onDateHighlighted;
 
   const CalendarGrid({
     Key? key,
     required this.selectedDate,
     required this.onDateSelected,
+    this.highlightedDate,
+    this.onDateHighlighted,
   }) : super(key: key);
 
   @override
-  _CalendarGridState createState() => _CalendarGridState();
-}
-
-class _CalendarGridState extends State<CalendarGrid> {
-  late ScrollController _scrollController;
-
-  @override
-  void initState() {
-    super.initState();
-    // Инициализируем собственный ScrollController
-    _scrollController = ScrollController();
-  }
-
-  @override
-  void dispose() {
-    // Освобождаем ресурсы
-    _scrollController.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    // Текущее время и расчёт дней месяца
-    DateTime now = DateTime.now();
-    DateTime firstDay = DateTime(now.year, now.month, 1);
-    DateTime lastDay = DateTime(now.year, now.month + 1, 0);
-    int totalDays = lastDay.day;
-    int startingWeekday =
-        firstDay.weekday; // 1 = понедельник, ... 7 = воскресенье
+    final now = DateTime.now();
+    final firstDayOfMonth = DateTime(now.year, now.month, 1);
+    final lastDayOfMonth = DateTime(now.year, now.month + 1, 0);
+    final daysInMonth = lastDayOfMonth.day;
+    final startingWeekday = firstDayOfMonth.weekday;
+    final weeks = ((daysInMonth + startingWeekday - 1) / 7).ceil();
 
-    // Заголовок дней недели
-    List<Widget> headerCells = [];
-    List<String> weekDays = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
-    for (String day in weekDays) {
-      headerCells.add(
-        Expanded(
-          child: Container(
-            alignment: Alignment.center,
-            child: Text(
-              day,
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-            ),
-          ),
-        ),
-      );
-    }
-
-    // Ячейки с числами
-    List<Widget> dayCells = [];
-    // Пустые ячейки до первого числа месяца
-    for (int i = 1; i < startingWeekday; i++) {
-      dayCells.add(Container());
-    }
-    // Добавляем ячейки для каждого дня месяца
-    for (int d = 1; d <= totalDays; d++) {
-      DateTime currentDay = DateTime(now.year, now.month, d);
-      bool isSelected = currentDay.year == widget.selectedDate.year &&
-          currentDay.month == widget.selectedDate.month &&
-          currentDay.day == widget.selectedDate.day;
-
-      dayCells.add(
-        GestureDetector(
-          onTap: () => widget.onDateSelected(currentDay),
-          child: Container(
-            margin: const EdgeInsets.all(2),
-            decoration: BoxDecoration(
-              color: isSelected ? Colors.cyan : Colors.transparent,
-              borderRadius: BorderRadius.circular(4),
-            ),
-            alignment: Alignment.center,
-            child: Text(
-              d.toString(),
-              style: TextStyle(
-                fontSize: 12,
-                color: isSelected ? Colors.black : Colors.white,
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        // Определяем ширину для расчёта размера ячеек
-        double width = (constraints.hasBoundedWidth &&
-                constraints.maxWidth != double.infinity)
-            ? constraints.maxWidth
-            : MediaQuery.of(context).size.width;
-
-        if (width <= 0) return Container();
-        double cellSize = width / 7;
-
-        return Column(
-          children: [
-            // Заголовок дней недели (одна строка)
-            Container(
-              height: cellSize,
-              child: Row(children: headerCells),
-            ),
-            // Прокручиваемая сетка для дней
-            Expanded(
-              child: Scrollbar(
-                controller: _scrollController, // привязываем ScrollController
-                thumbVisibility:
-                    true, // чтобы полоса прокрутки всегда была видна (по желанию)
-                child: GridView.builder(
-                  controller:
-                      _scrollController, // передаём контроллер в GridView
-                  padding: EdgeInsets.zero,
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 7,
-                    childAspectRatio: 1, // квадратные ячейки
-                  ),
-                  itemCount: dayCells.length,
-                  itemBuilder: (context, index) {
-                    return dayCells[index];
-                  },
+    return Container(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: [
+          // Month and year header
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                DateFormat('MMMM yyyy', 'ru').format(now),
+                style: const TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          // Weekday headers
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
+                .map((day) => SizedBox(
+                      width: 40,
+                      child: Text(
+                        day,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.cyan,
+                        ),
+                      ),
+                    ))
+                .toList(),
+          ),
+          const SizedBox(height: 8),
+          // Calendar grid
+          Expanded(
+            child: GridView.builder(
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 7,
+                childAspectRatio: 1,
+                crossAxisSpacing: 4,
+                mainAxisSpacing: 4,
+              ),
+              itemCount: weeks * 7,
+              itemBuilder: (context, index) {
+                final dayOffset = index - (startingWeekday - 1);
+                final day = dayOffset + 1;
+                final isCurrentMonth = day > 0 && day <= daysInMonth;
+                final isToday = isCurrentMonth &&
+                    day == DateTime.now().day &&
+                    now.month == DateTime.now().month &&
+                    now.year == DateTime.now().year;
+                final isSelected = isCurrentMonth &&
+                    day == selectedDate.day &&
+                    now.month == selectedDate.month &&
+                    now.year == selectedDate.year;
+                final isHighlighted = highlightedDate != null &&
+                    isCurrentMonth &&
+                    day == highlightedDate!.day &&
+                    now.month == highlightedDate!.month &&
+                    now.year == highlightedDate!.year;
+
+                return isCurrentMonth
+                    ? GestureDetector(
+                        onTap: () {
+                          final selectedDay = DateTime(now.year, now.month, day);
+                          // If this date is already highlighted, open it directly
+                          if (highlightedDate != null && 
+                              day == highlightedDate!.day && 
+                              now.month == highlightedDate!.month && 
+                              now.year == highlightedDate!.year) {
+                            onDateSelected(selectedDay);
+                          } else if (onDateHighlighted != null) {
+                            // Otherwise, highlight it
+                            onDateHighlighted!(selectedDay);
+                          }
+                        },
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: isHighlighted
+                                ? Colors.cyan.withOpacity(0.3)
+                                : isToday
+                                    ? Colors.cyan.withOpacity(0.1)
+                                    : null,
+                            border: Border.all(
+                              color: isHighlighted
+                                  ? Colors.cyan
+                                  : isToday
+                                      ? Colors.cyan.withOpacity(0.5)
+                                      : Colors.grey.withOpacity(0.3),
+                              width: isHighlighted ? 2 : 1,
+                            ),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Center(
+                            child: Text(
+                              day.toString(),
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: isToday
+                                    ? FontWeight.bold
+                                    : FontWeight.normal,
+                                color: isHighlighted
+                                    ? Colors.cyan
+                                    : isToday
+                                        ? Colors.cyan
+                                        : Colors.white,
+                              ),
+                            ),
+                          ),
+                        ),
+                      )
+                    : Container();
+              },
             ),
-          ],
-        );
-      },
+          ),
+        ],
+      ),
     );
   }
 } 

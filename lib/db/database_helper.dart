@@ -37,6 +37,8 @@ class DatabaseHelper {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         title TEXT,
         content TEXT,
+        created_at INTEGER,
+        updated_at INTEGER,
         folder TEXT
       )
     ''');
@@ -58,10 +60,12 @@ class DatabaseHelper {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         title TEXT,
         content TEXT,
-        posX REAL,
-        posY REAL,
-        backgroundColor INTEGER,
-        icon TEXT
+        position_x REAL,
+        position_y REAL,
+        width REAL,
+        height REAL,
+        background_color INTEGER,
+        icon INTEGER
       )
     ''');
 
@@ -69,10 +73,13 @@ class DatabaseHelper {
     await db.execute('''
       CREATE TABLE connections(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        fromId INTEGER,
-        toId INTEGER,
+        from_note_id INTEGER,
+        to_note_id INTEGER,
+        type TEXT,
         name TEXT,
-        connectionColor INTEGER
+        connection_color INTEGER,
+        FOREIGN KEY (from_note_id) REFERENCES pinboard_notes (id),
+        FOREIGN KEY (to_note_id) REFERENCES pinboard_notes (id)
       )
     ''');
 
@@ -136,7 +143,13 @@ class DatabaseHelper {
   // Методы для работы с заметками на доске
   Future<int> insertPinboardNote(PinboardNoteDB note) async {
     final db = await database;
-    return await db.insert('pinboard_notes', note.toMap());
+    try {
+      final id = await db.insert('pinboard_notes', note.toMap());
+      return id;
+    } catch (e) {
+      print('Ошибка при вставке заметки в базу данных: $e');
+      rethrow;
+    }
   }
 
   Future<List<PinboardNoteDB>> getPinboardNotes() async {
@@ -145,31 +158,29 @@ class DatabaseHelper {
     return List.generate(maps.length, (i) => PinboardNoteDB.fromMap(maps[i]));
   }
 
-  Future<int> updatePinboardNote(PinboardNoteDB note) async {
+  Future<void> updatePinboardNote(PinboardNoteDB note) async {
     final db = await database;
-    return await db.update('pinboard_notes', note.toMap(),
-        where: 'id = ?', whereArgs: [note.id]);
+    await db.update(
+      'pinboard_notes',
+      note.toMap(),
+      where: 'id = ?',
+      whereArgs: [note.id],
+    );
   }
 
-  Future<int> deletePinboardNote(int id) async {
+  Future<void> deletePinboardNote(int id) async {
     final db = await database;
-    return await db.delete('pinboard_notes', where: 'id = ?', whereArgs: [id]);
+    await db.delete(
+      'pinboard_notes',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
-  // Методы для работы с соединениями заметок
+  // Методы для работы с соединениями
   Future<int> insertConnection(ConnectionDB connection) async {
     final db = await database;
     return await db.insert('connections', connection.toMap());
-  }
-
-  Future<int> updateConnection(ConnectionDB connection) async {
-    final db = await database;
-    return await db.update(
-      'connections',
-      connection.toMap(),
-      where: 'id = ?',
-      whereArgs: [connection.id],
-    );
   }
 
   Future<List<ConnectionDB>> getConnections() async {
@@ -178,9 +189,23 @@ class DatabaseHelper {
     return List.generate(maps.length, (i) => ConnectionDB.fromMap(maps[i]));
   }
 
-  Future<int> deleteConnection(int id) async {
+  Future<void> updateConnection(ConnectionDB connection) async {
     final db = await database;
-    return await db.delete('connections', where: 'id = ?', whereArgs: [id]);
+    await db.update(
+      'connections',
+      connection.toMap(),
+      where: 'id = ?',
+      whereArgs: [connection.id],
+    );
+  }
+
+  Future<void> deleteConnection(int id) async {
+    final db = await database;
+    await db.delete(
+      'connections',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   // Методы для работы с папками
@@ -204,5 +229,48 @@ class DatabaseHelper {
   Future<int> deleteFolder(int id) async {
     final db = await database;
     return await db.delete('folders', where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<List<Note>> getNotesByFolder(int folderId) async {
+    final db = await database;
+    // Сначала получаем имя папки по ID
+    final List<Map<String, dynamic>> folderMaps = await db.query(
+      'folders',
+      where: 'id = ?',
+      whereArgs: [folderId],
+    );
+    
+    if (folderMaps.isEmpty) return [];
+    
+    final String folderName = folderMaps[0]['name'];
+    
+    // Затем получаем заметки по имени папки
+    final List<Map<String, dynamic>> maps = await db.query(
+      'notes',
+      where: 'folder = ?',
+      whereArgs: [folderName],
+    );
+    
+    return List.generate(maps.length, (i) {
+      return Note(
+        id: maps[i]['id'],
+        title: maps[i]['title'],
+        content: maps[i]['content'],
+        folder: maps[i]['folder'],
+      );
+    });
+  }
+
+  Future<List<Note>> getAllNotes() async {
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query('notes');
+    return List.generate(maps.length, (i) {
+      return Note(
+        id: maps[i]['id'],
+        title: maps[i]['title'],
+        content: maps[i]['content'],
+        folder: maps[i]['folder'],
+      );
+    });
   }
 } 

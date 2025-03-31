@@ -4,6 +4,9 @@ import '../models/note.dart';
 import '../models/folder.dart';
 import '../widgets/color_picker.dart';
 import '../utils/toast_utils.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:oktoast/oktoast.dart';
+import 'package:flutter/rendering.dart';
 
 /// Экран заметок и папок с использованием БД для заметок
 class NotesScreen extends StatefulWidget {
@@ -13,27 +16,40 @@ class NotesScreen extends StatefulWidget {
   _NotesScreenState createState() => _NotesScreenState();
 }
 
-class _NotesScreenState extends State<NotesScreen> {
+class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClientMixin {
+  final DatabaseHelper _dbHelper = DatabaseHelper();
   List<Folder> _folders = [];
   List<Note> _notes = [];
   Folder? _selectedFolder;
   Note? _selectedNote;
   bool _isFolderExpanded = true;
   double _previewWidth = 0.3; // Default width ratio for preview window
+  String _newFolderName = '';
+  Color _selectedColor = Colors.blue;
   final TextEditingController _noteTitleController = TextEditingController();
   final TextEditingController _noteContentController = TextEditingController();
+  bool _isLoading = false;
+  DateTime? _lastSave;
+  
+  // Кэш для отфильтрованных заметок
+  Map<int?, List<Note>> _notesCache = {};
+  
   // Виртуальная папка для заметок без папки
   final Folder _noFolderCategory = Folder(
-    id: -1, // Специальный ID для виртуальной папки
-    name: "Без папки",
-    backgroundColor: Colors.grey[600]!.value,
+    id: 0,
+    name: 'Без папки',
+    color: Colors.grey[600]!,
   );
+
+  bool _isEditing = false;
+
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
     super.initState();
-    _loadFolders();
-    _loadAllNotes();
+    _loadData();
   }
 
   @override
@@ -43,176 +59,273 @@ class _NotesScreenState extends State<NotesScreen> {
     super.dispose();
   }
 
-  Future<void> _loadFolders() async {
-    List<Folder> foldersFromDb = await DatabaseHelper().getFolders();
-    setState(() {
-      _folders = foldersFromDb;
-    });
-  }
-
-  Future<void> _loadAllNotes() async {
-    List<Note> notesFromDb = await DatabaseHelper().getAllNotes();
-    setState(() {
-      _notes = notesFromDb;
-      // Выбираем папку "Без папки" по умолчанию, если папка не выбрана
-      if (_selectedFolder == null) {
-        _selectedFolder = _noFolderCategory;
-        _isFolderExpanded = true;
-      }
-    });
-  }
-
-  Future<void> _loadNotes(int folderId) async {
-    List<Note> notesFromDb;
-    if (folderId == _noFolderCategory.id) {
-      // Загружаем все заметки и фильтруем без папки
-      notesFromDb = await DatabaseHelper().getAllNotes();
-    } else {
-      // Загружаем заметки для выбранной папки
-      notesFromDb = await DatabaseHelper().getNotesByFolder(folderId);
-    }
-    setState(() {
-      _notes = notesFromDb;
-    });
-  }
-
-  void _addNote() async {
-    Note newNote = Note(
-      title: '',
-      content: '',
-      folderId: _selectedFolder?.id == _noFolderCategory.id ? null : _selectedFolder?.id,
-    );
-    int id = await DatabaseHelper().insertNote(newNote);
-    newNote.id = id;
-    setState(() {
-      _notes.add(newNote);
-      _selectedNote = newNote;
-      _noteTitleController.text = newNote.title;
-      _noteContentController.text = newNote.content ?? '';
-    });
+  Future<void> _loadData() async {
+    if (!mounted) return;
     
-    showCustomToastWithIcon(
-      "Заметка успешно создана",
-      accentColor: Colors.green,
-      fontSize: 14.0,
-      icon: const Icon(Icons.check, size: 20, color: Colors.green),
+    setState(() => _isLoading = true);
+    try {
+      // Загружаем данные параллельно
+      final results = await Future.wait([
+        _dbHelper.getAllFolders(),
+        _dbHelper.getAllNotes(),
+      ]);
+      
+      if (!mounted) return;
+      
+      setState(() {
+        _folders = results[0] as List<Folder>;
+        _notes = results[1] as List<Note>;
+        _updateNotesCache();
+        
+        // Устанавливаем папку "Без папки" по умолчанию, если папка не выбрана
+        if (_selectedFolder == null) {
+          _selectedFolder = _noFolderCategory;
+          _isFolderExpanded = true;
+        }
+        
+        _isLoading = false;
+      });
+    } catch (e) {
+      print('Ошибка загрузки данных: $e');
+      if (mounted) {
+        setState(() => _isLoading = false);
+        showToast('Ошибка загрузки данных');
+      }
+    }
+  }
+
+  void _updateNotesCache() {
+    _notesCache.clear();
+    for (var note in _notes) {
+      final key = note.folderId ?? 0; // Используем 0 для заметок без папки
+      if (!_notesCache.containsKey(key)) {
+        _notesCache[key] = [];
+      }
+      _notesCache[key]!.add(note);
+    }
+  }
+
+  List<Note> _getNotesForFolder(Folder folder) {
+    if (folder.id == _noFolderCategory.id) {
+      return _notesCache[0] ?? []; // Используем ключ 0 для заметок без папки
+    }
+    return _notesCache[folder.id] ?? [];
+  }
+
+  void showToast(String message) {
+    showToastWidget(
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.black87,
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Text(
+          message,
+          style: const TextStyle(color: Colors.white),
+        ),
+      ),
+      duration: const Duration(seconds: 2),
     );
   }
 
-  void _deleteNote(int index) async {
-    if (_notes[index].id != null) {
-      await DatabaseHelper().deleteNote(_notes[index].id!);
+  Future<void> _addNote() async {
+    if (!mounted) return;
+    
+    try {
+      // Если папка не выбрана или выбрана "Без папки", создаем заметку без папки
+      final folderId = (_selectedFolder == null || _selectedFolder?.id == _noFolderCategory.id) 
+          ? null 
+          : _selectedFolder?.id;
+      
+      final note = Note(
+        title: '',  // Пустой заголовок
+        content: '',
+        folderId: folderId,
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      );
+      
+      final id = await _dbHelper.insertNote(note);
+      if (!mounted) return;
+      
+      note.id = id;
       setState(() {
-        _notes.removeAt(index);
-        _selectedNote = null;
+        _notes.insert(0, note);
+        _updateNotesCache();
+        _selectedNote = note;
+        _noteTitleController.text = note.title;
+        _noteContentController.text = '';
+        
+        // Если папка не выбрана, автоматически выбираем "Без папки"
+        if (_selectedFolder == null) {
+          _selectedFolder = _noFolderCategory;
+          _isFolderExpanded = true;
+        }
       });
+      
+      showCustomToastWithIcon(
+        "Заметка успешно создана",
+        accentColor: Colors.green,
+        fontSize: 14.0,
+        icon: const Icon(Icons.check, size: 20, color: Colors.green),
+      );
+    } catch (e) {
+      print('Ошибка создания заметки: $e');
+      if (mounted) {
+        showCustomToastWithIcon(
+          "Ошибка создания заметки",
+          accentColor: Colors.amber,
+          fontSize: 14.0,
+          icon: const Icon(Icons.warning, size: 20, color: Colors.amber),
+        );
+      }
+    }
+  }
+
+  Future<void> _deleteNote(Note note) async {
+    if (note.id == null) return;
+    
+    try {
+      await _dbHelper.deleteNote(note.id!);
+      if (!mounted) return;
+      
+      setState(() {
+        // Удаляем заметку из списка
+        _notes.removeWhere((n) => n.id == note.id);
+        
+        // Обновляем кэш заметок
+        _updateNotesCache();
+        
+        // Если удалена выбранная заметка, очищаем поля редактирования
+        if (_selectedNote?.id == note.id) {
+          _selectedNote = null;
+          _noteTitleController.clear();
+          _noteContentController.clear();
+        }
+      });
+      
       showCustomToastWithIcon(
         "Заметка успешно удалена",
         accentColor: Colors.red,
         fontSize: 14.0,
         icon: const Icon(Icons.close, size: 20, color: Colors.red),
       );
-    }
-  }
-
-  void _updateSelectedNote(String title, String content, [int? folderId]) async {
-    if (_selectedNote != null) {
-      Note updatedNote = Note(
-        id: _selectedNote!.id,
-        title: title,
-        content: content,
-        folderId: folderId,
+    } catch (e) {
+      print('Ошибка удаления заметки: $e');
+      showCustomToastWithIcon(
+        "Ошибка удаления заметки",
+        accentColor: Colors.amber,
+        fontSize: 14.0,
+        icon: const Icon(Icons.warning, size: 20, color: Colors.amber),
       );
-      await DatabaseHelper().updateNote(updatedNote);
-      setState(() {
-        final index = _notes.indexWhere((note) => note.id == updatedNote.id);
-        if (index != -1) {
-          _notes[index] = updatedNote;
-          _selectedNote = updatedNote;
-        }
-      });
     }
   }
 
-  void _addFolder() {
-    TextEditingController folderController = TextEditingController();
-    Color selectedColor = Colors.grey[700]!;
-    showDialog(
+  Future<void> _updateNote(Note note) async {
+    if (note.id == null) return;
+    
+    try {
+      await _dbHelper.updateNote(note);
+      if (!mounted) return;
+      
+      await _loadData();
+      showToast('Заметка обновлена');
+    } catch (e) {
+      print('Ошибка обновления заметки: $e');
+      showToast('Ошибка обновления заметки');
+    }
+  }
+
+  Future<void> _addFolder() async {
+    final result = await showDialog<Map<String, dynamic>>(
       context: context,
-      builder: (BuildContext dialogContext) {
-        return StatefulBuilder(
-          builder: (BuildContext innerContext,
-              void Function(void Function()) setStateDialog) {
-            return AlertDialog(
-              title: const Text('Создать папку'),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: folderController,
-                    decoration:
-                        const InputDecoration(labelText: 'Название папки'),
-                  ),
-                  const SizedBox(height: 10),
-                  ColorPicker(
-                    color: selectedColor,
-                    onChanged: (color) {
-                      setStateDialog(() {
-                        selectedColor = color;
-                      });
-                    },
-                  ),
-                ],
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: const Text('Новая папка'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                decoration: const InputDecoration(
+                  labelText: 'Название папки',
+                  border: OutlineInputBorder(),
+                ),
+                onChanged: (value) {
+                  setState(() {
+                    _newFolderName = value;
+                  });
+                },
               ),
-              actions: [
-                TextButton(
-                  onPressed: () async {
-                    if (folderController.text.trim().isNotEmpty) {
-                      Folder newFolder = Folder(
-                        name: folderController.text.trim(),
-                        backgroundColor: selectedColor.value,
-                      );
-                      int id = await DatabaseHelper().insertFolder(newFolder);
-                      newFolder.id = id;
-                      setState(() {
-                        _folders.add(newFolder);
-                      });
-                      showCustomToastWithIcon(
-                        "Папка успешно создана",
-                        accentColor: Colors.green,
-                        fontSize: 14.0,
-                        icon: const Icon(Icons.check,
-                            size: 20, color: Colors.green),
-                      );
-                    }
-                    Navigator.of(dialogContext).pop();
-                  },
-                  child: const Text('Создать'),
-                ),
-                TextButton(
-                  onPressed: () => Navigator.of(dialogContext).pop(),
-                  child: const Text('Отмена'),
-                ),
-              ],
-            );
-          },
-        );
-      },
+              const SizedBox(height: 16),
+              ColorPicker(
+                color: _selectedColor,
+                onChanged: (color) {
+                  setState(() {
+                    _selectedColor = color;
+                  });
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Отмена'),
+            ),
+            TextButton(
+              onPressed: () {
+                if (_newFolderName.isNotEmpty) {
+                  Navigator.pop(context, {
+                    'name': _newFolderName,
+                    'color': _selectedColor,
+                  });
+                }
+              },
+              child: const Text('Создать'),
+            ),
+          ],
+        ),
+      ),
     );
+
+    if (result != null) {
+      final folder = Folder(
+        name: result['name'],
+        color: result['color'],
+      );
+      await _dbHelper.insertFolder(folder);
+      _loadData();
+      showCustomToastWithIcon(
+        "Папка успешно создана",
+        accentColor: Colors.green,
+        fontSize: 14.0,
+        icon: const Icon(Icons.check, size: 20, color: Colors.green),
+      );
+    }
   }
 
   void _deleteFolder(int index) async {
     Folder folderToDelete = _folders[index];
     if (folderToDelete.id != null) {
-      await DatabaseHelper().deleteFolder(folderToDelete.id!);
+      await _dbHelper.deleteFolder(folderToDelete.id!);
       setState(() {
         _folders.removeAt(index);
+        // Обновляем заметки и их кэш
         for (var note in _notes) {
           if (note.folderId == folderToDelete.id) {
             note.folderId = null;
-            DatabaseHelper().updateNote(note);
+            _dbHelper.updateNote(note);
           }
         }
+        _updateNotesCache(); // Обновляем кэш после изменения заметок
+        
+        // После удаления папки выбираем папку "Без папки"
+        _selectedFolder = _noFolderCategory;
+        _isFolderExpanded = true;
+        _selectedNote = null;
+        _noteTitleController.clear();
+        _noteContentController.clear();
       });
       showCustomToastWithIcon(
         "Папка успешно удалена",
@@ -223,68 +336,74 @@ class _NotesScreenState extends State<NotesScreen> {
     }
   }
 
-  void _editFolder(int index) {
-    Folder folderToEdit = _folders[index];
-    TextEditingController nameController =
-        TextEditingController(text: folderToEdit.name);
-    Color selectedColor = Color(folderToEdit.backgroundColor);
-    showDialog(
+  Future<void> _editFolder(Folder folder) async {
+    final result = await showDialog<Map<String, dynamic>>(
       context: context,
-      builder: (BuildContext dialogContext) {
-        return StatefulBuilder(
-          builder: (BuildContext innerContext,
-              void Function(void Function()) setStateDialog) {
-            return AlertDialog(
-              title: const Text('Редактировать папку'),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: nameController,
-                    decoration:
-                        const InputDecoration(labelText: 'Название папки'),
-                  ),
-                  const SizedBox(height: 10),
-                  ColorPicker(
-                    color: selectedColor,
-                    onChanged: (color) {
-                      setStateDialog(() {
-                        selectedColor = color;
-                      });
-                    },
-                  ),
-                ],
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: const Text('Редактировать папку'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                decoration: const InputDecoration(
+                  labelText: 'Название папки',
+                  border: OutlineInputBorder(),
+                ),
+                controller: TextEditingController(text: folder.name),
+                onChanged: (value) {
+                  setState(() {
+                    _newFolderName = value;
+                  });
+                },
               ),
-              actions: [
-                TextButton(
-                  onPressed: () async {
-                    folderToEdit.name = nameController.text.trim();
-                    folderToEdit.backgroundColor = selectedColor.value;
-                    await DatabaseHelper().updateFolder(folderToEdit);
-                    setState(() {
-                      _folders[index] = folderToEdit;
-                    });
-                    showCustomToastWithIcon(
-                      "Папка успешно обновлена",
-                      accentColor: Colors.yellow,
-                      fontSize: 14.0,
-                      icon: const Icon(Icons.error_outline,
-                          size: 20, color: Colors.yellow),
-                    );
-                    Navigator.of(dialogContext).pop();
-                  },
-                  child: const Text('Сохранить'),
-                ),
-                TextButton(
-                  onPressed: () => Navigator.of(dialogContext).pop(),
-                  child: const Text('Отмена'),
-                ),
-              ],
-            );
-          },
-        );
-      },
+              const SizedBox(height: 16),
+              ColorPicker(
+                color: folder.color,
+                onChanged: (color) {
+                  setState(() {
+                    _selectedColor = color;
+                  });
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Отмена'),
+            ),
+            TextButton(
+              onPressed: () {
+                if (_newFolderName.isNotEmpty) {
+                  Navigator.pop(context, {
+                    'name': _newFolderName,
+                    'color': _selectedColor,
+                  });
+                }
+              },
+              child: const Text('Сохранить'),
+            ),
+          ],
+        ),
+      ),
     );
+
+    if (result != null) {
+      final updatedFolder = Folder(
+        id: folder.id,
+        name: result['name'],
+        color: result['color'],
+      );
+      await _dbHelper.updateFolder(updatedFolder);
+      _loadData();
+      showCustomToastWithIcon(
+        "Папка успешно обновлена",
+        accentColor: Colors.amber,
+        fontSize: 14.0,
+        icon: const Icon(Icons.check, size: 20, color: Colors.amber),
+      );
+    }
   }
 
   void _moveNoteToFolder(Note note, Folder folder) async {
@@ -294,16 +413,29 @@ class _NotesScreenState extends State<NotesScreen> {
       note.folderId = folder.id;
     }
     
-    await DatabaseHelper().updateNote(note);
-    setState(() {
-      final index = _notes.indexWhere((n) => n.id == note.id);
-      if (index != -1) {
-        _notes[index] = note;
-        if (_selectedNote?.id == note.id) {
-          _selectedNote = note;
+    try {
+      await _dbHelper.updateNote(note);
+      if (!mounted) return;
+      
+      setState(() {
+        final index = _notes.indexWhere((n) => n.id == note.id);
+        if (index != -1) {
+          _notes[index] = note;
+          _updateNotesCache();
+          if (_selectedNote?.id == note.id) {
+            _selectedNote = note;
+          }
         }
-      }
-    });
+      });
+    } catch (e) {
+      print('Ошибка при перемещении заметки: $e');
+      showCustomToastWithIcon(
+        "Ошибка при перемещении заметки",
+        accentColor: Colors.amber,
+        fontSize: 14.0,
+        icon: const Icon(Icons.warning, size: 20, color: Colors.amber),
+      );
+    }
   }
 
   void _toggleFolderExpansion(Folder folder) {
@@ -313,7 +445,7 @@ class _NotesScreenState extends State<NotesScreen> {
       } else {
         _selectedFolder = folder;
         _isFolderExpanded = true;
-        _loadAllNotes(); // Загружаем все заметки вместо только тех, которые в папке
+        _loadData(); // Загружаем все заметки вместо только тех, которые в папке
       }
     });
   }
@@ -325,8 +457,8 @@ class _NotesScreenState extends State<NotesScreen> {
         if (index == 0) {
           // Всегда показываем виртуальную папку "Без папки"
           final isSelected = _selectedFolder?.id == _noFolderCategory.id;
-          // Получаем заметки без папки
-          final notesWithoutFolder = _notes.where((note) => note.folderId == null).toList();
+          // Получаем заметки без папки из кэша
+          final notesWithoutFolder = _notesCache[0] ?? [];
           
           return Column(
             children: [
@@ -356,7 +488,7 @@ class _NotesScreenState extends State<NotesScreen> {
                         width: 24,
                         height: 24,
                         decoration: BoxDecoration(
-                          color: Color(_noFolderCategory.backgroundColor),
+                          color: _noFolderCategory.color,
                           borderRadius: BorderRadius.circular(4),
                         ),
                       ),
@@ -378,16 +510,25 @@ class _NotesScreenState extends State<NotesScreen> {
                   return Draggable<Note>(
                     data: note,
                     feedback: Material(
+                      elevation: 4.0,
                       child: Container(
+                        width: 200,
                         padding: const EdgeInsets.all(8),
-                        color: Colors.cyan.withOpacity(0.2),
-                        child: Text(note.title),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[850],
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          note.title,
+                          style: const TextStyle(color: Colors.white),
+                        ),
                       ),
                     ),
                     childWhenDragging: Container(
-                      color: Colors.grey[800],
-                      child: ListTile(
-                        title: Text(note.title),
+                      height: 56,
+                      decoration: BoxDecoration(
+                        color: Colors.grey[850]?.withOpacity(0.5),
+                        borderRadius: BorderRadius.circular(4),
                       ),
                     ),
                     child: Container(
@@ -407,16 +548,10 @@ class _NotesScreenState extends State<NotesScreen> {
                       child: ListTile(
                         title: Text(note.title),
                         selected: isNoteSelected,
-                        onTap: () {
-                          setState(() {
-                            _selectedNote = note;
-                            _noteTitleController.text = note.title;
-                            _noteContentController.text = note.content ?? '';
-                          });
-                        },
+                        onTap: () => _selectNote(note),
                         trailing: IconButton(
                           icon: const Icon(Icons.delete),
-                          onPressed: () => _deleteNote(_notes.indexOf(note)),
+                          onPressed: () => _deleteNote(note),
                         ),
                       ),
                     ),
@@ -430,8 +565,8 @@ class _NotesScreenState extends State<NotesScreen> {
         final folderIndex = index - 1;
         final folder = _folders[folderIndex];
         final isSelected = _selectedFolder?.id == folder.id;
-        // Фильтруем заметки по выбранной папке
-        final folderNotes = _notes.where((note) => note.folderId == folder.id).toList();
+        // Получаем заметки для папки из кэша
+        final folderNotes = _notesCache[folder.id] ?? [];
         
         return Column(
           children: [
@@ -461,7 +596,7 @@ class _NotesScreenState extends State<NotesScreen> {
                       width: 24,
                       height: 24,
                       decoration: BoxDecoration(
-                        color: Color(folder.backgroundColor),
+                        color: folder.color,
                         borderRadius: BorderRadius.circular(4),
                       ),
                     ),
@@ -481,7 +616,7 @@ class _NotesScreenState extends State<NotesScreen> {
                         ),
                         IconButton(
                           icon: const Icon(Icons.edit),
-                          onPressed: () => _editFolder(folderIndex),
+                          onPressed: () => _editFolder(folder),
                         ),
                         IconButton(
                           icon: const Icon(Icons.delete),
@@ -499,16 +634,25 @@ class _NotesScreenState extends State<NotesScreen> {
                 return Draggable<Note>(
                   data: note,
                   feedback: Material(
+                    elevation: 4.0,
                     child: Container(
+                      width: 200,
                       padding: const EdgeInsets.all(8),
-                      color: Colors.cyan.withOpacity(0.2),
-                      child: Text(note.title),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[850],
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        note.title,
+                        style: const TextStyle(color: Colors.white),
+                      ),
                     ),
                   ),
                   childWhenDragging: Container(
-                    color: Colors.grey[800],
-                    child: ListTile(
-                      title: Text(note.title),
+                    height: 56,
+                    decoration: BoxDecoration(
+                      color: Colors.grey[850]?.withOpacity(0.5),
+                      borderRadius: BorderRadius.circular(4),
                     ),
                   ),
                   child: Container(
@@ -528,16 +672,10 @@ class _NotesScreenState extends State<NotesScreen> {
                     child: ListTile(
                       title: Text(note.title),
                       selected: isNoteSelected,
-                      onTap: () {
-                        setState(() {
-                          _selectedNote = note;
-                          _noteTitleController.text = note.title;
-                          _noteContentController.text = note.content ?? '';
-                        });
-                      },
+                      onTap: () => _selectNote(note),
                       trailing: IconButton(
                         icon: const Icon(Icons.delete),
-                        onPressed: () => _deleteNote(_notes.indexOf(note)),
+                        onPressed: () => _deleteNote(note),
                       ),
                     ),
                   ),
@@ -556,6 +694,9 @@ class _NotesScreenState extends State<NotesScreen> {
       } else {
         _selectedFolder = _noFolderCategory;
         _isFolderExpanded = true;
+        _selectedNote = null;
+        _noteTitleController.clear();
+        _noteContentController.clear();
       }
     });
   }
@@ -632,7 +773,7 @@ class _NotesScreenState extends State<NotesScreen> {
                   content: contentController.text,
                   folderId: selectedFolderId,
                 );
-                await DatabaseHelper().updateNote(updatedNote);
+                await _updateNote(updatedNote);
                 this.setState(() {
                   final index = _notes.indexWhere((n) => n.id == note.id);
                   if (index != -1) {
@@ -652,157 +793,204 @@ class _NotesScreenState extends State<NotesScreen> {
     );
   }
 
+  void _selectFolder(Folder folder) {
+    setState(() {
+      _selectedFolder = folder;
+      _selectedNote = null;
+      _notes = _notes.where((note) => note.folderId == folder.id).toList();
+    });
+  }
+
+  void _selectNote(Note note) {
+    if (!mounted) return;
+    
+    setState(() {
+      _selectedNote = note;
+      _noteTitleController.text = note.title;
+      _noteContentController.text = note.content ?? '';
+    });
+  }
+
+  void _updateNoteContent(String content) {
+    if (_selectedNote == null) return;
+    
+    setState(() {
+      _selectedNote!.content = content;
+      _selectedNote!.updatedAt = DateTime.now();
+    });
+    
+    _debounceSave();
+  }
+
+  void _updateNoteTitle(String title) {
+    if (_selectedNote == null) return;
+    
+    setState(() {
+      _selectedNote!.title = title;
+      _selectedNote!.updatedAt = DateTime.now();
+    });
+    
+    _debounceSave();
+  }
+
+  void _debounceSave() {
+    final now = DateTime.now();
+    _lastSave = now;
+    
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (_lastSave == now && mounted && _selectedNote != null) {
+        _dbHelper.updateNote(_selectedNote!);
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    super.build(context);
+    
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
     return Scaffold(
       body: Row(
         children: [
-          // Combined folders and notes list with resizable width
+          // Левая панель
           SizedBox(
             width: MediaQuery.of(context).size.width * _previewWidth,
             child: Column(
               children: [
+                // Панель инструментов
                 Padding(
                   padding: const EdgeInsets.all(8.0),
                   child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
-                      const Text(
-                        'Папки и заметки',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
+                      IconButton(
+                        icon: Icon(_isFolderExpanded ? Icons.expand_less : Icons.expand_more),
+                        onPressed: () {
+                          setState(() {
+                            _isFolderExpanded = !_isFolderExpanded;
+                          });
+                        },
                       ),
-                      Row(
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.add),
-                            onPressed: _addNote,
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.create_new_folder),
-                            onPressed: _addFolder,
-                          ),
-                        ],
+                      IconButton(
+                        icon: const Icon(Icons.add),
+                        onPressed: _addNote,
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.create_new_folder),
+                        onPressed: _addFolder,
                       ),
                     ],
                   ),
                 ),
+                // Список папок и заметок
                 Expanded(
-                  child: _buildCombinedList(),
+                  child: Container(
+                    constraints: BoxConstraints(
+                      maxHeight: MediaQuery.of(context).size.height,
+                    ),
+                    child: _buildCombinedList(),
+                  ),
                 ),
               ],
             ),
           ),
-          // Resize handle
-          GestureDetector(
-            onHorizontalDragUpdate: (details) {
-              setState(() {
-                _previewWidth = (_previewWidth + details.delta.dx / MediaQuery.of(context).size.width)
-                    .clamp(0.2, 0.5);
-              });
-            },
-            child: Container(
-              width: 8,
-              color: Colors.transparent,
-              child: Center(
-                child: Container(
-                  width: 2,
-                  height: 40,
-                  color: Colors.cyan.withOpacity(0.3),
+          // Разделитель с возможностью перетаскивания
+          MouseRegion(
+            cursor: SystemMouseCursors.resizeColumn,
+            child: GestureDetector(
+              onHorizontalDragUpdate: (details) {
+                setState(() {
+                  _previewWidth += details.delta.dx / MediaQuery.of(context).size.width;
+                  // Ограничиваем ширину от 20% до 60% экрана
+                  _previewWidth = _previewWidth.clamp(0.2, 0.6);
+                });
+              },
+              child: Container(
+                width: 8,
+                color: Colors.black,
+                child: Center(
+                  child: Container(
+                    width: 2,
+                    height: double.infinity,
+                    color: Colors.cyan,
+                  ),
                 ),
               ),
             ),
           ),
-          // Note content section
+          // Правая панель
           Expanded(
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
+            child: _selectedNote == null
+                ? const Center(child: Text('Выберите заметку'))
+                : Column(
                     children: [
-                      TextField(
-                        controller: _noteTitleController,
-                        decoration: const InputDecoration(
-                          labelText: 'Заголовок',
-                          hintText: 'Новая заметка',
-                          border: OutlineInputBorder(),
-                        ),
-                        onChanged: (value) {
-                          if (_selectedNote != null) {
-                            _updateSelectedNote(
-                              value,
-                              _noteContentController.text,
-                            );
-                          }
-                        },
-                      ),
-                      const SizedBox(height: 16),
-                      DropdownButtonFormField<int?>(
-                        value: _selectedNote?.folderId,
-                        decoration: const InputDecoration(
-                          labelText: 'Папка',
-                          border: OutlineInputBorder(),
-                        ),
-                        items: [
-                          DropdownMenuItem(
-                            value: null,
-                            child: Text(_noFolderCategory.name),
+                      // Заголовок заметки
+                      Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: TextField(
+                          controller: _noteTitleController,
+                          decoration: const InputDecoration(
+                            hintText: 'Новая заметка',
+                            border: OutlineInputBorder(),
                           ),
-                          ..._folders.map((folder) {
-                            return DropdownMenuItem(
-                              value: folder.id,
-                              child: Text(folder.name),
-                            );
-                          }).toList(),
-                        ],
-                        onChanged: (value) {
-                          if (_selectedNote != null) {
-                            _updateSelectedNote(
-                              _noteTitleController.text,
-                              _noteContentController.text,
-                              value,
-                            );
-                          }
-                        },
+                          onChanged: _updateNoteTitle,
+                        ),
                       ),
-                      const SizedBox(height: 16),
-                      const Text(
-                        'Содержимое',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
+                      // Объединенный редактор/предпросмотр
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () {
+                            setState(() {
+                              _isEditing = true;
+                            });
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.all(8.0),
+                            decoration: BoxDecoration(
+                              border: Border.all(color: Colors.grey),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: _isEditing
+                                ? Focus(
+                                    onFocusChange: (hasFocus) {
+                                      if (!hasFocus) {
+                                        setState(() {
+                                          _isEditing = false;
+                                        });
+                                      }
+                                    },
+                                    child: TextField(
+                                      controller: _noteContentController,
+                                      maxLines: null,
+                                      expands: true,
+                                      autofocus: true,
+                                      decoration: const InputDecoration(
+                                        hintText: 'Содержание заметки (поддерживается Markdown)',
+                                        border: InputBorder.none,
+                                      ),
+                                      onChanged: _updateNoteContent,
+                                    ),
+                                  )
+                                : SingleChildScrollView(
+                                    child: ConstrainedBox(
+                                      constraints: BoxConstraints(
+                                        minHeight: 0,
+                                        maxHeight: MediaQuery.of(context).size.height,
+                                      ),
+                                      child: Markdown(
+                                        data: _selectedNote?.content ?? '',
+                                        selectable: true,
+                                      ),
+                                    ),
+                                  ),
+                          ),
                         ),
                       ),
                     ],
                   ),
-                ),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: TextField(
-                      controller: _noteContentController,
-                      decoration: const InputDecoration(
-                        border: OutlineInputBorder(),
-                      ),
-                      maxLines: null,
-                      expands: true,
-                      textAlignVertical: TextAlignVertical.top,
-                      onChanged: (value) {
-                        if (_selectedNote != null) {
-                          _updateSelectedNote(
-                            _noteTitleController.text,
-                            value,
-                          );
-                        }
-                      },
-                    ),
-                  ),
-                ),
-              ],
-            ),
           ),
         ],
       ),

@@ -12,10 +12,12 @@ dependencies:
   oktoast: ^3.3.2
   intl: ^0.17.0
   sqflite: ^2.0.0+4
-  sqflite_common_ffi: ^2.0.0
-  path: ^1.8.2
+  sqflite_common_ffi: ^2.3.2
+  path: ^1.8.3
   path_provider: ^2.0.11
   mask_text_input_formatter: ^2.4.0
+  markdown: ^7.1.2
+  flutter_markdown: ^0.6.18
 
 dev_dependencies:
   flutter_test:
@@ -24,3 +26,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/images/

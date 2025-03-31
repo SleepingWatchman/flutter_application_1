@@ -1,10 +1,12 @@
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import '../models/note.dart';
 import '../models/folder.dart';
 import '../models/schedule_entry.dart';
 import '../models/pinboard_note.dart';
 import '../models/connection.dart';
+import 'dart:convert';
 
 /// Класс для работы с базой данных, реализующий CRUD-операции для всех сущностей.
 class DatabaseHelper {
@@ -27,20 +29,34 @@ class DatabaseHelper {
       path,
       version: 1,
       onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
     );
   }
 
   Future<void> _onCreate(Database db, int version) async {
-    // Таблица заметок
+    // Создаем таблицу папок
     await db.execute('''
-      CREATE TABLE notes(
+      CREATE TABLE folders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        color INTEGER NOT NULL,
+        is_expanded INTEGER NOT NULL DEFAULT 1
+      )
+    ''');
+
+    // Создаем таблицу заметок
+    await db.execute('''
+      CREATE TABLE notes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         title TEXT NOT NULL,
         content TEXT,
+        folder_id INTEGER,
         created_at INTEGER,
         updated_at INTEGER,
-        folder_id INTEGER,
-        FOREIGN KEY (folder_id) REFERENCES folders (id)
+        images TEXT,
+        metadata TEXT,
+        content_json TEXT,
+        FOREIGN KEY (folder_id) REFERENCES folders (id) ON DELETE SET NULL
       )
     ''');
 
@@ -83,37 +99,78 @@ class DatabaseHelper {
         FOREIGN KEY (to_note_id) REFERENCES pinboard_notes (id)
       )
     ''');
+  }
 
-    // Таблица папок
-    await db.execute('''
-      CREATE TABLE folders(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        background_color INTEGER NOT NULL
-      )
-    ''');
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      // Добавляем новые колонки для версии 2
+      await db.execute('ALTER TABLE notes ADD COLUMN images TEXT');
+      await db.execute('ALTER TABLE notes ADD COLUMN metadata TEXT');
+      await db.execute('ALTER TABLE notes ADD COLUMN content_json TEXT');
+    }
   }
 
   // Методы для работы с заметками
   Future<int> insertNote(Note note) async {
     final db = await database;
-    return await db.insert('notes', note.toMap());
+    try {
+      final Map<String, dynamic> data = {
+        'title': note.title,
+        'content': note.content,
+        'folder_id': note.folderId,
+        'created_at': note.createdAt?.millisecondsSinceEpoch ?? DateTime.now().millisecondsSinceEpoch,
+        'updated_at': note.updatedAt?.millisecondsSinceEpoch ?? DateTime.now().millisecondsSinceEpoch,
+      };
+      return await db.insert('notes', data);
+    } catch (e) {
+      print('Ошибка при создании заметки: $e');
+      rethrow;
+    }
   }
 
   Future<List<Note>> getAllNotes() async {
     final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query('notes');
-    return List.generate(maps.length, (i) => Note.fromMap(maps[i]));
+    try {
+      final List<Map<String, dynamic>> maps = await db.query('notes');
+      return List.generate(maps.length, (i) {
+        // Создаем заметку из основных полей
+        return Note(
+          id: maps[i]['id'],
+          title: maps[i]['title'] ?? 'Без названия',
+          content: maps[i]['content'],
+          folderId: maps[i]['folder_id'],
+          createdAt: maps[i]['created_at'] != null 
+              ? DateTime.fromMillisecondsSinceEpoch(maps[i]['created_at'])
+              : null,
+          updatedAt: maps[i]['updated_at'] != null 
+              ? DateTime.fromMillisecondsSinceEpoch(maps[i]['updated_at'])
+              : null,
+        );
+      });
+    } catch (e) {
+      print('Ошибка при получении заметок: $e');
+      return [];
+    }
   }
 
   Future<void> updateNote(Note note) async {
     final db = await database;
-    await db.update(
-      'notes',
-      note.toMap(),
-      where: 'id = ?',
-      whereArgs: [note.id],
-    );
+    try {
+      await db.update(
+        'notes',
+        {
+          'title': note.title,
+          'content': note.content,
+          'folder_id': note.folderId,
+          'updated_at': DateTime.now().millisecondsSinceEpoch,
+        },
+        where: 'id = ?',
+        whereArgs: [note.id],
+      );
+    } catch (e) {
+      print('Ошибка при обновлении заметки: $e');
+      rethrow;
+    }
   }
 
   Future<void> deleteNote(int id) async {
@@ -163,7 +220,12 @@ class DatabaseHelper {
       where: 'folder_id = ?',
       whereArgs: [folderId],
     );
-    return List.generate(maps.length, (i) => Note.fromMap(maps[i]));
+    return List.generate(maps.length, (i) {
+      final noteJson = maps[i]['content_json'];
+      final note = Note.fromJson(noteJson);
+      note.id = maps[i]['id']; // Восстанавливаем ID из основной таблицы
+      return note;
+    });
   }
 
   // Методы для работы с расписанием
@@ -256,5 +318,19 @@ class DatabaseHelper {
       where: 'id = ?',
       whereArgs: [id],
     );
+  }
+
+  Future<List<Folder>> getAllFolders() async {
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query('folders');
+    return List.generate(maps.length, (i) {
+      return Folder.fromMap(maps[i]);
+    });
+  }
+
+  static Future<void> deleteDatabase() async {
+    final dbPath = await getDatabasesPath();
+    final path = p.join(dbPath, 'notes_app.db');
+    await databaseFactoryFfi.deleteDatabase(path);
   }
 } 

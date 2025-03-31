@@ -2,21 +2,24 @@ import 'package:flutter/material.dart';
 
 /// Модель папки
 class Folder {
-  int? id;
-  String name;
-  int backgroundColor; // хранится как int (ARGB)
-  
+  final int? id;
+  final String name;
+  bool isExpanded;
+  final Color color;
+
   Folder({
-    this.id, 
-    required this.name, 
-    required this.backgroundColor
+    this.id,
+    required this.name,
+    this.isExpanded = false,
+    this.color = Colors.blue,
   });
   
   Map<String, dynamic> toMap() {
     return {
       'id': id,
       'name': name,
-      'background_color': backgroundColor,
+      'is_expanded': isExpanded ? 1 : 0,
+      'color': color.value,
     };
   }
 
@@ -24,7 +27,8 @@ class Folder {
     return Folder(
       id: map['id'],
       name: map['name'],
-      backgroundColor: map['background_color'],
+      isExpanded: (map['is_expanded'] ?? 1) == 1,
+      color: Color(map['color'] ?? Colors.blue.value),
     );
   }
 } 

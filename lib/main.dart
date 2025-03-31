@@ -9,12 +9,39 @@ import 'screens/pinboard_screen.dart';
 
 /// Функция main: инициализация БД и запуск приложения
 void main() async {
-  sqfliteFfiInit();
-  databaseFactory = databaseFactoryFfi;
-  WidgetsFlutterBinding.ensureInitialized();
-  await DatabaseHelper().database;
-  await initializeDateFormatting('ru', null);
-  runApp(const NotesApp());
+  try {
+    // Инициализация Flutter
+    WidgetsFlutterBinding.ensureInitialized();
+    
+    // Инициализация базы данных
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+    
+    // Удаляем старую базу данных
+    await DatabaseHelper.deleteDatabase();
+    
+    // Инициализация локализации
+    await initializeDateFormatting('ru', null);
+    
+    // Инициализация базы данных
+    final dbHelper = DatabaseHelper();
+    await dbHelper.database;
+    
+    // Запуск приложения
+    runApp(const NotesApp());
+  } catch (e) {
+    print('Ошибка инициализации приложения: $e');
+    // Показываем ошибку пользователю
+    runApp(
+      MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: Text('Ошибка запуска приложения: $e'),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class NotesApp extends StatelessWidget {
@@ -44,9 +71,9 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
   final List<Widget> _widgetOptions = <Widget>[
-    ScheduleScreen(),
-    NotesScreen(),
-    PinboardScreen(),
+    const ScheduleScreen(),
+    const NotesScreen(),
+    const PinboardScreen(),
   ];
   
   void _onItemTapped(int index) {

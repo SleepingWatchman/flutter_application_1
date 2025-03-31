@@ -16,7 +16,7 @@ class Folder {
     return {
       'id': id,
       'name': name,
-      'backgroundColor': backgroundColor,
+      'background_color': backgroundColor,
     };
   }
 
@@ -24,7 +24,7 @@ class Folder {
     return Folder(
       id: map['id'],
       name: map['name'],
-      backgroundColor: map['backgroundColor'],
+      backgroundColor: map['background_color'],
     );
   }
 } 

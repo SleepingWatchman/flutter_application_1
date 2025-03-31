@@ -35,11 +35,12 @@ class DatabaseHelper {
     await db.execute('''
       CREATE TABLE notes(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT,
+        title TEXT NOT NULL,
         content TEXT,
         created_at INTEGER,
         updated_at INTEGER,
-        folder TEXT
+        folder_id INTEGER,
+        FOREIGN KEY (folder_id) REFERENCES folders (id)
       )
     ''');
 
@@ -87,8 +88,8 @@ class DatabaseHelper {
     await db.execute('''
       CREATE TABLE folders(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT,
-        backgroundColor INTEGER
+        name TEXT NOT NULL,
+        background_color INTEGER NOT NULL
       )
     ''');
   }
@@ -99,21 +100,70 @@ class DatabaseHelper {
     return await db.insert('notes', note.toMap());
   }
 
-  Future<List<Note>> getNotes() async {
+  Future<List<Note>> getAllNotes() async {
     final db = await database;
     final List<Map<String, dynamic>> maps = await db.query('notes');
     return List.generate(maps.length, (i) => Note.fromMap(maps[i]));
   }
 
-  Future<int> updateNote(Note note) async {
+  Future<void> updateNote(Note note) async {
     final db = await database;
-    return await db
-        .update('notes', note.toMap(), where: 'id = ?', whereArgs: [note.id]);
+    await db.update(
+      'notes',
+      note.toMap(),
+      where: 'id = ?',
+      whereArgs: [note.id],
+    );
   }
 
-  Future<int> deleteNote(int id) async {
+  Future<void> deleteNote(int id) async {
     final db = await database;
-    return await db.delete('notes', where: 'id = ?', whereArgs: [id]);
+    await db.delete(
+      'notes',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  // Методы для работы с папками
+  Future<List<Folder>> getFolders() async {
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query('folders');
+    return List.generate(maps.length, (i) => Folder.fromMap(maps[i]));
+  }
+
+  Future<int> insertFolder(Folder folder) async {
+    final db = await database;
+    return await db.insert('folders', folder.toMap());
+  }
+
+  Future<void> updateFolder(Folder folder) async {
+    final db = await database;
+    await db.update(
+      'folders',
+      folder.toMap(),
+      where: 'id = ?',
+      whereArgs: [folder.id],
+    );
+  }
+
+  Future<void> deleteFolder(int id) async {
+    final db = await database;
+    await db.delete(
+      'folders',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<List<Note>> getNotesByFolder(int folderId) async {
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query(
+      'notes',
+      where: 'folder_id = ?',
+      whereArgs: [folderId],
+    );
+    return List.generate(maps.length, (i) => Note.fromMap(maps[i]));
   }
 
   // Методы для работы с расписанием
@@ -206,71 +256,5 @@ class DatabaseHelper {
       where: 'id = ?',
       whereArgs: [id],
     );
-  }
-
-  // Методы для работы с папками
-  Future<int> insertFolder(Folder folder) async {
-    final db = await database;
-    return await db.insert('folders', folder.toMap());
-  }
-
-  Future<List<Folder>> getFolders() async {
-    final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query('folders');
-    return List.generate(maps.length, (i) => Folder.fromMap(maps[i]));
-  }
-
-  Future<int> updateFolder(Folder folder) async {
-    final db = await database;
-    return await db.update('folders', folder.toMap(),
-        where: 'id = ?', whereArgs: [folder.id]);
-  }
-
-  Future<int> deleteFolder(int id) async {
-    final db = await database;
-    return await db.delete('folders', where: 'id = ?', whereArgs: [id]);
-  }
-
-  Future<List<Note>> getNotesByFolder(int folderId) async {
-    final db = await database;
-    // Сначала получаем имя папки по ID
-    final List<Map<String, dynamic>> folderMaps = await db.query(
-      'folders',
-      where: 'id = ?',
-      whereArgs: [folderId],
-    );
-    
-    if (folderMaps.isEmpty) return [];
-    
-    final String folderName = folderMaps[0]['name'];
-    
-    // Затем получаем заметки по имени папки
-    final List<Map<String, dynamic>> maps = await db.query(
-      'notes',
-      where: 'folder = ?',
-      whereArgs: [folderName],
-    );
-    
-    return List.generate(maps.length, (i) {
-      return Note(
-        id: maps[i]['id'],
-        title: maps[i]['title'],
-        content: maps[i]['content'],
-        folder: maps[i]['folder'],
-      );
-    });
-  }
-
-  Future<List<Note>> getAllNotes() async {
-    final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query('notes');
-    return List.generate(maps.length, (i) {
-      return Note(
-        id: maps[i]['id'],
-        title: maps[i]['title'],
-        content: maps[i]['content'],
-        folder: maps[i]['folder'],
-      );
-    });
   }
 } 

@@ -4,14 +4,14 @@ import 'package:flutter/material.dart';
 class Note {
   int? id;
   String title;
-  String content;
-  String? folder;
+  String? content;
+  int? folderId;
   
   Note({
     this.id, 
-    this.title = 'Без названия', 
-    this.content = '', 
-    this.folder
+    required this.title, 
+    this.content, 
+    this.folderId
   });
   
   Map<String, dynamic> toMap() {
@@ -19,7 +19,7 @@ class Note {
       'id': id,
       'title': title,
       'content': content,
-      'folder': folder,
+      'folder_id': folderId,
     };
   }
 
@@ -28,7 +28,7 @@ class Note {
       id: map['id'],
       title: map['title'],
       content: map['content'],
-      folder: map['folder'],
+      folderId: map['folder_id'],
     );
   }
 } 

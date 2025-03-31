@@ -80,7 +80,7 @@ class _NotesScreenState extends State<NotesScreen> {
     Note newNote = Note(
       title: '',
       content: '',
-      folder: _selectedFolder?.id == _noFolderCategory.id ? null : _selectedFolder?.name,
+      folderId: _selectedFolder?.id == _noFolderCategory.id ? null : _selectedFolder?.id,
     );
     int id = await DatabaseHelper().insertNote(newNote);
     newNote.id = id;
@@ -115,15 +115,21 @@ class _NotesScreenState extends State<NotesScreen> {
     }
   }
 
-  void _updateSelectedNote(String title, String content, [String? folder]) async {
+  void _updateSelectedNote(String title, String content, [int? folderId]) async {
     if (_selectedNote != null) {
-      Note updatedNote = _selectedNote!;
-      updatedNote.title = title;
-      updatedNote.content = content;
-      updatedNote.folder = folder;
+      Note updatedNote = Note(
+        id: _selectedNote!.id,
+        title: title,
+        content: content,
+        folderId: folderId,
+      );
       await DatabaseHelper().updateNote(updatedNote);
       setState(() {
-        _notes[_notes.indexOf(updatedNote)] = updatedNote;
+        final index = _notes.indexWhere((note) => note.id == updatedNote.id);
+        if (index != -1) {
+          _notes[index] = updatedNote;
+          _selectedNote = updatedNote;
+        }
       });
     }
   }
@@ -202,8 +208,8 @@ class _NotesScreenState extends State<NotesScreen> {
       setState(() {
         _folders.removeAt(index);
         for (var note in _notes) {
-          if (note.folder == folderToDelete.name) {
-            note.folder = null;
+          if (note.folderId == folderToDelete.id) {
+            note.folderId = null;
             DatabaseHelper().updateNote(note);
           }
         }
@@ -283,16 +289,20 @@ class _NotesScreenState extends State<NotesScreen> {
 
   void _moveNoteToFolder(Note note, Folder folder) async {
     if (folder.id == _noFolderCategory.id) {
-      // Если перетаскиваем в папку "Без папки", то очищаем поле folder
-      note.folder = null;
-    } else if (note.folder != folder.name) {
-      // Если перетаскиваем в обычную папку
-      note.folder = folder.name;
+      note.folderId = null;
+    } else if (note.folderId != folder.id) {
+      note.folderId = folder.id;
     }
     
     await DatabaseHelper().updateNote(note);
     setState(() {
-      _notes[_notes.indexOf(note)] = note;
+      final index = _notes.indexWhere((n) => n.id == note.id);
+      if (index != -1) {
+        _notes[index] = note;
+        if (_selectedNote?.id == note.id) {
+          _selectedNote = note;
+        }
+      }
     });
   }
 
@@ -316,7 +326,7 @@ class _NotesScreenState extends State<NotesScreen> {
           // Всегда показываем виртуальную папку "Без папки"
           final isSelected = _selectedFolder?.id == _noFolderCategory.id;
           // Получаем заметки без папки
-          final notesWithoutFolder = _notes.where((note) => note.folder == null).toList();
+          final notesWithoutFolder = _notes.where((note) => note.folderId == null).toList();
           
           return Column(
             children: [
@@ -421,7 +431,7 @@ class _NotesScreenState extends State<NotesScreen> {
         final folder = _folders[folderIndex];
         final isSelected = _selectedFolder?.id == folder.id;
         // Фильтруем заметки по выбранной папке
-        final folderNotes = _notes.where((note) => note.folder == folder.name).toList();
+        final folderNotes = _notes.where((note) => note.folderId == folder.id).toList();
         
         return Column(
           children: [
@@ -550,6 +560,98 @@ class _NotesScreenState extends State<NotesScreen> {
     });
   }
 
+  void _editNote(Note note) {
+    final titleController = TextEditingController(text: note.title);
+    final contentController = TextEditingController(text: note.content);
+    int? selectedFolderId = note.folderId;
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: const Text('Редактировать заметку'),
+          content: SingleChildScrollView(
+            child: SizedBox(
+              width: 400,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: titleController,
+                    decoration: const InputDecoration(
+                      labelText: 'Заголовок',
+                      hintText: 'Введите заголовок',
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: contentController,
+                    decoration: const InputDecoration(
+                      labelText: 'Содержимое',
+                      hintText: 'Введите содержимое заметки',
+                    ),
+                    maxLines: 5,
+                  ),
+                  const SizedBox(height: 16),
+                  DropdownButtonFormField<int?>(
+                    value: selectedFolderId,
+                    decoration: const InputDecoration(
+                      labelText: 'Папка',
+                      hintText: 'Выберите папку',
+                    ),
+                    items: [
+                      DropdownMenuItem(
+                        value: null,
+                        child: Text(_noFolderCategory.name),
+                      ),
+                      ..._folders.map((folder) => DropdownMenuItem(
+                            value: folder.id,
+                            child: Text(folder.name),
+                          )),
+                    ],
+                    onChanged: (value) {
+                      setState(() {
+                        selectedFolderId = value;
+                      });
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Отмена'),
+            ),
+            TextButton(
+              onPressed: () async {
+                Note updatedNote = Note(
+                  id: note.id,
+                  title: titleController.text,
+                  content: contentController.text,
+                  folderId: selectedFolderId,
+                );
+                await DatabaseHelper().updateNote(updatedNote);
+                this.setState(() {
+                  final index = _notes.indexWhere((n) => n.id == note.id);
+                  if (index != -1) {
+                    _notes[index] = updatedNote;
+                    _selectedNote = updatedNote;
+                    _noteTitleController.text = updatedNote.title;
+                    _noteContentController.text = updatedNote.content ?? '';
+                  }
+                });
+                Navigator.pop(context);
+              },
+              child: const Text('Сохранить'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -638,8 +740,8 @@ class _NotesScreenState extends State<NotesScreen> {
                         },
                       ),
                       const SizedBox(height: 16),
-                      DropdownButtonFormField<String?>(
-                        value: _selectedNote?.folder,
+                      DropdownButtonFormField<int?>(
+                        value: _selectedNote?.folderId,
                         decoration: const InputDecoration(
                           labelText: 'Папка',
                           border: OutlineInputBorder(),
@@ -651,7 +753,7 @@ class _NotesScreenState extends State<NotesScreen> {
                           ),
                           ..._folders.map((folder) {
                             return DropdownMenuItem(
-                              value: folder.name,
+                              value: folder.id,
                               child: Text(folder.name),
                             );
                           }).toList(),

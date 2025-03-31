@@ -558,11 +558,12 @@ class _PinboardScreenState extends State<PinboardScreen> {
                 });
                 DatabaseHelper().updateConnection(connection).then((_) {
                   _loadPinboardData();
+                  Navigator.pop(context);
                   showCustomToastWithIcon(
                     "Связь успешно обновлена",
-                    accentColor: const Color.fromARGB(255, 255, 255, 0),
+                    accentColor: Colors.yellow,
                     fontSize: 14.0,
-                    icon: const Icon(Icons.edit, size: 20, color: Color.fromARGB(255, 255, 255, 0)),
+                    icon: const Icon(Icons.edit, size: 20, color: Colors.yellow),
                   );
                 });
               },
@@ -579,9 +580,9 @@ class _PinboardScreenState extends State<PinboardScreen> {
       _loadPinboardData();
       showCustomToastWithIcon(
         "Заметка успешно обновлена",
-        accentColor: const Color.fromARGB(255, 255, 255, 0),
+        accentColor: Colors.yellow,
         fontSize: 14.0,
-        icon: const Icon(Icons.edit, size: 20, color: Color.fromARGB(255, 255, 255, 0),),
+        icon: const Icon(Icons.edit, size: 20, color: Colors.yellow),
       );
     });
   }

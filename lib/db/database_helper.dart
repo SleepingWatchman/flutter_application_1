@@ -327,10 +327,4 @@ class DatabaseHelper {
       return Folder.fromMap(maps[i]);
     });
   }
-
-  static Future<void> deleteDatabase() async {
-    final dbPath = await getDatabasesPath();
-    final path = p.join(dbPath, 'notes_app.db');
-    await databaseFactoryFfi.deleteDatabase(path);
-  }
 } 

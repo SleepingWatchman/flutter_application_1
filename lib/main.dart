@@ -17,9 +17,6 @@ void main() async {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
     
-    // Удаляем старую базу данных
-    await DatabaseHelper.deleteDatabase();
-    
     // Инициализация локализации
     await initializeDateFormatting('ru', null);
     

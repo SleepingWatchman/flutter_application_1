@@ -7,10 +7,20 @@ import '../utils/toast_utils.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:oktoast/oktoast.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
+import 'package:file_picker/file_picker.dart';
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as path;
+import 'package:permission_handler/permission_handler.dart';
+import 'package:win32/win32.dart';
+import 'dart:ffi';
+import 'package:flutter_markdown/flutter_markdown.dart' show ElementBuilder;
+
 
 /// Экран заметок и папок с использованием БД для заметок
 class NotesScreen extends StatefulWidget {
-  const NotesScreen({Key? key}) : super(key: key);
+  const NotesScreen({super.key});
 
   @override
   _NotesScreenState createState() => _NotesScreenState();
@@ -28,6 +38,7 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
   Color _selectedColor = Colors.blue;
   final TextEditingController _noteTitleController = TextEditingController();
   final TextEditingController _noteContentController = TextEditingController();
+  final FocusNode _noteContentFocusNode = FocusNode();
   bool _isLoading = false;
   DateTime? _lastSave;
   
@@ -56,6 +67,7 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
   void dispose() {
     _noteTitleController.dispose();
     _noteContentController.dispose();
+    _noteContentFocusNode.dispose();
     super.dispose();
   }
 
@@ -844,6 +856,171 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
     });
   }
 
+  Widget _buildNoteEditor() {
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.grey),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Column(
+        children: [
+          // Панель инструментов
+          Container(
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: Colors.grey),
+              ),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.image),
+                  onPressed: _handleImageSelection,
+                  tooltip: 'Вставить изображение',
+                ),
+              ],
+            ),
+          ),
+          // Редактор
+          Expanded(
+            child: TextField(
+              controller: _noteContentController,
+              focusNode: _noteContentFocusNode,
+              maxLines: null,
+              expands: true,
+              autofocus: true,
+              decoration: const InputDecoration(
+                hintText: 'Содержание заметки (поддерживается Markdown). Нажмите Enter для новой строки. Нажмите на кнопку изображения для вставки.',
+                border: InputBorder.none,
+                contentPadding: EdgeInsets.all(8),
+              ),
+              onChanged: _updateNoteContent,
+              onSubmitted: (value) {
+                setState(() {
+                  _isEditing = false;
+                });
+              },
+              keyboardType: TextInputType.multiline,
+              textInputAction: TextInputAction.newline,
+              style: const TextStyle(
+                fontSize: 16,
+                height: 1.5,
+              ),
+              cursorColor: Colors.cyan,
+              enableInteractiveSelection: true,
+              showCursor: true,
+              readOnly: false,
+              onTapOutside: (event) {
+                setState(() {
+                  _isEditing = false;
+                });
+              },
+              onEditingComplete: () {
+                _debounceSave();
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _handleImageSelection() async {
+    try {
+      // Открываем диалог выбора файла
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        allowMultiple: false,
+      );
+
+      if (result == null) {
+        return;
+      }
+
+      final filePath = result.files.single.path;
+      if (filePath == null) {
+        showToast('Не удалось получить путь к файлу');
+        return;
+      }
+
+      final file = File(filePath);
+      if (!await file.exists()) {
+        showToast('Выбранный файл не существует');
+        return;
+      }
+
+      // Получаем директорию приложения
+      final appDir = await getApplicationDocumentsDirectory();
+      final imageDir = Directory(path.join(appDir.path, 'note_images'));
+      
+      if (!await imageDir.exists()) {
+        await imageDir.create(recursive: true);
+      }
+
+      // Копируем изображение
+      final fileName = 'image_${DateTime.now().millisecondsSinceEpoch}${path.extension(filePath)}';
+      final newFilePath = path.join(imageDir.path, fileName);
+      
+      await file.copy(newFilePath);
+
+      // Вставляем Markdown-ссылку
+      final text = _noteContentController.text;
+      final selection = _noteContentController.selection;
+      final beforeText = text.substring(0, selection.start);
+      final afterText = text.substring(selection.end);
+      
+      final imageMarkdown = '\n![Изображение]($newFilePath)\n';
+      
+      setState(() {
+        _noteContentController.text = beforeText + imageMarkdown + afterText;
+        _noteContentController.selection = TextSelection.collapsed(
+          offset: selection.start + imageMarkdown.length,
+        );
+      });
+
+      _updateNoteContent(_noteContentController.text);
+      showToast('Изображение успешно добавлено');
+    } catch (e) {
+      print('Ошибка при выборе изображения: $e');
+      showToast('Ошибка при выборе изображения');
+    }
+  }
+
+  Widget _buildMarkdownPreview(String content) {
+    return FutureBuilder<String>(
+      future: getApplicationDocumentsDirectory().then((dir) => dir.path),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        return Markdown(
+          data: content,
+          selectable: true,
+          imageDirectory: snapshot.data,
+          imageBuilder: (uri, title, alt) {
+            // Преобразуем URI в путь к файлу и исправляем экранирование
+            final filePath = uri.toString()
+                .replaceAll('file://', '')
+                .replaceAll('%5C', '\\')
+                .replaceAll('%2F', '/');
+            print('Попытка загрузки изображения: $filePath');
+            return Image.file(
+              File(filePath),
+              fit: BoxFit.contain,
+              errorBuilder: (context, error, stackTrace) {
+                print('Ошибка загрузки изображения: $error');
+                return const Text('Ошибка загрузки изображения');
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -939,54 +1116,112 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
                           onChanged: _updateNoteTitle,
                         ),
                       ),
+                      // Панель инструментов
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+                        decoration: BoxDecoration(
+                          border: Border(
+                            bottom: BorderSide(color: Colors.grey),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.image),
+                              onPressed: () {
+                                if (!_isEditing) {
+                                  setState(() {
+                                    _isEditing = true;
+                                  });
+                                }
+                                _handleImageSelection();
+                              },
+                              tooltip: 'Вставить изображение',
+                            ),
+                          ],
+                        ),
+                      ),
                       // Объединенный редактор/предпросмотр
                       Expanded(
-                        child: GestureDetector(
-                          onTap: () {
-                            setState(() {
-                              _isEditing = true;
-                            });
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.all(8.0),
-                            decoration: BoxDecoration(
-                              border: Border.all(color: Colors.grey),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: _isEditing
-                                ? Focus(
-                                    onFocusChange: (hasFocus) {
-                                      if (!hasFocus) {
-                                        setState(() {
-                                          _isEditing = false;
-                                        });
-                                      }
-                                    },
-                                    child: TextField(
-                                      controller: _noteContentController,
-                                      maxLines: null,
-                                      expands: true,
-                                      autofocus: true,
-                                      decoration: const InputDecoration(
-                                        hintText: 'Содержание заметки (поддерживается Markdown)',
-                                        border: InputBorder.none,
-                                      ),
-                                      onChanged: _updateNoteContent,
+                        child: Container(
+                          padding: const EdgeInsets.all(8.0),
+                          child: _isEditing
+                              ? Container(
+                                  decoration: BoxDecoration(
+                                    border: Border.all(color: Colors.grey),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: TextField(
+                                    controller: _noteContentController,
+                                    focusNode: _noteContentFocusNode,
+                                    maxLines: null,
+                                    expands: true,
+                                    autofocus: true,
+                                    decoration: const InputDecoration(
+                                      hintText: 'Содержание заметки (поддерживается Markdown). Нажмите Enter для новой строки. Нажмите на кнопку изображения для вставки.',
+                                      border: InputBorder.none,
+                                      contentPadding: EdgeInsets.all(8),
                                     ),
-                                  )
-                                : SingleChildScrollView(
-                                    child: ConstrainedBox(
-                                      constraints: BoxConstraints(
-                                        minHeight: 0,
-                                        maxHeight: MediaQuery.of(context).size.height,
-                                      ),
-                                      child: Markdown(
-                                        data: _selectedNote?.content ?? '',
-                                        selectable: true,
+                                    onChanged: _updateNoteContent,
+                                    onSubmitted: (value) {
+                                      setState(() {
+                                        _isEditing = false;
+                                      });
+                                    },
+                                    keyboardType: TextInputType.multiline,
+                                    textInputAction: TextInputAction.newline,
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      height: 1.5,
+                                    ),
+                                    cursorColor: Colors.cyan,
+                                    enableInteractiveSelection: true,
+                                    showCursor: true,
+                                    readOnly: false,
+                                    onTapOutside: (event) {
+                                      setState(() {
+                                        _isEditing = false;
+                                      });
+                                    },
+                                    onEditingComplete: () {
+                                      _debounceSave();
+                                    },
+                                  ),
+                                )
+                              : GestureDetector(
+                                  onTap: () {
+                                    setState(() {
+                                      _isEditing = true;
+                                    });
+                                  },
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      border: Border.all(color: Colors.grey),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: SingleChildScrollView(
+                                      padding: const EdgeInsets.all(8),
+                                      child: ConstrainedBox(
+                                        constraints: BoxConstraints(
+                                          minHeight: 0,
+                                          maxHeight: MediaQuery.of(context).size.height,
+                                        ),
+                                        child: _selectedNote?.content?.isEmpty ?? true
+                                            ? const Center(
+                                                child: Text(
+                                                  'Содержание заметки (поддерживается Markdown). Нажмите Enter для новой строки. Для вставки изображения перетащите его сюда.',
+                                                  style: TextStyle(
+                                                    color: Colors.grey,
+                                                    fontSize: 16,
+                                                  ),
+                                                ),
+                                              )
+                                            : _buildMarkdownPreview(_selectedNote?.content ?? ''),
                                       ),
                                     ),
                                   ),
-                          ),
+                                ),
                         ),
                       ),
                     ],

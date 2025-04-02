@@ -39,6 +39,7 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
   final TextEditingController _noteTitleController = TextEditingController();
   final TextEditingController _noteContentController = TextEditingController();
   final FocusNode _noteContentFocusNode = FocusNode();
+  final FocusNode _noteTitleFocusNode = FocusNode();
   bool _isLoading = false;
   DateTime? _lastSave;
   
@@ -68,6 +69,7 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
     _noteTitleController.dispose();
     _noteContentController.dispose();
     _noteContentFocusNode.dispose();
+    _noteTitleFocusNode.dispose();
     super.dispose();
   }
 
@@ -141,57 +143,36 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
     );
   }
 
-  Future<void> _addNote() async {
-    if (!mounted) return;
-    
+  Future<void> _createNote() async {
     try {
-      // Если папка не выбрана или выбрана "Без папки", создаем заметку без папки
-      final folderId = (_selectedFolder == null || _selectedFolder?.id == _noFolderCategory.id) 
-          ? null 
-          : _selectedFolder?.id;
-      
-      final note = Note(
-        title: '',  // Пустой заголовок
+      final now = DateTime.now();
+      final newNote = Note(
+        title: 'Новая заметка',
         content: '',
-        folderId: folderId,
-        createdAt: DateTime.now(),
-        updatedAt: DateTime.now(),
+        folderId: _selectedFolder?.id,
+        createdAt: now,
+        updatedAt: now,
       );
-      
-      final id = await _dbHelper.insertNote(note);
+
+      final id = await _dbHelper.insertNote(newNote);
       if (!mounted) return;
-      
-      note.id = id;
+
       setState(() {
-        _notes.insert(0, note);
+        _selectedNote = newNote.copyWith(id: id);
+        _notes.add(_selectedNote!);
+        _noteTitleController.text = _selectedNote!.title;
+        _noteContentController.text = _selectedNote!.content ?? '';
         _updateNotesCache();
-        _selectedNote = note;
-        _noteTitleController.text = note.title;
-        _noteContentController.text = '';
-        
-        // Если папка не выбрана, автоматически выбираем "Без папки"
-        if (_selectedFolder == null) {
-          _selectedFolder = _noFolderCategory;
-          _isFolderExpanded = true;
-        }
       });
-      
-      showCustomToastWithIcon(
-        "Заметка успешно создана",
-        accentColor: Colors.green,
-        fontSize: 14.0,
-        icon: const Icon(Icons.check, size: 20, color: Colors.green),
+
+      // Фокусируемся на заголовке
+      _noteTitleFocusNode.requestFocus();
+      _noteTitleController.selection = TextSelection.fromPosition(
+        TextPosition(offset: _noteTitleController.text.length),
       );
     } catch (e) {
       print('Ошибка создания заметки: $e');
-      if (mounted) {
-        showCustomToastWithIcon(
-          "Ошибка создания заметки",
-          accentColor: Colors.amber,
-          fontSize: 14.0,
-          icon: const Icon(Icons.warning, size: 20, color: Colors.amber),
-        );
-      }
+      showToast('Ошибка создания заметки');
     }
   }
 
@@ -199,6 +180,10 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
     if (note.id == null) return;
     
     try {
+      // Удаляем изображения из базы данных
+      await _dbHelper.deleteImagesForNote(note.id!);
+      
+      // Удаляем заметку
       await _dbHelper.deleteNote(note.id!);
       if (!mounted) return;
       
@@ -241,7 +226,22 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
       await _dbHelper.updateNote(note);
       if (!mounted) return;
       
-      await _loadData();
+      setState(() {
+        // Обновляем заметку в списке
+        final index = _notes.indexWhere((n) => n.id == note.id);
+        if (index != -1) {
+          _notes[index] = note;
+        }
+        
+        // Если это текущая выбранная заметка, обновляем её
+        if (_selectedNote?.id == note.id) {
+          _selectedNote = note;
+        }
+        
+        // Обновляем кэш заметок
+        _updateNotesCache();
+      });
+      
       showToast('Заметка обновлена');
     } catch (e) {
       print('Ошибка обновления заметки: $e');
@@ -326,8 +326,15 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
         // Обновляем заметки и их кэш
         for (var note in _notes) {
           if (note.folderId == folderToDelete.id) {
-            note.folderId = null;
-            _dbHelper.updateNote(note);
+            final updatedNote = note.copyWith(
+              folderId: null,
+              updatedAt: DateTime.now(),
+            );
+            _dbHelper.updateNote(updatedNote);
+            final noteIndex = _notes.indexWhere((n) => n.id == note.id);
+            if (noteIndex != -1) {
+              _notes[noteIndex] = updatedNote;
+            }
           }
         }
         _updateNotesCache(); // Обновляем кэш после изменения заметок
@@ -418,35 +425,37 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
     }
   }
 
-  void _moveNoteToFolder(Note note, Folder folder) async {
-    if (folder.id == _noFolderCategory.id) {
-      note.folderId = null;
-    } else if (note.folderId != folder.id) {
-      note.folderId = folder.id;
-    }
+  Future<void> _moveNoteToFolder(Note note, Folder? folder) async {
+    if (note.id == null) return;
     
     try {
-      await _dbHelper.updateNote(note);
-      if (!mounted) return;
+      // Обновляем локальный объект заметки
+      final updatedNote = note.copyWith(
+        folderId: folder?.id,
+        updatedAt: DateTime.now(),
+      );
+      
+      // Обновляем заметку в базе данных
+      await _dbHelper.updateNote(updatedNote);
       
       setState(() {
+        // Обновляем заметку в списке
         final index = _notes.indexWhere((n) => n.id == note.id);
         if (index != -1) {
-          _notes[index] = note;
-          _updateNotesCache();
-          if (_selectedNote?.id == note.id) {
-            _selectedNote = note;
-          }
+          _notes[index] = updatedNote;
         }
+        
+        // Если это текущая выбранная заметка, обновляем её
+        if (_selectedNote?.id == note.id) {
+          _selectedNote = updatedNote;
+        }
+        
+        // Обновляем кэш заметок
+        _updateNotesCache();
       });
     } catch (e) {
-      print('Ошибка при перемещении заметки: $e');
-      showCustomToastWithIcon(
-        "Ошибка при перемещении заметки",
-        accentColor: Colors.amber,
-        fontSize: 14.0,
-        icon: const Icon(Icons.warning, size: 20, color: Colors.amber),
-      );
+      print('Ошибка перемещения заметки: $e');
+      showToast('Ошибка перемещения заметки');
     }
   }
 
@@ -779,11 +788,14 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
             ),
             TextButton(
               onPressed: () async {
+                final now = DateTime.now();
                 Note updatedNote = Note(
                   id: note.id,
                   title: titleController.text,
                   content: contentController.text,
                   folderId: selectedFolderId,
+                  createdAt: note.createdAt,
+                  updatedAt: now,
                 );
                 await _updateNote(updatedNote);
                 this.setState(() {
@@ -821,28 +833,72 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
       _noteTitleController.text = note.title;
       _noteContentController.text = note.content ?? '';
     });
+    
+    // Загружаем изображения для выбранной заметки
+    _loadImagesForNote(note);
   }
 
-  void _updateNoteContent(String content) {
+  Future<void> _updateNoteContent(String content) async {
     if (_selectedNote == null) return;
     
-    setState(() {
-      _selectedNote!.content = content;
-      _selectedNote!.updatedAt = DateTime.now();
-    });
-    
-    _debounceSave();
+    try {
+      // Обновляем локальный объект заметки
+      final updatedNote = _selectedNote!.copyWith(
+        title: _noteTitleController.text,
+        content: content,
+        updatedAt: DateTime.now(),
+      );
+      
+      // Обновляем заметку в базе данных
+      await _dbHelper.updateNote(updatedNote);
+      
+      setState(() {
+        _selectedNote = updatedNote;
+        
+        // Обновляем заметку в списке
+        final index = _notes.indexWhere((n) => n.id == _selectedNote!.id);
+        if (index != -1) {
+          _notes[index] = _selectedNote!;
+        }
+        
+        // Обновляем кэш заметок
+        _updateNotesCache();
+      });
+    } catch (e) {
+      print('Ошибка обновления заметки: $e');
+      showToast('Ошибка обновления заметки');
+    }
   }
 
-  void _updateNoteTitle(String title) {
+  Future<void> _updateNoteTitle(String title) async {
     if (_selectedNote == null) return;
     
-    setState(() {
-      _selectedNote!.title = title;
-      _selectedNote!.updatedAt = DateTime.now();
-    });
-    
-    _debounceSave();
+    try {
+      // Обновляем локальный объект заметки
+      final updatedNote = _selectedNote!.copyWith(
+        title: title,
+        updatedAt: DateTime.now(),
+      );
+      
+      // Обновляем заметку в базе данных
+      await _dbHelper.updateNote(updatedNote);
+      
+      setState(() {
+        _selectedNote = updatedNote;
+        
+        // Обновляем заметку в списке
+        final index = _notes.indexWhere((n) => n.id == _selectedNote!.id);
+        if (index != -1) {
+          _notes[index] = _selectedNote!;
+        }
+        
+        // Обновляем кэш заметок
+        _updateNotesCache();
+      });
+    } catch (e) {
+      print('Ошибка обновления заголовка: $e');
+      showToast('Ошибка обновления заголовка');
+    }
   }
 
   void _debounceSave() {
@@ -965,13 +1021,22 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
       
       await file.copy(newFilePath);
 
-      // Вставляем Markdown-ссылку
+      // Сохраняем информацию об изображении в базе данных
+      if (_selectedNote?.id != null) {
+        await _dbHelper.insertImage(
+          _selectedNote!.id!,
+          fileName,
+          newFilePath,
+        );
+      }
+
+      // Вставляем Markdown-ссылку с именем файла
       final text = _noteContentController.text;
       final selection = _noteContentController.selection;
       final beforeText = text.substring(0, selection.start);
       final afterText = text.substring(selection.end);
       
-      final imageMarkdown = '\n![Изображение]($newFilePath)\n';
+      final imageMarkdown = '\n![Изображение]($fileName)\n';
       
       setState(() {
         _noteContentController.text = beforeText + imageMarkdown + afterText;
@@ -988,33 +1053,123 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
     }
   }
 
+  Future<void> _loadImagesForNote(Note note) async {
+    if (note.id == null) return;
+    
+    try {
+      final images = await _dbHelper.getImagesForNote(note.id!);
+      print('Загружено изображений для заметки ${note.id}: ${images.length}');
+      
+      // Проверяем существование файлов изображений
+      for (var image in images) {
+        final file = File(image['file_path']);
+        if (!await file.exists()) {
+          print('Файл изображения не найден: ${image['file_path']}');
+          // Удаляем запись из базы данных, если файл не существует
+          await _dbHelper.deleteImage(image['id']);
+        }
+      }
+    } catch (e) {
+      print('Ошибка при загрузке изображений: $e');
+    }
+  }
+
   Widget _buildMarkdownPreview(String content) {
-    return FutureBuilder<String>(
-      future: getApplicationDocumentsDirectory().then((dir) => dir.path),
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: _selectedNote?.id != null ? _dbHelper.getImagesForNote(_selectedNote!.id!) : Future.value([]),
       builder: (context, snapshot) {
-        if (!snapshot.hasData) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
+
+        if (snapshot.hasError) {
+          print('Ошибка при загрузке изображений: ${snapshot.error}');
+          return const Center(child: Text('Ошибка при загрузке изображений'));
+        }
+
+        final images = snapshot.data ?? [];
+        final imageMap = {
+          for (var image in images)
+            image['file_name'] as String: image['image_data'] as Uint8List
+        };
 
         return Markdown(
           data: content,
           selectable: true,
-          imageDirectory: snapshot.data,
           imageBuilder: (uri, title, alt) {
-            // Преобразуем URI в путь к файлу и исправляем экранирование
-            final filePath = uri.toString()
-                .replaceAll('file://', '')
-                .replaceAll('%5C', '\\')
-                .replaceAll('%2F', '/');
-            print('Попытка загрузки изображения: $filePath');
-            return Image.file(
-              File(filePath),
-              fit: BoxFit.contain,
-              errorBuilder: (context, error, stackTrace) {
-                print('Ошибка загрузки изображения: $error');
-                return const Text('Ошибка загрузки изображения');
-              },
-            );
+            try {
+              // Получаем имя файла из URI
+              final fileName = uri.pathSegments.last;
+              final imageData = imageMap[fileName];
+              
+              if (imageData == null) {
+                print('Изображение не найдено в базе данных: $fileName');
+                return Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[200],
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.broken_image, color: Colors.grey[600]),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Изображение не найдено',
+                        style: TextStyle(color: Colors.grey[600]),
+                      ),
+                    ],
+                  ),
+                );
+              }
+              
+              return Image.memory(
+                imageData,
+                fit: BoxFit.contain,
+                errorBuilder: (context, error, stackTrace) {
+                  print('Ошибка отображения изображения: $error');
+                  return Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.red[100],
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.error_outline, color: Colors.red[900]),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Ошибка загрузки изображения',
+                          style: TextStyle(color: Colors.red[900]),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              );
+            } catch (e) {
+              print('Ошибка обработки изображения: $e');
+              return Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.orange[100],
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.warning, color: Colors.orange[900]),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Ошибка обработки изображения',
+                      style: TextStyle(color: Colors.orange[900]),
+                    ),
+                  ],
+                ),
+              );
+            }
           },
         );
       },
@@ -1053,7 +1208,7 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
                       ),
                       IconButton(
                         icon: const Icon(Icons.add),
-                        onPressed: _addNote,
+                        onPressed: _createNote,
                       ),
                       IconButton(
                         icon: const Icon(Icons.create_new_folder),

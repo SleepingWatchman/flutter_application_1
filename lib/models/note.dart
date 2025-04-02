@@ -4,22 +4,22 @@ import 'dart:convert';
 
 /// Модель заметки
 class Note {
-  int? id;
-  String title;
-  String? content;
-  int? folderId;
-  DateTime? createdAt;
-  DateTime? updatedAt;
+  final int? id;
+  final String title;
+  final String? content;
+  final int? folderId;
+  final DateTime createdAt;
+  final DateTime updatedAt;
   List<String>? images; // Список путей к изображениям
   Map<String, dynamic>? metadata; // Дополнительные метаданные
   
   Note({
-    this.id, 
-    required this.title, 
-    this.content, 
+    this.id,
+    required this.title,
+    this.content,
     this.folderId,
-    this.createdAt,
-    this.updatedAt,
+    required this.createdAt,
+    required this.updatedAt,
     this.images,
     this.metadata,
   });
@@ -37,8 +37,8 @@ class Note {
       'title': title,
       'content': content,
       'folder_id': folderId,
-      'created_at': createdAt?.millisecondsSinceEpoch,
-      'updated_at': updatedAt?.millisecondsSinceEpoch,
+      'created_at': createdAt.toIso8601String(),
+      'updated_at': updatedAt.toIso8601String(),
       'images': images,
       'metadata': metadata,
     };
@@ -48,15 +48,11 @@ class Note {
   factory Note.fromMap(Map<String, dynamic> map) {
     return Note(
       id: map['id'],
-      title: map['title'] ?? 'Без названия',
+      title: map['title'],
       content: map['content'],
       folderId: map['folder_id'],
-      createdAt: map['created_at'] != null 
-          ? DateTime.fromMillisecondsSinceEpoch(map['created_at'])
-          : null,
-      updatedAt: map['updated_at'] != null 
-          ? DateTime.fromMillisecondsSinceEpoch(map['updated_at'])
-          : null,
+      createdAt: DateTime.parse(map['created_at']),
+      updatedAt: DateTime.parse(map['updated_at']),
       images: List<String>.from(map['images'] ?? []),
       metadata: map['metadata'],
     );
@@ -74,19 +70,22 @@ class Note {
 
   // Копирование заметки с новыми данными
   Note copyWith({
+    int? id,
     String? title,
     String? content,
     int? folderId,
+    DateTime? createdAt,
+    DateTime? updatedAt,
     List<String>? images,
     Map<String, dynamic>? metadata,
   }) {
     return Note(
-      id: this.id,
+      id: id ?? this.id,
       title: title ?? this.title,
       content: content ?? this.content,
       folderId: folderId ?? this.folderId,
-      createdAt: this.createdAt,
-      updatedAt: DateTime.now(),
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
       images: images ?? this.images,
       metadata: metadata ?? this.metadata,
     );

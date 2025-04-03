@@ -24,14 +24,30 @@ class DatabaseHelper {
   }
 
   Future<Database> _initDatabase() async {
-    final databasePath = await getDatabasesPath();
-    final path = p.join(databasePath, 'notes_app.db');
-    return await openDatabase(
-      path,
-      version: 3,
-      onCreate: _onCreate,
-      onUpgrade: _onUpgrade,
-    );
+    try {
+      // Получаем путь к исполняемому файлу приложения
+      final exePath = Platform.resolvedExecutable;
+      final appDir = Directory(p.dirname(exePath));
+      final dbDir = Directory(p.join(appDir.path, 'database'));
+      
+      // Создаем директорию для базы данных, если она не существует
+      if (!await dbDir.exists()) {
+        await dbDir.create(recursive: true);
+      }
+      
+      final path = p.join(dbDir.path, 'notes_app.db');
+      
+      // Открываем базу данных
+      return await openDatabase(
+        path,
+        version: 3,
+        onCreate: _onCreate,
+        onUpgrade: _onUpgrade,
+      );
+    } catch (e) {
+      print('Критическая ошибка при создании базы данных: $e');
+      rethrow;
+    }
   }
 
   Future<void> _onCreate(Database db, int version) async {

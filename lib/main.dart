@@ -22,7 +22,12 @@ void main() async {
     
     // Инициализация базы данных
     final dbHelper = DatabaseHelper();
-    await dbHelper.database;
+    final db = await dbHelper.database;
+    
+    // Проверяем, что база данных создана и доступна
+    if (db == null) {
+      throw Exception('Не удалось инициализировать базу данных');
+    }
     
     // Запуск приложения
     runApp(const NotesApp());

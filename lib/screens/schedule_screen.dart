@@ -470,7 +470,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                         "Интервал успешно обновлён",
                         accentColor: Colors.yellow,
                         fontSize: 14.0,
-                        icon: const Icon(Icons.error_outline,
+                        icon: const Icon(Icons.edit,
                             size: 20, color: Colors.yellow),
                       );
                       Navigator.of(outerContext).pop();

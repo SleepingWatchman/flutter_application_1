@@ -557,7 +557,11 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
             ),
             title: Text(folder.name),
             selected: isSelected,
-            selectedTileColor: Colors.blue.withOpacity(0.1),
+            selectedTileColor: isSelected ? Colors.cyan.withOpacity(0.15) : Colors.transparent, // Полупрозрачный cyan для выбранной папки
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+              side: isSelected ? const BorderSide(color: Colors.cyan, width: 2) : BorderSide.none,
+            ),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -623,7 +627,11 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
                         leading: const Icon(Icons.note),
                         title: Text(note.title.isEmpty ? 'Новая заметка' : note.title),
                         selected: _selectedNote?.id == note.id,
-                        selectedTileColor: Colors.blue.withOpacity(0.1),
+                        selectedTileColor: _selectedNote?.id == note.id ? Colors.cyan.withOpacity(0.15) : Colors.transparent, // Полупрозрачный cyan для выбранной заметки
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          side: _selectedNote?.id == note.id ? const BorderSide(color: Colors.cyan, width: 2) : BorderSide.none,
+                        ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
@@ -1310,14 +1318,16 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
                                           maxHeight: MediaQuery.of(context).size.height,
                                         ),
                                         child: _selectedNote?.content?.isEmpty ?? true
-                                            ? const Center(
-                                                child: Text(
+                                            ? Column(
+                                                children: [
+                                                  Text(
                                                   'Содержание заметки (поддерживается Markdown). Нажмите Enter для новой строки. Для вставки изображения перетащите его сюда.',
                                                   style: TextStyle(
                                                     color: Colors.grey,
                                                     fontSize: 16,
                                                   ),
                                                 ),
+                                                ]
                                               )
                                             : _buildMarkdownPreview(_selectedNote?.content ?? ''),
                                       ),

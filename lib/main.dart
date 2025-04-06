@@ -3,12 +3,13 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:oktoast/oktoast.dart';
 import 'package:provider/provider.dart';
-import 'db/database_helper.dart';
 import 'screens/schedule_screen.dart';
 import 'screens/notes_screen.dart';
 import 'screens/pinboard_screen.dart';
 import 'screens/profile/account_screen.dart';
 import 'providers/auth_provider.dart';
+import 'providers/backup_provider.dart';
+import 'db/database_helper.dart';
 
 /// Функция main: инициализация БД и запуск приложения
 void main() async {
@@ -57,6 +58,10 @@ class NotesApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => AuthProvider()),
+        ChangeNotifierProxyProvider<AuthProvider, BackupProvider>(
+          create: (context) => BackupProvider(context.read<AuthProvider>()),
+          update: (context, auth, previous) => BackupProvider(auth),
+        ),
       ],
       child: OKToast(
         child: MaterialApp(

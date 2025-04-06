@@ -1,6 +1,7 @@
 using System.Text;
 using AuthServer.Data;
 using AuthServer.Services;
+using NotesServer.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -17,6 +18,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 
 // Register AuthService
 builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IBackupService, BackupService>();
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -25,9 +27,10 @@ builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
-        policy.AllowAnyOrigin()
+        policy.SetIsOriginAllowed(_ => true) // Allow any origin
               .AllowAnyMethod()
-              .AllowAnyHeader();
+              .AllowAnyHeader()
+              .AllowCredentials();
     });
 });
 
@@ -36,13 +39,35 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     {
         options.TokenValidationParameters = new TokenValidationParameters
         {
-            ValidateIssuer = false,
-            ValidateAudience = false,
+            ValidateIssuer = true,
+            ValidateAudience = true,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
+            ValidIssuer = builder.Configuration["Jwt:Issuer"],
+            ValidAudience = builder.Configuration["Jwt:Audience"],
             IssuerSigningKey = new SymmetricSecurityKey(
-                Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"] ?? 
-                    throw new Exception("JWT key not configured")))
+                Encoding.ASCII.GetBytes(builder.Configuration["Jwt:Key"] ?? 
+                    throw new Exception("JWT key not configured"))),
+            ClockSkew = TimeSpan.Zero
+        };
+
+        options.Events = new JwtBearerEvents
+        {
+            OnAuthenticationFailed = context =>
+            {
+                Console.WriteLine("Authentication failed: " + context.Exception.Message);
+                return Task.CompletedTask;
+            },
+            OnTokenValidated = context =>
+            {
+                Console.WriteLine("Token validated successfully");
+                return Task.CompletedTask;
+            },
+            OnChallenge = context =>
+            {
+                Console.WriteLine("Token challenge: " + context.Error);
+                return Task.CompletedTask;
+            }
         };
     });
 
@@ -68,6 +93,13 @@ var uploadsPath = Path.Combine(app.Environment.ContentRootPath, "uploads");
 if (!Directory.Exists(uploadsPath))
 {
     Directory.CreateDirectory(uploadsPath);
+}
+
+// Create backups directory if it doesn't exist
+var backupsPath = Path.Combine(app.Environment.ContentRootPath, "backups");
+if (!Directory.Exists(backupsPath))
+{
+    Directory.CreateDirectory(backupsPath);
 }
 
 // Configure the HTTP request pipeline.

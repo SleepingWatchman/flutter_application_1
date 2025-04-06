@@ -6,11 +6,14 @@ class AuthProvider with ChangeNotifier {
   final AuthService _authService = AuthService();
   UserModel? _user;
   bool _isLoading = false;
+  String? _error;
 
   UserModel? get user => _user;
   bool get isLoading => _isLoading;
   bool get isAuthenticated => _user != null;
   String? get token => _authService.token;
+  String? get error => _error;
+  AuthService get authService => _authService;
 
   AuthProvider() {
     _init();

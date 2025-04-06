@@ -1,0 +1,19 @@
+{
+  "Version": 1,
+  "Hash": "OhXPYHjvObp6SDiPgb3IuHlrvDxWO4pnCrG8Z8v7oV0=",
+  "Source": "NotesServer",
+  "BasePath": "_content/NotesServer",
+  "Mode": "Default",
+  "ManifestType": "Build",
+  "ReferencedProjectsConfiguration": [],
+  "DiscoveryPatterns": [
+    {
+      "Name": "NotesServer\\wwwroot",
+      "Source": "NotesServer",
+      "ContentRoot": "C:\\Users\\maxim\\Desktop\\Flutter Projects\\flutter_application_1\\NotesServer\\wwwroot\\",
+      "BasePath": "_content/NotesServer",
+      "Pattern": "**"
+    }
+  ],
+  "Assets": []
+}

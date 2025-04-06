@@ -122,38 +122,18 @@ class DatabaseHelper {
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
-      // Проверяем существование колонок перед их добавлением
-      var tableInfo = await db.rawQuery('PRAGMA table_info(notes)');
-      var columns = tableInfo.map((col) => col['name'] as String).toList();
-
-      if (!columns.contains('images')) {
-        await db.execute('ALTER TABLE notes ADD COLUMN images TEXT');
-      }
-      if (!columns.contains('metadata')) {
-        await db.execute('ALTER TABLE notes ADD COLUMN metadata TEXT');
-      }
-      if (!columns.contains('content_json')) {
-        await db.execute('ALTER TABLE notes ADD COLUMN content_json TEXT');
-      }
-    }
-    
-    // Миграция таблицы изображений
-    if (oldVersion < 3) {
-      // Удаляем старую таблицу
-      await db.execute('DROP TABLE IF EXISTS images');
-      // Создаем новую таблицу с правильной структурой
+      // Создаем таблицу для изображений, если её нет
       await _createImagesTable(db);
     }
   }
 
   Future<void> _createImagesTable(Database db) async {
     await db.execute('''
-      CREATE TABLE IF NOT EXISTS images (
+      CREATE TABLE IF NOT EXISTS note_images (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         note_id INTEGER NOT NULL,
         file_name TEXT NOT NULL,
-        image_data TEXT NOT NULL,
-        created_at TEXT NOT NULL,
+        file_path TEXT NOT NULL,
         FOREIGN KEY (note_id) REFERENCES notes (id) ON DELETE CASCADE
       )
     ''');
@@ -162,16 +142,13 @@ class DatabaseHelper {
   // Методы для работы с заметками
   Future<int> insertNote(Note note) async {
     final db = await database;
-    return await db.insert(
-      'notes',
-      {
-        'title': note.title,
-        'content': note.content,
-        'folder_id': note.folderId,
-        'created_at': note.createdAt.toIso8601String(),
-        'updated_at': note.updatedAt.toIso8601String(),
-      },
-    );
+    try {
+      final id = await db.insert('notes', note.toMap());
+      return id;
+    } catch (e) {
+      print('Ошибка при вставке заметки в базу данных: $e');
+      rethrow;
+    }
   }
 
   Future<List<Note>> getAllNotes() async {
@@ -179,15 +156,7 @@ class DatabaseHelper {
     try {
       final List<Map<String, dynamic>> maps = await db.query('notes');
       return List.generate(maps.length, (i) {
-        // Создаем заметку из основных полей
-        return Note(
-          id: maps[i]['id'],
-          title: maps[i]['title'] ?? 'Без названия',
-          content: maps[i]['content'],
-          folderId: maps[i]['folder_id'],
-          createdAt: DateTime.parse(maps[i]['created_at'] ?? DateTime.now().toIso8601String()),
-          updatedAt: DateTime.parse(maps[i]['updated_at'] ?? DateTime.now().toIso8601String()),
-        );
+        return Note.fromMap(maps[i]);
       });
     } catch (e) {
       print('Ошибка при получении заметок: $e');
@@ -201,12 +170,7 @@ class DatabaseHelper {
     final db = await database;
     await db.update(
       'notes',
-      {
-        'title': note.title,
-        'content': note.content,
-        'folder_id': note.folderId,
-        'updated_at': note.updatedAt.toIso8601String(),
-      },
+      note.toMap(),
       where: 'id = ?',
       whereArgs: [note.id],
     );
@@ -277,6 +241,12 @@ class DatabaseHelper {
     final db = await database;
     final List<Map<String, dynamic>> maps =
         await db.query('schedule', where: 'date = ?', whereArgs: [date]);
+    return List.generate(maps.length, (i) => ScheduleEntry.fromMap(maps[i]));
+  }
+
+  Future<List<ScheduleEntry>> getAllScheduleEntries() async {
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query('schedule');
     return List.generate(maps.length, (i) => ScheduleEntry.fromMap(maps[i]));
   }
 
@@ -368,100 +338,52 @@ class DatabaseHelper {
   }
 
   // Методы для работы с изображениями
-  Future<List<Map<String, dynamic>>> getImagesForNote(int noteId) async {
+  Future<List<Map<String, dynamic>>> getImagesForNote(int id) async {
     final db = await database;
-    try {
-      final List<Map<String, dynamic>> images = await db.query(
-        'images',
-        where: 'note_id = ?',
-        whereArgs: [noteId],
-      );
-      
-      // Конвертируем base64 обратно в байты
-      return images.map((image) {
-        try {
-          final imageData = image['image_data'];
-          if (imageData == null) {
-            print('Данные изображения отсутствуют для записи: ${image['id']}');
-            return null;
-          }
-          
-          final base64Image = imageData as String;
-          final bytes = base64Decode(base64Image);
-          return {
-            ...image,
-            'image_data': bytes,
-          };
-        } catch (e) {
-          print('Ошибка при обработке изображения ${image['id']}: $e');
-          return null;
-        }
-      }).where((image) => image != null).cast<Map<String, dynamic>>().toList();
-    } catch (e) {
-      print('Ошибка при получении изображений из базы данных: $e');
-      return [];
-    }
+    return await db.query(
+      'note_images',
+      where: 'note_id = ?',
+      whereArgs: [id],
+    );
   }
 
   Future<void> insertImage(int noteId, String fileName, String filePath) async {
     final db = await database;
-    try {
-      final file = File(filePath);
-      if (!await file.exists()) {
-        print('Файл не существует: $filePath');
-        return;
-      }
-
-      // Читаем файл как байты и конвертируем в base64
-      final bytes = await file.readAsBytes();
-      if (bytes.isEmpty) {
-        print('Файл пуст: $filePath');
-        return;
-      }
-
-      final base64Image = base64Encode(bytes);
-      
-      await db.insert('images', {
+    await db.insert(
+      'note_images',
+      {
         'note_id': noteId,
         'file_name': fileName,
-        'image_data': base64Image,
-        'created_at': DateTime.now().toIso8601String(),
-      });
-
-      print('Изображение успешно сохранено: $fileName');
-    } catch (e) {
-      print('Ошибка при сохранении изображения: $e');
-      rethrow;
-    }
+        'file_path': filePath,
+      },
+    );
   }
 
-  Future<void> deleteImage(int imageId) async {
+  Future<void> deleteImage(int id) async {
     final db = await database;
-    try {
-      final result = await db.delete(
-        'images',
-        where: 'id = ?',
-        whereArgs: [imageId],
-      );
-      print('Удалено изображений: $result');
-    } catch (e) {
-      print('Ошибка при удалении изображения: $e');
-      rethrow;
-    }
+    await db.delete(
+      'note_images',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
-  Future<void> deleteImagesForNote(int noteId) async {
+  Future<void> deleteImagesForNote(int id) async {
     final db = await database;
-    try {
-      final result = await db.delete(
-        'images',
-        where: 'note_id = ?',
-        whereArgs: [noteId],
-      );
-      print('Удалено изображений для заметки $noteId: $result');
-    } catch (e) {
-      print('Ошибка при удалении изображений для заметки: $e');
-      rethrow;
-    }
+    await db.delete(
+      'note_images',
+      where: 'note_id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<void> clearDatabase() async {
+    final db = await database;
+    await db.delete('notes');
+    await db.delete('folders');
+    await db.delete('note_images');
+    await db.delete('pinboard_notes');
+    await db.delete('connections');
+    await db.delete('schedule');
   }
 } 

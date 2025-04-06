@@ -26,8 +26,7 @@ class Note {
   
   // Преобразование в HTML для отображения
   String toHtml() {
-    if (content == null) return '';
-    return md.markdownToHtml(content!);
+    return md.markdownToHtml(content ?? '');
   }
 
   // Преобразование в JSON для хранения
@@ -47,13 +46,13 @@ class Note {
   // Создание из JSON
   factory Note.fromMap(Map<String, dynamic> map) {
     return Note(
-      id: map['id'],
-      title: map['title'],
-      content: map['content'],
-      folderId: map['folder_id'],
-      createdAt: DateTime.parse(map['created_at']),
-      updatedAt: DateTime.parse(map['updated_at']),
-      images: List<String>.from(map['images'] ?? []),
+      id: map['id'] as int?,
+      title: map['title'] as String,
+      content: map['content'] as String?,
+      folderId: map['folder_id'] as int?,
+      createdAt: DateTime.parse(map['created_at'] as String),
+      updatedAt: DateTime.parse(map['updated_at'] as String),
+      images: map['images'] != null ? List<String>.from(map['images']) : null,
       metadata: map['metadata'],
     );
   }

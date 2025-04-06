@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/backup_provider.dart';
 import 'edit_profile_screen.dart';
 import '../auth/login_screen.dart';
 
@@ -22,8 +23,8 @@ class AccountScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<AuthProvider>(
-      builder: (context, auth, _) {
+    return Consumer2<AuthProvider, BackupProvider>(
+      builder: (context, auth, backup, _) {
         final user = auth.user;
         
         return Scaffold(
@@ -61,6 +62,46 @@ class AccountScreen extends StatelessWidget {
                       );
                     },
                     child: const Text('Редактировать профиль'),
+                  ),
+                  const SizedBox(height: 8),
+                  ElevatedButton(
+                    onPressed: () async {
+                      try {
+                        await backup.uploadBackup();
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Резервная копия успешно загружена')),
+                          );
+                        }
+                      } catch (e) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Ошибка загрузки резервной копии: $e')),
+                          );
+                        }
+                      }
+                    },
+                    child: const Text('Загрузить резервную копию'),
+                  ),
+                  const SizedBox(height: 8),
+                  ElevatedButton(
+                    onPressed: () async {
+                      try {
+                        await backup.downloadBackup();
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Резервная копия успешно восстановлена')),
+                          );
+                        }
+                      } catch (e) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Ошибка восстановления резервной копии: $e')),
+                          );
+                        }
+                      }
+                    },
+                    child: const Text('Восстановить резервную копию'),
                   ),
                   const SizedBox(height: 8),
                   ElevatedButton(

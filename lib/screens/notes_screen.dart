@@ -1053,7 +1053,7 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
         final images = snapshot.data ?? [];
         final imageMap = {
           for (var image in images)
-            image['file_name'] as String: image['image_data'] as Uint8List
+            image['file_name'] as String: image['file_path'] as String
         };
 
         return Markdown(
@@ -1063,9 +1063,9 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
             try {
               // Получаем имя файла из URI
               final fileName = uri.pathSegments.last;
-              final imageData = imageMap[fileName];
+              final imagePath = imageMap[fileName];
               
-              if (imageData == null) {
+              if (imagePath == null) {
                 print('Изображение не найдено в базе данных: $fileName');
                 return Container(
                   padding: const EdgeInsets.all(8),
@@ -1086,48 +1086,79 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
                   ),
                 );
               }
-              
-              return Image.memory(
-                imageData,
-                fit: BoxFit.contain,
-                errorBuilder: (context, error, stackTrace) {
-                  print('Ошибка отображения изображения: $error');
-                  return Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.red[100],
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.error_outline, color: Colors.red[900]),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Ошибка загрузки изображения',
-                          style: TextStyle(color: Colors.red[900]),
+
+              // Загружаем изображение из файла
+              return FutureBuilder<File>(
+                future: Future.value(File(imagePath)),
+                builder: (context, fileSnapshot) {
+                  if (fileSnapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+
+                  if (fileSnapshot.hasError || !fileSnapshot.hasData || !fileSnapshot.data!.existsSync()) {
+                    return Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[200],
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.broken_image, color: Colors.grey[600]),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Ошибка загрузки изображения',
+                            style: TextStyle(color: Colors.grey[600]),
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+
+                  return Image.file(
+                    fileSnapshot.data!,
+                    fit: BoxFit.contain,
+                    errorBuilder: (context, error, stackTrace) {
+                      print('Ошибка при отображении изображения: $error');
+                      return Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[200],
+                          borderRadius: BorderRadius.circular(4),
                         ),
-                      ],
-                    ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.broken_image, color: Colors.grey[600]),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Ошибка отображения',
+                              style: TextStyle(color: Colors.grey[600]),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
                   );
                 },
               );
             } catch (e) {
-              print('Ошибка обработки изображения: $e');
+              print('Ошибка при обработке изображения: $e');
               return Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: Colors.orange[100],
+                  color: Colors.grey[200],
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.warning, color: Colors.orange[900]),
+                    Icon(Icons.broken_image, color: Colors.grey[600]),
                     const SizedBox(width: 8),
                     Text(
-                      'Ошибка обработки изображения',
-                      style: TextStyle(color: Colors.orange[900]),
+                      'Ошибка обработки',
+                      style: TextStyle(color: Colors.grey[600]),
                     ),
                   ],
                 ),

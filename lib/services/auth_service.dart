@@ -1,16 +1,19 @@
 import 'dart:convert';
+import 'dart:async';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/user_model.dart';
 
 class AuthService {
-  static const String baseUrl = 'http://localhost:5294/api/auth';
+  static const String baseUrl = 'http://127.0.0.1:5294/api/auth';
   String? _token;
   UserModel? _currentUser;
   late Future<SharedPreferences> _prefs;
+  final _userController = StreamController<UserModel?>.broadcast();
 
   UserModel? get currentUser => _currentUser;
   String? get token => _token;
+  Stream<UserModel?> get userStream => _userController.stream;
 
   AuthService() {
     _prefs = SharedPreferences.getInstance();
@@ -44,6 +47,8 @@ class AuthService {
       } else {
         await prefs.remove('user_data');
       }
+      
+      _userController.add(_currentUser);
     } catch (e) {
       print('Error saving data: $e');
     }
@@ -158,7 +163,7 @@ class AuthService {
     }
   }
 
-  Stream<UserModel?> get userStream async* {
-    yield _currentUser;
+  void dispose() {
+    _userController.close();
   }
 } 

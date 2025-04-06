@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter/services.dart';
+import 'dart:io' show Platform, exit;
 import '../../providers/auth_provider.dart';
 import '../../providers/backup_provider.dart';
 import 'edit_profile_screen.dart';
@@ -92,6 +94,47 @@ class AccountScreen extends StatelessWidget {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(content: Text('Резервная копия успешно восстановлена')),
                           );
+                          
+                          // Если требуется перезагрузка, показываем диалог
+                          if (backup.needsReload) {
+                            if (context.mounted) {
+                              showDialog(
+                                context: context,
+                                barrierDismissible: false,
+                                builder: (context) => AlertDialog(
+                                  title: const Text('Перезагрузка требуется'),
+                                  content: const Text('Для корректного отображения данных необходимо перезапустить приложение. Приложение будет закрыто, и вам нужно будет запустить его снова вручную.'),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () {
+                                        // Сбрасываем флаг перезагрузки
+                                        backup.resetReloadFlag();
+                                        Navigator.of(context).pop();
+                                      },
+                                      child: const Text('Позже'),
+                                    ),
+                                    TextButton(
+                                      onPressed: () {
+                                        // Перезапускаем приложение
+                                        Navigator.of(context).pop();
+                                        
+                                        // Безопасный способ перезапуска приложения
+                                        if (Platform.isWindows) {
+                                          // На Windows используем exit(0), чтобы закрыть приложение
+                                          // Пользователь может запустить его снова вручную
+                                          exit(0);
+                                        } else {
+                                          // На других платформах используем SystemNavigator
+                                          SystemNavigator.pop();
+                                        }
+                                      },
+                                      child: const Text('Закрыть сейчас'),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }
+                          }
                         }
                       } catch (e) {
                         if (context.mounted) {

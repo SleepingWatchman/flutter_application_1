@@ -18,9 +18,8 @@ class CalendarGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now();
-    final firstDayOfMonth = DateTime(now.year, now.month, 1);
-    final lastDayOfMonth = DateTime(now.year, now.month + 1, 0);
+    final firstDayOfMonth = DateTime(selectedDate.year, selectedDate.month, 1);
+    final lastDayOfMonth = DateTime(selectedDate.year, selectedDate.month + 1, 0);
     final daysInMonth = lastDayOfMonth.day;
     final startingWeekday = firstDayOfMonth.weekday;
     final weeks = ((daysInMonth + startingWeekday - 1) / 7).ceil();
@@ -33,12 +32,26 @@ class CalendarGrid extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
+              IconButton(
+                icon: const Icon(Icons.chevron_left, color: Colors.cyan),
+                onPressed: () {
+                  final newDate = DateTime(selectedDate.year, selectedDate.month - 1, 1);
+                  onDateSelected(newDate);
+                },
+              ),
               Text(
-                DateFormat('MMMM yyyy', 'ru').format(now),
+                DateFormat('MMMM yyyy', 'ru').format(selectedDate),
                 style: const TextStyle(
                   fontSize: 24,
                   fontWeight: FontWeight.bold,
                 ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.chevron_right, color: Colors.cyan),
+                onPressed: () {
+                  final newDate = DateTime(selectedDate.year, selectedDate.month + 1, 1);
+                  onDateSelected(newDate);
+                },
               ),
             ],
           ),
@@ -77,27 +90,27 @@ class CalendarGrid extends StatelessWidget {
                 final isCurrentMonth = day > 0 && day <= daysInMonth;
                 final isToday = isCurrentMonth &&
                     day == DateTime.now().day &&
-                    now.month == DateTime.now().month &&
-                    now.year == DateTime.now().year;
+                    selectedDate.month == DateTime.now().month &&
+                    selectedDate.year == DateTime.now().year;
                 final isSelected = isCurrentMonth &&
                     day == selectedDate.day &&
-                    now.month == selectedDate.month &&
-                    now.year == selectedDate.year;
+                    selectedDate.month == selectedDate.month &&
+                    selectedDate.year == selectedDate.year;
                 final isHighlighted = highlightedDate != null &&
                     isCurrentMonth &&
                     day == highlightedDate!.day &&
-                    now.month == highlightedDate!.month &&
-                    now.year == highlightedDate!.year;
+                    selectedDate.month == highlightedDate!.month &&
+                    selectedDate.year == highlightedDate!.year;
 
                 return isCurrentMonth
                     ? GestureDetector(
                         onTap: () {
-                          final selectedDay = DateTime(now.year, now.month, day);
+                          final selectedDay = DateTime(selectedDate.year, selectedDate.month, day);
                           // If this date is already highlighted, open it directly
                           if (highlightedDate != null && 
                               day == highlightedDate!.day && 
-                              now.month == highlightedDate!.month && 
-                              now.year == highlightedDate!.year) {
+                              selectedDate.month == highlightedDate!.month && 
+                              selectedDate.year == highlightedDate!.year) {
                             onDateSelected(selectedDay);
                           } else if (onDateHighlighted != null) {
                             // Otherwise, highlight it

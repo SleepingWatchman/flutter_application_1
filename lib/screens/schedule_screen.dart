@@ -20,6 +20,7 @@ class ScheduleScreen extends StatefulWidget {
 class _ScheduleScreenState extends State<ScheduleScreen> {
   DateTime? _selectedDate; // Если null – показываем календарь
   DateTime? _highlightedDate; // Дата, выбранная первым кликом
+  DateTime _currentMonth = DateTime.now(); // Текущий отображаемый месяц
   List<ScheduleEntry> _schedule = [];
   int? _selectedIndex;
 
@@ -29,6 +30,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     // При запуске ни один день не выбран – отображается календарь.
     _selectedDate = null;
     _highlightedDate = null;
+    _currentMonth = DateTime.now();
   }
 
   // Вызывается при первом клике на день в календарной сетке
@@ -536,8 +538,16 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       return Scaffold(
         appBar: AppBar(title: const Text("Расписание")),
         body: CalendarGrid(
-          selectedDate: DateTime.now(),
-          onDateSelected: _onDateSelected,
+          selectedDate: _currentMonth,
+          onDateSelected: (date) {
+            if (date.month != _currentMonth.month) {
+              setState(() {
+                _currentMonth = date;
+              });
+            } else {
+              _onDateSelected(date);
+            }
+          },
           highlightedDate: _highlightedDate,
           onDateHighlighted: _onDateHighlighted,
         ),

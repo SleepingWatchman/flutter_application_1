@@ -22,7 +22,7 @@ class ScheduleEntry {
       'time': time,
       'date': date,
       'note': note,
-      'dynamicFields': dynamicFieldsJson,
+      'dynamic_fields_json': dynamicFieldsJson,
     };
   }
 
@@ -32,7 +32,7 @@ class ScheduleEntry {
       time: map['time'],
       date: map['date'],
       note: map['note'],
-      dynamicFieldsJson: map['dynamicFields'],
+      dynamicFieldsJson: map['dynamic_fields_json'],
     );
   }
 } 

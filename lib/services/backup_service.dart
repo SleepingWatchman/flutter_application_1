@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import '../models/note.dart';
 import '../models/folder.dart';
@@ -15,7 +16,7 @@ class BackupService {
 
   BackupService(this._authProvider);
 
-  Future<Map<String, dynamic>> createBackup() async {
+  Future<String> createBackup() async {
     try {
       print('Начало создания резервной копии...');
       
@@ -42,7 +43,16 @@ class BackupService {
       for (var note in notes) {
         if (note.id != null) {
           final noteImages = await _dbHelper.getImagesForNote(note.id!);
-          images.addAll(noteImages);
+          for (var image in noteImages) {
+            final imageData = await _dbHelper.getImageData(image['id'] as int);
+            if (imageData != null) {
+              images.add({
+                'note_id': image['note_id'],
+                'file_name': image['file_name'],
+                'image_data': base64Encode(imageData),
+              });
+            }
+          }
         }
       }
       print('Получено изображений: ${images.length}');
@@ -92,20 +102,22 @@ class BackupService {
       };
 
       print('Резервная копия создана успешно');
-      return backupData;
+      return jsonEncode(backupData);
     } catch (e) {
       print('Ошибка при создании резервной копии: $e');
       rethrow;
     }
   }
 
-  Future<void> restoreFromBackup(Map<String, dynamic> backupData) async {
+  Future<void> restoreFromBackup(String backupJson) async {
     try {
       print('Начало восстановления из резервной копии...');
       
       // Очищаем текущую базу данных
       await _dbHelper.clearDatabase();
       print('База данных очищена');
+
+      final backupData = jsonDecode(backupJson);
 
       // Восстанавливаем папки
       if (backupData['folders'] != null) {
@@ -189,10 +201,11 @@ class BackupService {
       // Восстанавливаем изображения
       if (backupData['images'] != null) {
         for (var imageData in backupData['images']) {
+          final imageBytes = base64Decode(imageData['image_data'] as String);
           await _dbHelper.insertImage(
             imageData['note_id'] as int,
             imageData['file_name'] as String,
-            imageData['file_path'] as String,
+            imageBytes,
           );
         }
         print('Восстановлено изображений: ${backupData['images'].length}');
@@ -220,7 +233,7 @@ class BackupService {
       print('Authorization: Bearer $token');
 
       final backupData = await createBackup();
-      print('Данные для загрузки: ${jsonEncode(backupData)}');
+      print('Данные для загрузки: $backupData');
 
       final response = await http.post(
         Uri.parse('$_baseUrl/upload'),
@@ -228,7 +241,7 @@ class BackupService {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
         },
-        body: jsonEncode(backupData),
+        body: backupData,
       );
 
       print('Ответ сервера: ${response.statusCode}');
@@ -268,10 +281,7 @@ class BackupService {
         throw Exception('Ошибка при загрузке резервной копии: ${response.statusCode}');
       }
 
-      final responseData = jsonDecode(response.body);
-      print('Данные для восстановления: ${jsonEncode(responseData)}');
-
-      await restoreFromBackup(responseData);
+      await restoreFromBackup(response.body);
       
       print('Резервная копия успешно загружена с сервера и восстановлена');
     } catch (e) {

@@ -8,6 +8,8 @@ import '../models/pinboard_note.dart';
 import '../models/connection.dart';
 import 'dart:convert';
 import 'dart:io';
+import 'package:sqflite/sqflite.dart';
+import 'dart:typed_data';
 
 /// Класс для работы с базой данных, реализующий CRUD-операции для всех сущностей.
 class DatabaseHelper {
@@ -133,7 +135,7 @@ class DatabaseHelper {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         note_id INTEGER NOT NULL,
         file_name TEXT NOT NULL,
-        file_path TEXT NOT NULL,
+        image_data BLOB NOT NULL,
         FOREIGN KEY (note_id) REFERENCES notes (id) ON DELETE CASCADE
       )
     ''');
@@ -347,14 +349,14 @@ class DatabaseHelper {
     );
   }
 
-  Future<void> insertImage(int noteId, String fileName, String filePath) async {
+  Future<void> insertImage(int noteId, String fileName, Uint8List imageData) async {
     final db = await database;
     await db.insert(
       'note_images',
       {
         'note_id': noteId,
         'file_name': fileName,
-        'file_path': filePath,
+        'image_data': imageData,
       },
     );
   }
@@ -375,6 +377,19 @@ class DatabaseHelper {
       where: 'note_id = ?',
       whereArgs: [id],
     );
+  }
+
+  Future<Uint8List?> getImageData(int imageId) async {
+    final db = await database;
+    final List<Map<String, dynamic>> result = await db.query(
+      'note_images',
+      columns: ['image_data'],
+      where: 'id = ?',
+      whereArgs: [imageId],
+    );
+    
+    if (result.isEmpty) return null;
+    return result.first['image_data'] as Uint8List;
   }
 
   Future<void> clearDatabase() async {

@@ -960,26 +960,16 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
         return;
       }
 
-      // Получаем директорию приложения
-      final appDir = await getApplicationDocumentsDirectory();
-      final imageDir = Directory(path.join(appDir.path, 'note_images'));
-      
-      if (!await imageDir.exists()) {
-        await imageDir.create(recursive: true);
-      }
-
-      // Копируем изображение
+      // Читаем файл как байты
+      final imageBytes = await file.readAsBytes();
       final fileName = 'image_${DateTime.now().millisecondsSinceEpoch}${path.extension(filePath)}';
-      final newFilePath = path.join(imageDir.path, fileName);
-      
-      await file.copy(newFilePath);
 
       // Сохраняем информацию об изображении в базе данных
       if (_selectedNote?.id != null) {
         await _dbHelper.insertImage(
           _selectedNote!.id!,
           fileName,
-          newFilePath,
+          imageBytes,
         );
       }
 
@@ -1022,16 +1012,6 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
     try {
       final images = await _dbHelper.getImagesForNote(note.id!);
       print('Загружено изображений для заметки ${note.id}: ${images.length}');
-      
-      // Проверяем существование файлов изображений
-      for (var image in images) {
-        final file = File(image['file_path']);
-        if (!await file.exists()) {
-          print('Файл изображения не найден: ${image['file_path']}');
-          // Удаляем запись из базы данных, если файл не существует
-          await _dbHelper.deleteImage(image['id']);
-        }
-      }
     } catch (e) {
       print('Ошибка при загрузке изображений: $e');
     }
@@ -1051,51 +1031,33 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
         }
 
         final images = snapshot.data ?? [];
-        final imageMap = {
-          for (var image in images)
-            image['file_name'] as String: image['file_path'] as String
-        };
+        final imageMap = <String, Uint8List>{};
 
-        return Markdown(
-          data: content,
-          selectable: true,
-          imageBuilder: (uri, title, alt) {
-            try {
-              // Получаем имя файла из URI
-              final fileName = uri.pathSegments.last;
-              final imagePath = imageMap[fileName];
-              
-              if (imagePath == null) {
-                print('Изображение не найдено в базе данных: $fileName');
-                return Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.grey[200],
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.broken_image, color: Colors.grey[600]),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Изображение не найдено',
-                        style: TextStyle(color: Colors.grey[600]),
-                      ),
-                    ],
-                  ),
-                );
+        return FutureBuilder<void>(
+          future: Future.wait(
+            images.map((image) async {
+              final imageData = await _dbHelper.getImageData(image['id'] as int);
+              if (imageData != null) {
+                imageMap[image['file_name'] as String] = imageData;
               }
+            }),
+          ),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
 
-              // Загружаем изображение из файла
-              return FutureBuilder<File>(
-                future: Future.value(File(imagePath)),
-                builder: (context, fileSnapshot) {
-                  if (fileSnapshot.connectionState == ConnectionState.waiting) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-
-                  if (fileSnapshot.hasError || !fileSnapshot.hasData || !fileSnapshot.data!.existsSync()) {
+            return Markdown(
+              data: content,
+              selectable: true,
+              imageBuilder: (uri, title, alt) {
+                try {
+                  // Получаем имя файла из URI
+                  final fileName = uri.pathSegments.last;
+                  final imageData = imageMap[fileName];
+                  
+                  if (imageData == null) {
+                    print('Изображение не найдено в базе данных: $fileName');
                     return Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
@@ -1108,7 +1070,7 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
                           Icon(Icons.broken_image, color: Colors.grey[600]),
                           const SizedBox(width: 8),
                           Text(
-                            'Ошибка загрузки изображения',
+                            'Изображение не найдено',
                             style: TextStyle(color: Colors.grey[600]),
                           ),
                         ],
@@ -1116,8 +1078,8 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
                     );
                   }
 
-                  return Image.file(
-                    fileSnapshot.data!,
+                  return Image.memory(
+                    imageData,
                     fit: BoxFit.contain,
                     errorBuilder: (context, error, stackTrace) {
                       print('Ошибка при отображении изображения: $error');
@@ -1141,29 +1103,29 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
                       );
                     },
                   );
-                },
-              );
-            } catch (e) {
-              print('Ошибка при обработке изображения: $e');
-              return Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.grey[200],
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.broken_image, color: Colors.grey[600]),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Ошибка обработки',
-                      style: TextStyle(color: Colors.grey[600]),
+                } catch (e) {
+                  print('Ошибка при обработке изображения: $e');
+                  return Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[200],
+                      borderRadius: BorderRadius.circular(4),
                     ),
-                  ],
-                ),
-              );
-            }
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.broken_image, color: Colors.grey[600]),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Ошибка обработки',
+                          style: TextStyle(color: Colors.grey[600]),
+                        ),
+                      ],
+                    ),
+                  );
+                }
+              },
+            );
           },
         );
       },

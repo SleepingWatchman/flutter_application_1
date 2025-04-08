@@ -35,7 +35,7 @@ public class FolderData
     public string Name { get; set; } = null!;
 
     [JsonPropertyName("color")]
-    public string Color { get; set; } = null!;
+    public string Color { get; set; } = "FF424242";
 
     [JsonPropertyName("isExpanded")]
     public bool IsExpanded { get; set; }
@@ -66,6 +66,9 @@ public class NoteData
 
     [JsonPropertyName("metadata")]
     public Dictionary<string, string>? Metadata { get; set; }
+
+    [JsonPropertyName("content_json")]
+    public string? ContentJson { get; set; }
 }
 
 public class ScheduleEntryData
@@ -103,8 +106,14 @@ public class PinboardNoteData
     [JsonPropertyName("positionY")]
     public double PositionY { get; set; }
 
+    [JsonPropertyName("width")]
+    public double Width { get; set; } = 200.0;
+
+    [JsonPropertyName("height")]
+    public double Height { get; set; } = 150.0;
+
     [JsonPropertyName("backgroundColor")]
-    public long BackgroundColor { get; set; }
+    public double BackgroundColor { get; set; }
 
     [JsonPropertyName("icon")]
     public string Icon { get; set; } = string.Empty;
@@ -136,6 +145,6 @@ public class ImageData
     [JsonPropertyName("file_name")]
     public string FileName { get; set; } = null!;
 
-    [JsonPropertyName("file_path")]
-    public string FilePath { get; set; } = null!;
+    [JsonPropertyName("image_data")]
+    public string Base64Data { get; set; } = null!;
 } 

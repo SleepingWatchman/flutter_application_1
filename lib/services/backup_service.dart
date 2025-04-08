@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
+import 'package:flutter/material.dart';
 import '../models/note.dart';
 import '../models/folder.dart';
 import '../models/schedule_entry.dart';
@@ -42,6 +43,7 @@ class BackupService {
       // Собираем информацию об изображениях для всех заметок
       for (var note in notes) {
         if (note.id != null) {
+          // Получаем изображения из базы данных
           final noteImages = await _dbHelper.getImagesForNote(note.id!);
           for (var image in noteImages) {
             final imageData = await _dbHelper.getImageData(image['id'] as int);
@@ -53,6 +55,27 @@ class BackupService {
               });
             }
           }
+          
+          // Также проверяем изображения в content_json
+          if (note.content_json != null) {
+            try {
+              final contentJson = jsonDecode(note.content_json!);
+              if (contentJson['images'] != null) {
+                for (var imagePath in contentJson['images']) {
+                  final imageData = await _dbHelper.getImageDataByPath(imagePath);
+                  if (imageData != null) {
+                    images.add({
+                      'note_id': note.id,
+                      'file_name': imagePath.split('/').last,
+                      'image_data': base64Encode(imageData),
+                    });
+                  }
+                }
+              }
+            } catch (e) {
+              print('Ошибка при обработке content_json: $e');
+            }
+          }
         }
       }
       print('Получено изображений: ${images.length}');
@@ -61,7 +84,7 @@ class BackupService {
         'folders': folders.map((folder) => {
           'id': folder.id,
           'name': folder.name,
-          'color': folder.color,
+          'color': folder.color.value.toRadixString(16),
           'isExpanded': folder.isExpanded,
         }).toList(),
         'notes': notes.map((note) => {
@@ -73,6 +96,7 @@ class BackupService {
           'updatedAt': note.updatedAt.toIso8601String(),
           'images': note.images,
           'metadata': note.metadata,
+          'content_json': note.content_json,
         }).toList(),
         'schedule': scheduleEntries.map((entry) => {
           'id': entry.id,
@@ -81,21 +105,27 @@ class BackupService {
           'note': entry.note,
           'dynamicFieldsJson': entry.dynamicFieldsJson,
         }).toList(),
-        'pinboardNotes': pinboardNotes.map((note) => {
-          'id': note.id,
-          'title': note.title,
-          'content': note.content,
-          'positionX': note.posX,
-          'positionY': note.posY,
-          'backgroundColor': note.backgroundColor,
-          'icon': note.icon,
+        'pinboardNotes': pinboardNotes.map((note) {
+          print('Сохранение заметки на доске: ${note.title}');
+          print('Данные заметки: id=${note.id}, posX=${note.posX}, posY=${note.posY}, width=${note.width}, height=${note.height}, backgroundColor=${note.backgroundColor}');
+          return {
+            'id': note.id,
+            'title': note.title,
+            'content': note.content,
+            'positionX': note.posX,
+            'positionY': note.posY,
+            'width': note.width,
+            'height': note.height,
+            'backgroundColor': note.backgroundColor.toDouble(),
+            'icon': note.icon,
+          };
         }).toList(),
         'connections': connections.map((conn) => {
           'id': conn.id,
           'fromId': conn.fromId,
           'toId': conn.toId,
           'name': conn.name,
-          'connectionColor': conn.connectionColor,
+          'connectionColor': conn.connectionColor.toRadixString(16),
         }).toList(),
         'images': images,
         'lastModified': DateTime.now().toIso8601String(),
@@ -125,7 +155,7 @@ class BackupService {
           final folder = Folder(
             id: folderData['id'],
             name: folderData['name'],
-            color: folderData['color'],
+            color: Color(int.parse(folderData['color'], radix: 16)),
             isExpanded: folderData['isExpanded'] ?? true,
           );
           await _dbHelper.insertFolder(folder);
@@ -136,6 +166,18 @@ class BackupService {
       // Восстанавливаем заметки
       if (backupData['notes'] != null) {
         for (var noteData in backupData['notes']) {
+          // Получаем изображения для заметки
+          final noteImages = (backupData['images'] as List?)
+              ?.where((img) => img['note_id'] == noteData['id'])
+              .map((img) => img['file_name'] as String)
+              .toList() ?? [];
+          
+          // Создаем JSON с информацией об изображениях
+          final contentJson = {
+            'content': noteData['content'],
+            'images': noteImages,
+          };
+          
           final note = Note(
             id: noteData['id'] as int?,
             title: noteData['title'],
@@ -143,10 +185,25 @@ class BackupService {
             folderId: noteData['folderId'],
             createdAt: DateTime.parse(noteData['createdAt']),
             updatedAt: DateTime.parse(noteData['updatedAt']),
-            images: noteData['images'] != null ? List<String>.from(noteData['images']) : null,
+            images: noteImages,
             metadata: noteData['metadata'],
+            content_json: jsonEncode(contentJson),
           );
           await _dbHelper.insertNote(note);
+          
+          // Сохраняем изображения для заметки
+          if (note.id != null) {
+            for (var imageData in (backupData['images'] as List?)
+                ?.where((img) => img['note_id'] == note.id)
+                .toList() ?? []) {
+              final imageBytes = base64Decode(imageData['image_data'] as String);
+              await _dbHelper.insertImage(
+                note.id!,
+                imageData['file_name'] as String,
+                imageBytes,
+              );
+            }
+          }
         }
         print('Восстановлено заметок: ${backupData['notes'].length}');
       }
@@ -169,16 +226,22 @@ class BackupService {
       // Восстанавливаем заметки на доске
       if (backupData['pinboardNotes'] != null) {
         for (var noteData in backupData['pinboardNotes']) {
+          print('Восстанавливаем заметку на доске: ${noteData['title']}');
+          print('Данные заметки: $noteData');
+          
           final note = PinboardNoteDB(
             id: noteData['id'],
             title: noteData['title'],
             content: noteData['content'],
-            posX: noteData['positionX'],
-            posY: noteData['positionY'],
-            backgroundColor: noteData['backgroundColor'],
+            posX: noteData['positionX']?.toDouble() ?? 0.0,
+            posY: noteData['positionY']?.toDouble() ?? 0.0,
+            width: noteData['width']?.toDouble() ?? 200.0,
+            height: noteData['height']?.toDouble() ?? 150.0,
+            backgroundColor: (noteData['backgroundColor'] as num?)?.toInt() ?? 0xFF000000,
             icon: noteData['icon'],
           );
           await _dbHelper.insertPinboardNote(note);
+          print('Заметка на доске восстановлена: ${note.title}');
         }
         print('Восстановлено заметок на доске: ${backupData['pinboardNotes'].length}');
       }
@@ -191,7 +254,7 @@ class BackupService {
             fromId: connData['fromId'],
             toId: connData['toId'],
             name: connData['name'],
-            connectionColor: connData['connectionColor'],
+            connectionColor: int.parse(connData['connectionColor'], radix: 16),
           );
           await _dbHelper.insertConnection(conn);
         }

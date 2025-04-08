@@ -7,6 +7,8 @@ class PinboardNoteDB {
   String content;
   double posX;
   double posY;
+  double width;
+  double height;
   int backgroundColor;
   String icon;
 
@@ -16,6 +18,8 @@ class PinboardNoteDB {
     this.content = '',
     required this.posX,
     required this.posY,
+    this.width = 200.0,
+    this.height = 150.0,
     this.backgroundColor = 0xFF424242, // Темно-серый по умолчанию
     this.icon = 'person',
   });
@@ -27,6 +31,8 @@ class PinboardNoteDB {
       'content': content,
       'position_x': posX,
       'position_y': posY,
+      'width': width,
+      'height': height,
       'background_color': backgroundColor,
       'icon': _getIconCodePoint(icon), // Сохраняем codePoint иконки
     };
@@ -39,6 +45,8 @@ class PinboardNoteDB {
       content: map['content'] ?? '',
       posX: map['position_x'] ?? 0.0,
       posY: map['position_y'] ?? 0.0,
+      width: map['width'] ?? 200.0,
+      height: map['height'] ?? 150.0,
       backgroundColor: map['background_color'] ?? 0xFF424242,
       icon: _getIconKey(map['icon'] ?? Icons.person.codePoint), // Преобразуем codePoint в ключ
     );

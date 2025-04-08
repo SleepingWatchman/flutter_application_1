@@ -392,6 +392,25 @@ class DatabaseHelper {
     return result.first['image_data'] as Uint8List;
   }
 
+  Future<Uint8List?> getImageDataByPath(String imagePath) async {
+    final db = await database;
+    try {
+      final List<Map<String, dynamic>> result = await db.query(
+        'note_images',
+        where: 'file_name = ?',
+        whereArgs: [imagePath.split('/').last],
+      );
+      
+      if (result.isNotEmpty) {
+        return result.first['image_data'] as Uint8List;
+      }
+      return null;
+    } catch (e) {
+      print('Ошибка при получении данных изображения: $e');
+      return null;
+    }
+  }
+
   Future<void> clearDatabase() async {
     final db = await database;
     await db.delete('notes');

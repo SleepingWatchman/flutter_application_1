@@ -19,6 +19,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 // Register AuthService
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IBackupService, BackupService>();
+builder.Services.AddScoped<IImageService, ImageService>();
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();

@@ -12,11 +12,13 @@ namespace NotesServer.Controllers;
 public class BackupController : ControllerBase
 {
     private readonly IBackupService _backupService;
+    private readonly IImageService _imageService;
     private readonly ILogger<BackupController> _logger;
 
-    public BackupController(IBackupService backupService, ILogger<BackupController> logger)
+    public BackupController(IBackupService backupService, IImageService imageService, ILogger<BackupController> logger)
     {
         _backupService = backupService;
+        _imageService = imageService;
         _logger = logger;
     }
 
@@ -58,6 +60,12 @@ public class BackupController : ControllerBase
                 backupData.Connections.Count,
                 backupData.Images.Count);
 
+            // Сохраняем изображения
+            foreach (var image in backupData.Images)
+            {
+                await _imageService.SaveImageAsync(userId, image);
+            }
+
             await _backupService.SaveBackupAsync(userId, backupData);
             return Ok(new { message = "Backup saved successfully" });
         }
@@ -86,8 +94,14 @@ public class BackupController : ControllerBase
                 return NotFound(new { message = "No backup found" });
             }
 
-            _logger.LogInformation("Sending backup data for user {UserId}: {Folders} folders, {Notes} notes, {Images} images",
-                userId, backup.Folders.Count, backup.Notes.Count, backup.Images.Count);
+            _logger.LogInformation("Sending backup data for user {UserId}: {Folders} folders, {Notes} notes, {Schedule} schedule entries, {PinboardNotes} pinboard notes, {Connections} connections, {Images} images",
+                userId, 
+                backup.Folders.Count, 
+                backup.Notes.Count, 
+                backup.Schedule.Count,
+                backup.PinboardNotes.Count,
+                backup.Connections.Count,
+                backup.Images.Count);
 
             return Ok(backup);
         }

@@ -12,6 +12,7 @@ class Note {
   final DateTime updatedAt;
   List<String>? images; // Список путей к изображениям
   Map<String, dynamic>? metadata; // Дополнительные метаданные
+  final String? content_json; // JSON-представление контента
   
   Note({
     this.id,
@@ -22,6 +23,7 @@ class Note {
     required this.updatedAt,
     this.images,
     this.metadata,
+    this.content_json,
   });
   
   // Преобразование в HTML для отображения
@@ -38,8 +40,9 @@ class Note {
       'folder_id': folderId,
       'created_at': createdAt.toIso8601String(),
       'updated_at': updatedAt.toIso8601String(),
-      'images': images,
+      'images': images != null ? jsonEncode(images) : null,
       'metadata': metadata,
+      'content_json': content_json,
     };
   }
 
@@ -52,8 +55,9 @@ class Note {
       folderId: map['folder_id'] as int?,
       createdAt: DateTime.parse(map['created_at'] as String),
       updatedAt: DateTime.parse(map['updated_at'] as String),
-      images: map['images'] != null ? List<String>.from(map['images']) : null,
+      images: map['images'] != null ? List<String>.from(jsonDecode(map['images'])) : null,
       metadata: map['metadata'],
+      content_json: map['content_json'] as String?,
     );
   }
 
@@ -77,6 +81,7 @@ class Note {
     DateTime? updatedAt,
     List<String>? images,
     Map<String, dynamic>? metadata,
+    String? content_json,
   }) {
     return Note(
       id: id ?? this.id,
@@ -87,6 +92,7 @@ class Note {
       updatedAt: updatedAt ?? this.updatedAt,
       images: images ?? this.images,
       metadata: metadata ?? this.metadata,
+      content_json: content_json ?? this.content_json,
     );
   }
 } 

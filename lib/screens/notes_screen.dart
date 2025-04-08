@@ -16,6 +16,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:win32/win32.dart';
 import 'dart:ffi';
 import 'package:flutter_markdown/flutter_markdown.dart' show ElementBuilder;
+import 'dart:convert';
 
 
 /// Экран заметок и папок с использованием БД для заметок
@@ -785,11 +786,22 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
     if (_selectedNote == null) return;
     
     try {
+      // Получаем список изображений из базы данных
+      final images = await _dbHelper.getImagesForNote(_selectedNote!.id!);
+      final imagePaths = images.map((img) => img['file_name'] as String).toList();
+      
+      // Создаем JSON с информацией об изображениях
+      final contentJson = {
+        'content': content,
+        'images': imagePaths,
+      };
+      
       // Обновляем локальный объект заметки
       final updatedNote = _selectedNote!.copyWith(
         title: _noteTitleController.text,
         content: content,
         updatedAt: DateTime.now(),
+        content_json: jsonEncode(contentJson),
       );
       
       // Обновляем заметку в базе данных

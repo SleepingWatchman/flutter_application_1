@@ -62,9 +62,19 @@
               "target": "Package",
               "version": "[8.0.0, )"
             },
+            "Microsoft.EntityFrameworkCore.Design": {
+              "include": "Runtime, Build, Native, ContentFiles, Analyzers, BuildTransitive",
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[8.0.0, )"
+            },
             "Microsoft.EntityFrameworkCore.Sqlite": {
               "target": "Package",
               "version": "[8.0.0, )"
+            },
+            "SQLiteNetExtensions": {
+              "target": "Package",
+              "version": "[2.1.0, )"
             },
             "Swashbuckle.AspNetCore": {
               "target": "Package",
@@ -73,6 +83,10 @@
             "System.IdentityModel.Tokens.Jwt": {
               "target": "Package",
               "version": "[7.1.2, )"
+            },
+            "sqlite-net-pcl": {
+              "target": "Package",
+              "version": "[1.9.172, )"
             }
           },
           "imports": [

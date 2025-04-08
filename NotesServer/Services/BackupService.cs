@@ -30,17 +30,15 @@ public class BackupService : IBackupService
         _logger.LogInformation("Saving backup data: {Folders} folders, {Notes} notes, {Schedule} schedule entries, {PinboardNotes} pinboard notes, {Connections} connections, {Images} images",
             backupData.Folders.Count,
             backupData.Notes.Count,
-            backupData.Schedule.Count,
+            backupData.ScheduleEntries.Count,
             backupData.PinboardNotes.Count,
             backupData.Connections.Count,
-            backupData.Images.Count);
+            backupData.NoteImages.Count);
 
         var json = JsonSerializer.Serialize(backupData, new JsonSerializerOptions
         {
             WriteIndented = true
         });
-
-        _logger.LogInformation("Serialized backup data: {Json}", json);
 
         await File.WriteAllTextAsync(backupPath, json);
         _logger.LogInformation("Backup saved successfully for user {UserId}", userId);
@@ -67,10 +65,10 @@ public class BackupService : IBackupService
             _logger.LogInformation("Deserialized backup data: {Folders} folders, {Notes} notes, {Schedule} schedule entries, {PinboardNotes} pinboard notes, {Connections} connections, {Images} images",
                 backup.Folders.Count,
                 backup.Notes.Count,
-                backup.Schedule.Count,
+                backup.ScheduleEntries.Count,
                 backup.PinboardNotes.Count,
                 backup.Connections.Count,
-                backup.Images.Count);
+                backup.NoteImages.Count);
         }
         else
         {

@@ -4,81 +4,53 @@ using System.Text.Json;
 using NotesServer.Models;
 using NotesServer.Services;
 using System.Security.Claims;
+using Microsoft.Extensions.Configuration;
 
 namespace NotesServer.Controllers;
 
 [ApiController]
+[Authorize]
 [Route("api/[controller]")]
-public class BackupController : ControllerBase
+public class UserBackupController : ControllerBase
 {
-    private readonly IBackupService _backupService;
-    private readonly IImageService _imageService;
-    private readonly ILogger<BackupController> _logger;
+    private readonly IConfiguration _configuration;
+    private const string USER_BACKUPS_DIR = "user_backups";
 
-    public BackupController(IBackupService backupService, IImageService imageService, ILogger<BackupController> logger)
+    public UserBackupController(IConfiguration configuration)
     {
-        _backupService = backupService;
-        _imageService = imageService;
-        _logger = logger;
+        _configuration = configuration;
     }
 
-    [Authorize]
     [HttpPost("upload")]
-    public async Task<IActionResult> UploadBackup([FromBody] BackupData? backupData)
+    public async Task<IActionResult> UploadBackup([FromForm] IFormFile file)
     {
         try
         {
-            _logger.LogInformation("Received backup upload request");
-            _logger.LogInformation("Authorization header: {AuthHeader}", Request.Headers["Authorization"].ToString());
-            
-            if (backupData == null)
-            {
-                _logger.LogWarning("Backup data is null");
-                return BadRequest(new { message = "Backup data is required" });
-            }
-            
-            // Log all claims in the token
-            foreach (var claim in User.Claims)
-            {
-                _logger.LogInformation("Claim: {Type} = {Value}", claim.Type, claim.Value);
-            }
-            
             var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             if (string.IsNullOrEmpty(userId))
             {
-                _logger.LogWarning("User ID not found in token");
                 return Unauthorized();
             }
 
-            _logger.LogInformation("User ID from token: {UserId}", userId);
-            _logger.LogInformation("Received backup data for user {UserId}: {Folders} folders, {Notes} notes, {Schedule} schedule entries, {PinboardNotes} pinboard notes, {Connections} connections, {Images} images",
-                userId, 
-                backupData.Folders.Count, 
-                backupData.Notes.Count, 
-                backupData.Schedule.Count,
-                backupData.PinboardNotes.Count,
-                backupData.Connections.Count,
-                backupData.Images.Count);
+            var userBackupDir = Path.Combine(USER_BACKUPS_DIR, userId);
+            Directory.CreateDirectory(userBackupDir);
 
-            // Сохраняем изображения
-            foreach (var image in backupData.Images)
+            var backupPath = Path.Combine(userBackupDir, $"backup_{DateTime.Now:yyyyMMdd_HHmmss}.json");
+            using (var stream = new FileStream(backupPath, FileMode.Create))
             {
-                await _imageService.SaveImageAsync(userId, image);
+                await file.CopyToAsync(stream);
             }
 
-            await _backupService.SaveBackupAsync(userId, backupData);
-            return Ok(new { message = "Backup saved successfully" });
+            return Ok(new { message = "Резервная копия успешно загружена" });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error saving backup");
-            return StatusCode(500, new { message = "Error saving backup", error = ex.Message });
+            return BadRequest(new { message = $"Ошибка при загрузке резервной копии: {ex.Message}" });
         }
     }
 
-    [Authorize]
-    [HttpGet("download")]
-    public async Task<IActionResult> DownloadBackup()
+    [HttpGet("download/latest")]
+    public async Task<IActionResult> DownloadLatestBackup()
     {
         try
         {
@@ -88,27 +60,105 @@ public class BackupController : ControllerBase
                 return Unauthorized();
             }
 
-            var backup = await _backupService.GetBackupAsync(userId);
-            if (backup == null)
+            var userBackupDir = Path.Combine(USER_BACKUPS_DIR, userId);
+            if (!Directory.Exists(userBackupDir))
             {
-                return NotFound(new { message = "No backup found" });
+                return NotFound(new { message = "Резервные копии не найдены" });
             }
 
-            _logger.LogInformation("Sending backup data for user {UserId}: {Folders} folders, {Notes} notes, {Schedule} schedule entries, {PinboardNotes} pinboard notes, {Connections} connections, {Images} images",
-                userId, 
-                backup.Folders.Count, 
-                backup.Notes.Count, 
-                backup.Schedule.Count,
-                backup.PinboardNotes.Count,
-                backup.Connections.Count,
-                backup.Images.Count);
+            var latestBackup = Directory
+                .GetFiles(userBackupDir, "backup_*.json")
+                .OrderByDescending(f => f)
+                .FirstOrDefault();
 
-            return Ok(backup);
+            if (latestBackup == null)
+            {
+                return NotFound(new { message = "Резервные копии не найдены" });
+            }
+
+            var memory = new MemoryStream();
+            using (var stream = new FileStream(latestBackup, FileMode.Open))
+            {
+                await stream.CopyToAsync(memory);
+            }
+            memory.Position = 0;
+
+            return File(memory, "application/json", Path.GetFileName(latestBackup));
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error downloading backup");
-            return StatusCode(500, new { message = "Error downloading backup", error = ex.Message });
+            return BadRequest(new { message = $"Ошибка при загрузке резервной копии: {ex.Message}" });
+        }
+    }
+}
+
+[ApiController]
+[Route("api/[controller]")]
+public class CollaborationBackupController : ControllerBase
+{
+    private readonly IConfiguration _configuration;
+    private const string COLLAB_BACKUPS_DIR = "collaboration_backups";
+
+    public CollaborationBackupController(IConfiguration configuration)
+    {
+        _configuration = configuration;
+    }
+
+    [HttpPost("{databaseId}/upload")]
+    public async Task<IActionResult> UploadCollaborationBackup(int databaseId, [FromForm] IFormFile file)
+    {
+        try
+        {
+            var collabBackupDir = Path.Combine(COLLAB_BACKUPS_DIR, databaseId.ToString());
+            Directory.CreateDirectory(collabBackupDir);
+
+            var backupPath = Path.Combine(collabBackupDir, $"backup_{DateTime.Now:yyyyMMdd_HHmmss}.json");
+            using (var stream = new FileStream(backupPath, FileMode.Create))
+            {
+                await file.CopyToAsync(stream);
+            }
+
+            return Ok(new { message = "Резервная копия совместной базы данных успешно загружена" });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = $"Ошибка при загрузке резервной копии: {ex.Message}" });
+        }
+    }
+
+    [HttpGet("{databaseId}/download/latest")]
+    public async Task<IActionResult> DownloadLatestCollaborationBackup(int databaseId)
+    {
+        try
+        {
+            var collabBackupDir = Path.Combine(COLLAB_BACKUPS_DIR, databaseId.ToString());
+            if (!Directory.Exists(collabBackupDir))
+            {
+                return NotFound(new { message = "Резервные копии не найдены" });
+            }
+
+            var latestBackup = Directory
+                .GetFiles(collabBackupDir, "backup_*.json")
+                .OrderByDescending(f => f)
+                .FirstOrDefault();
+
+            if (latestBackup == null)
+            {
+                return NotFound(new { message = "Резервные копии не найдены" });
+            }
+
+            var memory = new MemoryStream();
+            using (var stream = new FileStream(latestBackup, FileMode.Open))
+            {
+                await stream.CopyToAsync(memory);
+            }
+            memory.Position = 0;
+
+            return File(memory, "application/json", Path.GetFileName(latestBackup));
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = $"Ошибка при загрузке резервной копии: {ex.Message}" });
         }
     }
 } 

@@ -29,7 +29,7 @@ class _PinboardScreenState extends State<PinboardScreen> {
 
   Future<void> _loadPinboardData() async {
     List<PinboardNoteDB> notes = await DatabaseHelper().getPinboardNotes();
-    List<ConnectionDB> connections = await DatabaseHelper().getConnections();
+    List<ConnectionDB> connections = await DatabaseHelper().getConnectionsDB();
     setState(() {
       _pinboardNotes = notes;
       _connections = connections;
@@ -46,7 +46,7 @@ class _PinboardScreenState extends State<PinboardScreen> {
       icon: 'person',
     );
 
-    DatabaseHelper().insertPinboardNote(newNote).then((_) {
+    DatabaseHelper().insertPinboardNote(newNote.toMap()).then((_) {
       _loadPinboardData();
       showCustomToastWithIcon(
         "Заметка успешно создана",
@@ -88,7 +88,7 @@ class _PinboardScreenState extends State<PinboardScreen> {
                 (conn.fromId == id && conn.toId == _selectedForConnection!))) {
           ConnectionDB newConn =
               ConnectionDB(fromId: _selectedForConnection!, toId: id);
-          DatabaseHelper().insertConnection(newConn).then((_) {
+          DatabaseHelper().insertConnection(newConn.toMap()).then((_) {
             _loadPinboardData();
           });
           _selectedForConnection = null;
@@ -556,7 +556,7 @@ class _PinboardScreenState extends State<PinboardScreen> {
                   connection.name = nameController.text;
                   connection.connectionColor = selectedColor.value;
                 });
-                DatabaseHelper().updateConnection(connection).then((_) {
+                DatabaseHelper().updateConnection(connection.toMap()).then((_) {
                   _loadPinboardData();
                   Navigator.pop(context);
                   showCustomToastWithIcon(

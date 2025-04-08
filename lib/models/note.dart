@@ -95,4 +95,24 @@ class Note {
       content_json: content_json ?? this.content_json,
     );
   }
+
+  Note copy({
+    int? id,
+    String? title,
+    String? content,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  }) {
+    return Note(
+      id: id ?? this.id,
+      title: title ?? this.title,
+      content: content ?? this.content,
+      folderId: this.folderId,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      images: this.images,
+      metadata: this.metadata,
+      content_json: this.content_json,
+    );
+  }
 } 

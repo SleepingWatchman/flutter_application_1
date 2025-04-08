@@ -6,6 +6,7 @@ import '../../providers/auth_provider.dart';
 import '../../providers/backup_provider.dart';
 import 'edit_profile_screen.dart';
 import '../auth/login_screen.dart';
+import '../collaboration/collaboration_screen.dart';
 
 class AccountScreen extends StatelessWidget {
   const AccountScreen({Key? key}) : super(key: key);
@@ -67,84 +68,115 @@ class AccountScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   ElevatedButton(
-                    onPressed: () async {
-                      try {
-                        await backup.uploadBackup();
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Резервная копия успешно загружена')),
-                          );
-                        }
-                      } catch (e) {
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Ошибка загрузки резервной копии: $e')),
-                          );
-                        }
-                      }
+                    onPressed: () {
+                      showDialog(
+                        context: context,
+                        builder: (context) => AlertDialog(
+                          title: const Text('Резервное копирование'),
+                          content: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              ElevatedButton(
+                                onPressed: () async {
+                                  try {
+                                    await backup.uploadBackup();
+                                    if (context.mounted) {
+                                      Navigator.of(context).pop();
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(content: Text('Резервная копия успешно загружена')),
+                                      );
+                                    }
+                                  } catch (e) {
+                                    if (context.mounted) {
+                                      Navigator.of(context).pop();
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(content: Text('Ошибка загрузки резервной копии: $e')),
+                                      );
+                                    }
+                                  }
+                                },
+                                child: const Text('Загрузить данные на сервер'),
+                              ),
+                              const SizedBox(height: 8),
+                              ElevatedButton(
+                                onPressed: () async {
+                                  try {
+                                    await backup.downloadBackup();
+                                    if (context.mounted) {
+                                      Navigator.of(context).pop();
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(content: Text('Резервная копия успешно восстановлена')),
+                                      );
+                                      
+                                      // Если требуется перезагрузка, показываем диалог
+                                      if (backup.needsReload) {
+                                        if (context.mounted) {
+                                          showDialog(
+                                            context: context,
+                                            barrierDismissible: false,
+                                            builder: (context) => AlertDialog(
+                                              title: const Text('Перезагрузка требуется'),
+                                              content: const Text('Для корректного отображения данных необходимо перезапустить приложение. Приложение будет закрыто, и вам нужно будет запустить его снова вручную.'),
+                                              actions: [
+                                                TextButton(
+                                                  onPressed: () {
+                                                    // Сбрасываем флаг перезагрузки
+                                                    backup.resetReloadFlag();
+                                                    Navigator.of(context).pop();
+                                                  },
+                                                  child: const Text('Позже'),
+                                                ),
+                                                TextButton(
+                                                  onPressed: () {
+                                                    // Перезапускаем приложение
+                                                    Navigator.of(context).pop();
+                                                    
+                                                    // Безопасный способ перезапуска приложения
+                                                    if (Platform.isWindows) {
+                                                      // На Windows используем exit(0), чтобы закрыть приложение
+                                                      // Пользователь может запустить его снова вручную
+                                                      exit(0);
+                                                    } else {
+                                                      // На других платформах используем SystemNavigator
+                                                      SystemNavigator.pop();
+                                                    }
+                                                  },
+                                                  child: const Text('Закрыть сейчас'),
+                                                ),
+                                              ],
+                                            ),
+                                          );
+                                        }
+                                      }
+                                    }
+                                  } catch (e) {
+                                    if (context.mounted) {
+                                      Navigator.of(context).pop();
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(content: Text('Ошибка восстановления резервной копии: $e')),
+                                      );
+                                    }
+                                  }
+                                },
+                                child: const Text('Выгрузить данные с сервера'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
                     },
-                    child: const Text('Загрузить резервную копию'),
+                    child: const Text('Резервное копирование'),
                   ),
                   const SizedBox(height: 8),
                   ElevatedButton(
-                    onPressed: () async {
-                      try {
-                        await backup.downloadBackup();
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Резервная копия успешно восстановлена')),
-                          );
-                          
-                          // Если требуется перезагрузка, показываем диалог
-                          if (backup.needsReload) {
-                            if (context.mounted) {
-                              showDialog(
-                                context: context,
-                                barrierDismissible: false,
-                                builder: (context) => AlertDialog(
-                                  title: const Text('Перезагрузка требуется'),
-                                  content: const Text('Для корректного отображения данных необходимо перезапустить приложение. Приложение будет закрыто, и вам нужно будет запустить его снова вручную.'),
-                                  actions: [
-                                    TextButton(
-                                      onPressed: () {
-                                        // Сбрасываем флаг перезагрузки
-                                        backup.resetReloadFlag();
-                                        Navigator.of(context).pop();
-                                      },
-                                      child: const Text('Позже'),
-                                    ),
-                                    TextButton(
-                                      onPressed: () {
-                                        // Перезапускаем приложение
-                                        Navigator.of(context).pop();
-                                        
-                                        // Безопасный способ перезапуска приложения
-                                        if (Platform.isWindows) {
-                                          // На Windows используем exit(0), чтобы закрыть приложение
-                                          // Пользователь может запустить его снова вручную
-                                          exit(0);
-                                        } else {
-                                          // На других платформах используем SystemNavigator
-                                          SystemNavigator.pop();
-                                        }
-                                      },
-                                      child: const Text('Закрыть сейчас'),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            }
-                          }
-                        }
-                      } catch (e) {
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Ошибка восстановления резервной копии: $e')),
-                          );
-                        }
-                      }
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const CollaborationScreen(),
+                        ),
+                      );
                     },
-                    child: const Text('Восстановить резервную копию'),
+                    child: const Text('Совместное редактирование'),
                   ),
                   const SizedBox(height: 8),
                   ElevatedButton(

@@ -9,6 +9,7 @@ import 'screens/pinboard_screen.dart';
 import 'screens/profile/account_screen.dart';
 import 'providers/auth_provider.dart';
 import 'providers/backup_provider.dart';
+import 'providers/collaboration_provider.dart';
 import 'db/database_helper.dart';
 
 /// Функция main: инициализация БД и запуск приложения
@@ -61,6 +62,10 @@ class NotesApp extends StatelessWidget {
         ChangeNotifierProxyProvider<AuthProvider, BackupProvider>(
           create: (context) => BackupProvider(context.read<AuthProvider>()),
           update: (context, auth, previous) => BackupProvider(auth),
+        ),
+        ChangeNotifierProxyProvider<AuthProvider, CollaborationProvider>(
+          create: (context) => CollaborationProvider(context.read<AuthProvider>()),
+          update: (context, auth, previous) => CollaborationProvider(auth),
         ),
       ],
       child: OKToast(

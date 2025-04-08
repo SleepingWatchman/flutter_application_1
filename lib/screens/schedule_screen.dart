@@ -63,9 +63,9 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     if (_selectedDate != null) {
       String dateKey = DateFormat('yyyy-MM-dd').format(_selectedDate!);
       List<ScheduleEntry> entries =
-          await DatabaseHelper().getScheduleEntries(dateKey);
+          await DatabaseHelper().getScheduleEntries();
       setState(() {
-        _schedule = entries;
+        _schedule = entries.where((entry) => entry.date == dateKey).toList();
         _selectedIndex = null;
       });
     }
@@ -249,7 +249,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                       note: shortNoteController.text.trim(),
                       dynamicFieldsJson: jsonEncode(dynamicMap),
                     );
-                    DatabaseHelper().insertScheduleEntry(newEntry).then((id) {
+                    DatabaseHelper().insertScheduleEntry(newEntry.toMap()).then((id) {
                       newEntry.id = id;
                       setState(() {
                         _schedule.add(newEntry);

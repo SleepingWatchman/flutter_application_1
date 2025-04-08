@@ -17,6 +17,7 @@ import 'package:win32/win32.dart';
 import 'dart:ffi';
 import 'package:flutter_markdown/flutter_markdown.dart' show ElementBuilder;
 import 'dart:convert';
+import 'package:image_picker/image_picker.dart';
 
 
 /// Экран заметок и папок с использованием БД для заметок
@@ -155,7 +156,7 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
         updatedAt: now,
       );
 
-      final id = await _dbHelper.insertNote(newNote);
+      final id = await _dbHelper.insertNote(newNote.toMap());
       if (!mounted) return;
 
       setState(() {
@@ -327,7 +328,7 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
           name: result['name'],
           color: result['color'],
         );
-        await _dbHelper.insertFolder(folder);
+        await _dbHelper.insertFolder(folder.toMap());
         _loadData();
         showCustomToastWithIcon(
           "Папка успешно создана",
@@ -459,7 +460,7 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
           name: result['name'],
           color: result['color'],
         );
-        await _dbHelper.updateFolder(updatedFolder);
+        await _dbHelper.updateFolder(updatedFolder.toMap());
         _loadData();
         showCustomToastWithIcon(
           "Папка успешно обновлена",
@@ -940,28 +941,14 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
 
   Future<void> _handleImageSelection() async {
     try {
-      // Открываем диалог выбора файла
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.image,
-        allowMultiple: false,
+      final result = await ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 80,
       );
 
-      if (result == null) {
-        return;
-      }
+      if (result == null) return;
 
-      final filePath = result.files.single.path;
-      if (filePath == null) {
-        showCustomToastWithIcon(
-          "Не удалось получить путь к файлу",
-          accentColor: Colors.yellow,
-          fontSize: 14.0,
-          icon: const Icon(Icons.warning, size: 20, color: Colors.yellow),
-        );
-        return;
-      }
-
-      final file = File(filePath);
+      final file = File(result.path);
       if (!await file.exists()) {
         showCustomToastWithIcon(
           "Выбранный файл не существует",
@@ -974,7 +961,7 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
 
       // Читаем файл как байты
       final imageBytes = await file.readAsBytes();
-      final fileName = 'image_${DateTime.now().millisecondsSinceEpoch}${path.extension(filePath)}';
+      final fileName = 'image_${DateTime.now().millisecondsSinceEpoch}${path.extension(result.path)}';
 
       // Сохраняем информацию об изображении в базе данных
       if (_selectedNote?.id != null) {
@@ -1023,7 +1010,16 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
     
     try {
       final images = await _dbHelper.getImagesForNote(note.id!);
-      print('Загружено изображений для заметки ${note.id}: ${images.length}');
+      final imageMap = <String, Uint8List>{};
+      
+      for (var image in images) {
+        final imageData = await _dbHelper.getImageData(image['id'] as int);
+        if (imageData != null) {
+          imageMap[image['file_name'] as String] = imageData;
+        }
+      }
+      
+      print('Загружено изображений для заметки ${note.id}: ${imageMap.length}');
     } catch (e) {
       print('Ошибка при загрузке изображений: $e');
     }

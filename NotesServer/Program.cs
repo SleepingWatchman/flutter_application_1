@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.Extensions.FileProviders;
+using NotesServer.Data;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -16,10 +17,15 @@ builder.Services.AddControllers();
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlite("Data Source=NotesServer.db"));
 
+// Добавляем контекст базы данных
+builder.Services.AddDbContext<ApplicationDbContext>(options =>
+    options.UseSqlite("Data Source=./Data/collaboration.db"));
+
 // Register AuthService
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IBackupService, BackupService>();
 builder.Services.AddScoped<IImageService, ImageService>();
+builder.Services.AddScoped<ICollaborationService, CollaborationService>();
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -87,6 +93,9 @@ using (var scope = app.Services.CreateScope())
 {
     var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     context.Database.EnsureCreated();
+
+    var applicationDbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+    applicationDbContext.Database.EnsureCreated();
 }
 
 // Create uploads directory if it doesn't exist
@@ -101,6 +110,13 @@ var backupsPath = Path.Combine(app.Environment.ContentRootPath, "backups");
 if (!Directory.Exists(backupsPath))
 {
     Directory.CreateDirectory(backupsPath);
+}
+
+// Create databases directory if it doesn't exist
+var databasesPath = Path.Combine(app.Environment.ContentRootPath, "Databases");
+if (!Directory.Exists(databasesPath))
+{
+    Directory.CreateDirectory(databasesPath);
 }
 
 // Configure the HTTP request pipeline.

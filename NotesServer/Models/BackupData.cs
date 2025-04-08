@@ -1,29 +1,48 @@
+using System;
+using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
 namespace NotesServer.Models;
 
 public class BackupData
 {
+    public BackupData()
+    {
+        DatabaseId = string.Empty;
+        UserId = string.Empty;
+        CreatedAt = DateTime.UtcNow;
+        LastModified = DateTime.UtcNow;
+    }
+
     [JsonPropertyName("folders")]
-    public List<FolderData> Folders { get; set; } = new();
+    public List<Folder> Folders { get; set; } = new();
 
     [JsonPropertyName("notes")]
-    public List<NoteData> Notes { get; set; } = new();
+    public List<Note> Notes { get; set; } = new();
 
-    [JsonPropertyName("schedule")]
-    public List<ScheduleEntryData> Schedule { get; set; } = new();
+    [JsonPropertyName("scheduleEntries")]
+    public List<ScheduleEntry> ScheduleEntries { get; set; } = new();
 
     [JsonPropertyName("pinboardNotes")]
-    public List<PinboardNoteData> PinboardNotes { get; set; } = new();
+    public List<PinboardNote> PinboardNotes { get; set; } = new();
 
     [JsonPropertyName("connections")]
-    public List<ConnectionData> Connections { get; set; } = new();
+    public List<Connection> Connections { get; set; } = new();
 
-    [JsonPropertyName("images")]
-    public List<ImageData> Images { get; set; } = new();
+    [JsonPropertyName("noteImages")]
+    public List<NoteImage> NoteImages { get; set; } = new();
 
     [JsonPropertyName("lastModified")]
     public DateTime LastModified { get; set; }
+
+    [JsonPropertyName("createdAt")]
+    public DateTime CreatedAt { get; set; }
+
+    [JsonPropertyName("databaseId")]
+    public string DatabaseId { get; set; }
+
+    [JsonPropertyName("userId")]
+    public string UserId { get; set; }
 }
 
 public class FolderData

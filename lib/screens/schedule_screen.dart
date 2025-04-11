@@ -7,6 +7,8 @@ import '../db/database_helper.dart';
 import '../models/schedule_entry.dart';
 import '../models/dynamic_field_entry.dart';
 import '../utils/toast_utils.dart';
+import '../providers/database_provider.dart';
+import 'package:provider/provider.dart';
 
 /// Экран расписания. Если день не выбран (_selectedDate == null), показывается календарная сетка.
 /// Если выбран день, отображается детальный режим с интервалами и предпросмотром заметки.
@@ -17,20 +19,55 @@ class ScheduleScreen extends StatefulWidget {
   _ScheduleScreenState createState() => _ScheduleScreenState();
 }
 
-class _ScheduleScreenState extends State<ScheduleScreen> {
+class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObserver {
   DateTime? _selectedDate; // Если null – показываем календарь
   DateTime? _highlightedDate; // Дата, выбранная первым кликом
   DateTime _currentMonth = DateTime.now(); // Текущий отображаемый месяц
   List<ScheduleEntry> _schedule = [];
   int? _selectedIndex;
+  bool _isActive = true;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     // При запуске ни один день не выбран – отображается календарь.
     _selectedDate = null;
     _highlightedDate = null;
     _currentMonth = DateTime.now();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (Provider.of<DatabaseProvider>(context, listen: false).needsUpdate) {
+      if (_selectedDate != null) {
+        _loadSchedule();
+      }
+      Provider.of<DatabaseProvider>(context, listen: false).resetUpdateFlag();
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && !_isActive) {
+      setState(() {
+        _isActive = true;
+      });
+      if (_selectedDate != null) {
+        _loadSchedule();
+      }
+    } else if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
+      setState(() {
+        _isActive = false;
+      });
+    }
   }
 
   // Вызывается при первом клике на день в календарной сетке

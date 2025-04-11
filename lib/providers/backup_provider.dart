@@ -3,6 +3,7 @@ import '../services/backup_service.dart';
 import '../db/database_helper.dart';
 import '../utils/config.dart';
 import 'auth_provider.dart';
+import 'database_provider.dart';
 
 class BackupProvider extends ChangeNotifier {
   final AuthProvider _authProvider;
@@ -12,6 +13,8 @@ class BackupProvider extends ChangeNotifier {
   bool _isLoading = false;
   String? _error;
   bool _needsReload = false;
+  late final DatabaseProvider _databaseProvider;
+  bool _disposed = false;
 
   BackupProvider(this._authProvider) {
     _userBackupService = UserBackupService(
@@ -25,9 +28,26 @@ class BackupProvider extends ChangeNotifier {
     );
   }
 
+  // Метод для установки DatabaseProvider
+  void setDatabaseProvider(DatabaseProvider provider) {
+    _databaseProvider = provider;
+  }
+
   bool get isLoading => _isLoading;
   String? get error => _error;
   bool get needsReload => _needsReload;
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
+
+  void _notifyIfNotDisposed() {
+    if (!_disposed) {
+      notifyListeners();
+    }
+  }
 
   Future<void> createAndUploadUserBackup() async {
     if (_authProvider.token == null) {
@@ -55,16 +75,16 @@ class BackupProvider extends ChangeNotifier {
     try {
       _isLoading = true;
       _error = null;
-      notifyListeners();
+      _notifyIfNotDisposed();
 
       await createAndUploadUserBackup();
 
       _isLoading = false;
-      notifyListeners();
+      _notifyIfNotDisposed();
     } catch (e) {
       _error = e.toString();
       _isLoading = false;
-      notifyListeners();
+      _notifyIfNotDisposed();
       rethrow;
     }
   }
@@ -73,18 +93,19 @@ class BackupProvider extends ChangeNotifier {
     try {
       _isLoading = true;
       _error = null;
-      notifyListeners();
+      _notifyIfNotDisposed();
 
       await restoreFromLatestUserBackup();
       
-      // После успешного восстановления устанавливаем флаг перезагрузки
+      // После успешного восстановления уведомляем о необходимости обновления данных
       _needsReload = true;
+      _databaseProvider.setNeedsUpdate(true);
       _isLoading = false;
-      notifyListeners();
+      _notifyIfNotDisposed();
     } catch (e) {
       _error = e.toString();
       _isLoading = false;
-      notifyListeners();
+      _notifyIfNotDisposed();
       rethrow;
     }
   }
@@ -92,6 +113,6 @@ class BackupProvider extends ChangeNotifier {
   // Метод для сброса флага перезагрузки после перезапуска
   void resetReloadFlag() {
     _needsReload = false;
-    notifyListeners();
+    _notifyIfNotDisposed();
   }
 } 

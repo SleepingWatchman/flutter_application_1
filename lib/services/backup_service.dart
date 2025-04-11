@@ -293,19 +293,19 @@ class CollaborationBackupService {
 
   Future<void> _restoreNotes(List<Map<String, dynamic>> notes, Transaction txn) async {
     for (var note in notes) {
-      await _dbHelper.insertNote(note, txn);
+      await _dbHelper.insertNoteForBackup(note, txn);
     }
   }
 
   Future<void> _restorePinboardNotes(List<Map<String, dynamic>> notes, Transaction txn) async {
     for (var note in notes) {
-      await _dbHelper.insertPinboardNote(note, txn);
+      await _dbHelper.insertPinboardNoteForBackup(note, txn);
     }
   }
 
   Future<void> _restoreConnections(List<Map<String, dynamic>> connections, Transaction txn) async {
     for (var connection in connections) {
-      await _dbHelper.insertConnection(connection, txn);
+      await _dbHelper.insertConnectionForBackup(connection, txn);
     }
   }
 } 

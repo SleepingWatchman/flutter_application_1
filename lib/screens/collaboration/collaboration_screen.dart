@@ -5,6 +5,7 @@ import '../../providers/collaboration_provider.dart';
 import '../../providers/backup_provider.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:flutter/services.dart';
 
 class CollaborationScreen extends StatefulWidget {
   const CollaborationScreen({super.key});
@@ -83,9 +84,66 @@ class _CollaborationScreenState extends State<CollaborationScreen> {
             children: [
               Padding(
                 padding: const EdgeInsets.all(16.0),
-                child: ElevatedButton(
-                  onPressed: () => provider.createNewDatabase(),
-                  child: const Text('Создать новую базу данных'),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    ElevatedButton(
+                      onPressed: () => provider.createNewDatabase(),
+                      child: const Text('Создать новую базу данных'),
+                    ),
+                    ElevatedButton(
+                      onPressed: () {
+                        showDialog(
+                          context: context,
+                          builder: (context) => AlertDialog(
+                            title: const Text('Импорт базы данных'),
+                            content: TextField(
+                              decoration: const InputDecoration(
+                                labelText: 'Введите ID базы данных',
+                                hintText: 'ID',
+                              ),
+                              keyboardType: TextInputType.number,
+                              onSubmitted: (value) async {
+                                try {
+                                  // Преобразуем строку ID в числовой идентификатор базы данных
+                                  final databaseId = int.parse(value);
+                                  
+                                  // Загружаем базу данных с сервера напрямую по ID
+                                  final backupData = await downloadDatabase(databaseId);
+                                  
+                                  // Создаем новую базу данных
+                                  await provider.createNewDatabase();
+                                  
+                                  // Загружаем данные в новую базу
+                                  await uploadDatabase(backupData, provider.databases.last['id']);
+
+                                  if (context.mounted) {
+                                    Navigator.of(context).pop();
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(content: Text('База данных успешно импортирована')),
+                                    );
+                                  }
+                                } catch (e) {
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text('Ошибка при импорте базы данных: $e')),
+                                    );
+                                  }
+                                }
+                              },
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.of(context).pop(),
+                                child: const Text('Отмена'),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                      child: const Text('Импортировать базу данных'),
+                    ),
+                  ],
                 ),
               ),
               Expanded(
@@ -93,12 +151,58 @@ class _CollaborationScreenState extends State<CollaborationScreen> {
                   itemCount: provider.databases.length,
                   itemBuilder: (context, index) {
                     final db = provider.databases[index];
+                    final createdAt = DateTime.parse(db['createdAt']);
                     return ListTile(
-                      title: Text('База данных #${db['id']}'),
-                      subtitle: Text('Создана: ${db['createdAt']}'),
+                      title: Row(
+                        children: [
+                          Text('База данных ID: ${db['id']}'),
+                          IconButton(
+                            icon: const Icon(Icons.copy, size: 20),
+                            onPressed: () {
+                              Clipboard.setData(ClipboardData(text: db['id'].toString()));
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('ID скопирован в буфер обмена'),
+                                  duration: Duration(seconds: 1),
+                                ),
+                              );
+                            },
+                            tooltip: 'Копировать ID',
+                          ),
+                        ],
+                      ),
+                      subtitle: Text('Создана: ${createdAt.toString().substring(0, 16)}'),
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
+                          IconButton(
+                            icon: const Icon(Icons.edit),
+                            onPressed: () async {
+                              try {
+                                // Создаем резервную копию пользовательской базы данных
+                                await context.read<BackupProvider>().uploadBackup();
+                                
+                                // Загружаем базу данных с сервера
+                                final backupData = await downloadDatabase(db['id']);
+                                
+                                // Загружаем данные в текущую базу
+                                await uploadDatabase(backupData, db['id']);
+
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('База данных успешно обновлена')),
+                                  );
+                                }
+                              } catch (e) {
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('Ошибка при обновлении базы данных: $e')),
+                                  );
+                                }
+                              }
+                            },
+                            tooltip: 'Редактировать базу данных',
+                          ),
                           IconButton(
                             icon: const Icon(Icons.download),
                             onPressed: () async {

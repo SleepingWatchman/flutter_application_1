@@ -100,7 +100,7 @@ namespace NotesServer.Controllers
                     return Unauthorized();
                 }
 
-                // Проверяем, существует ли база данных и принадлежит ли она пользователю
+                // Проверяем существование базы данных
                 var database = await _collaborationService.GetDatabaseAsync(databaseId, userId);
                 if (database == null)
                 {
@@ -129,28 +129,49 @@ namespace NotesServer.Controllers
                     return Unauthorized();
                 }
 
-                // Проверяем, существует ли база данных и принадлежит ли она пользователю
-                var database = await _collaborationService.GetDatabaseAsync(databaseId, userId);
-                if (database == null)
-                {
-                    return NotFound("База данных не найдена");
-                }
-
                 try
                 {
-                    // Получаем резервную копию
+                    // Получаем резервную копию без проверки владельца
                     var backup = await _collaborationService.GetDatabaseBackupAsync(databaseId, userId);
                     return Ok(backup);
                 }
-                catch (Exception ex) when (ex.Message == "Резервная копия не найдена")
+                catch (Exception ex) when (ex.Message == "Резервная копия не найдена" || ex.Message == "База данных не найдена")
                 {
-                    return NotFound("Резервная копия не найдена");
+                    return NotFound(ex.Message);
                 }
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Ошибка при получении резервной копии базы данных");
                 return StatusCode(500, "Ошибка при получении резервной копии базы данных");
+            }
+        }
+
+        [HttpGet("databases/{databaseId}")]
+        public async Task<IActionResult> GetDatabase(int databaseId)
+        {
+            try
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId))
+                {
+                    return Unauthorized();
+                }
+
+                try
+                {
+                    var database = await _collaborationService.GetDatabaseAsync(databaseId, userId);
+                    return Ok(database);
+                }
+                catch (Exception ex) when (ex.Message == "База данных не найдена")
+                {
+                    return NotFound(ex.Message);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Ошибка при получении информации о базе данных");
+                return StatusCode(500, "Ошибка при получении информации о базе данных");
             }
         }
     }

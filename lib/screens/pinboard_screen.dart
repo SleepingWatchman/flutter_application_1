@@ -6,6 +6,8 @@ import '../utils/toast_utils.dart';
 import '../utils/icon_utils.dart';
 import '../widgets/color_picker.dart';
 import '../widgets/connection_painter.dart';
+import '../providers/database_provider.dart';
+import 'package:provider/provider.dart';
 
 /// Экран доски с использованием БД для заметок и соединений
 class PinboardScreen extends StatefulWidget {
@@ -15,16 +17,47 @@ class PinboardScreen extends StatefulWidget {
   _PinboardScreenState createState() => _PinboardScreenState();
 }
 
-class _PinboardScreenState extends State<PinboardScreen> {
+class _PinboardScreenState extends State<PinboardScreen> with WidgetsBindingObserver {
   List<PinboardNoteDB> _pinboardNotes = [];
   List<ConnectionDB> _connections = [];
   int? _selectedForConnection;
   List<String> _availableIcons = ['person', 'check', 'tree', 'home', 'car', 'close'];
+  bool _isActive = true;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadPinboardData();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (Provider.of<DatabaseProvider>(context, listen: false).needsUpdate) {
+      _loadPinboardData();
+      Provider.of<DatabaseProvider>(context, listen: false).resetUpdateFlag();
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && !_isActive) {
+      setState(() {
+        _isActive = true;
+      });
+      _loadPinboardData();
+    } else if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
+      setState(() {
+        _isActive = false;
+      });
+    }
   }
 
   Future<void> _loadPinboardData() async {
@@ -311,46 +344,55 @@ class _PinboardScreenState extends State<PinboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.grey[850],
-      body: Stack(
-        children: [
-          CustomPaint(
-            size: MediaQuery.of(context).size,
-            painter: ConnectionPainter(
-                notes: _pinboardNotes, connections: _connections),
-          ),
-          // Заметки на доске
-          ..._pinboardNotes.map((note) {
-            return Positioned(
-              key: ValueKey(note.id),
-              left: note.posX,
-              top: note.posY,
-              child: GestureDetector(
-                onPanUpdate: (details) {
-                  setState(() {
-                    note.posX += details.delta.dx;
-                    note.posY += details.delta.dy;
-                  });
-                  DatabaseHelper().updatePinboardNote(note);
-                },
-                onTap: () => _selectForConnection(note.id!),
-                onSecondaryTapDown: (details) =>
-                    _showNoteContextMenu(context, note, details.globalPosition),
-                child: _buildNoteWidget(note,
-                    isSelected: _selectedForConnection == note.id),
+    return Consumer<DatabaseProvider>(
+      builder: (context, databaseProvider, child) {
+        if (databaseProvider.needsUpdate) {
+          _loadPinboardData();
+          databaseProvider.resetUpdateFlag();
+        }
+
+        return Scaffold(
+          backgroundColor: Colors.grey[850],
+          body: Stack(
+            children: [
+              CustomPaint(
+                size: MediaQuery.of(context).size,
+                painter: ConnectionPainter(
+                    notes: _pinboardNotes, connections: _connections),
               ),
-            );
-          }).toList(),
-          // Оверлеи для редактирования связей
-          ..._buildConnectionOverlays(),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _addNote,
-        tooltip: 'Добавить заметку на доску',
-        child: const Icon(Icons.add),
-      ),
+              // Заметки на доске
+              ..._pinboardNotes.map((note) {
+                return Positioned(
+                  key: ValueKey(note.id),
+                  left: note.posX,
+                  top: note.posY,
+                  child: GestureDetector(
+                    onPanUpdate: (details) {
+                      setState(() {
+                        note.posX += details.delta.dx;
+                        note.posY += details.delta.dy;
+                      });
+                      DatabaseHelper().updatePinboardNote(note);
+                    },
+                    onTap: () => _selectForConnection(note.id!),
+                    onSecondaryTapDown: (details) =>
+                        _showNoteContextMenu(context, note, details.globalPosition),
+                    child: _buildNoteWidget(note,
+                        isSelected: _selectedForConnection == note.id),
+                  ),
+                );
+              }).toList(),
+              // Оверлеи для редактирования связей
+              ..._buildConnectionOverlays(),
+            ],
+          ),
+          floatingActionButton: FloatingActionButton(
+            onPressed: _addNote,
+            tooltip: 'Добавить заметку на доску',
+            child: const Icon(Icons.add),
+          ),
+        );
+      },
     );
   }
 

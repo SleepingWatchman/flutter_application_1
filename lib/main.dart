@@ -10,6 +10,7 @@ import 'screens/profile/account_screen.dart';
 import 'providers/auth_provider.dart';
 import 'providers/backup_provider.dart';
 import 'providers/collaboration_provider.dart';
+import 'providers/database_provider.dart';
 import 'db/database_helper.dart';
 
 /// Функция main: инициализация БД и запуск приложения
@@ -59,9 +60,15 @@ class NotesApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => AuthProvider()),
-        ChangeNotifierProxyProvider<AuthProvider, BackupProvider>(
-          create: (context) => BackupProvider(context.read<AuthProvider>()),
-          update: (context, auth, previous) => BackupProvider(auth),
+        ChangeNotifierProvider(create: (_) => DatabaseProvider()),
+        ChangeNotifierProxyProvider2<AuthProvider, DatabaseProvider, BackupProvider>(
+          create: (context) => BackupProvider(context.read<AuthProvider>())
+            ..setDatabaseProvider(context.read<DatabaseProvider>()),
+          update: (context, auth, database, previous) {
+            final provider = BackupProvider(auth)
+              ..setDatabaseProvider(database);
+            return provider;
+          },
         ),
         ChangeNotifierProxyProvider<AuthProvider, CollaborationProvider>(
           create: (context) => CollaborationProvider(context.read<AuthProvider>()),
@@ -214,9 +221,13 @@ class _MainScreenState extends State<MainScreen> {
             ),
           ),
           Expanded(
-            child: IndexedStack(
-              index: _selectedIndex,
-              children: _widgetOptions,
+            child: Consumer<DatabaseProvider>(
+              builder: (context, databaseProvider, child) {
+                return IndexedStack(
+                  index: _selectedIndex,
+                  children: _widgetOptions,
+                );
+              },
             ),
           ),
         ],

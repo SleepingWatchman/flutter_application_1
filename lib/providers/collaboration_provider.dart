@@ -14,6 +14,26 @@ class CollaborationProvider with ChangeNotifier {
   bool get isLoading => _isLoading;
   List<Map<String, dynamic>> get databases => _databases;
 
+  Future<bool> checkDatabaseExists(int databaseId) async {
+    try {
+      final token = _authProvider.token;
+      if (token == null) {
+        throw Exception('Не авторизован');
+      }
+
+      final response = await http.get(
+        Uri.parse('$_baseUrl/databases/$databaseId'),
+        headers: {
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      return response.statusCode == 200;
+    } catch (e) {
+      return false;
+    }
+  }
+
   Future<void> loadDatabases() async {
     try {
       _isLoading = true;
@@ -37,6 +57,7 @@ class CollaborationProvider with ChangeNotifier {
 
       final data = jsonDecode(response.body);
       _databases = List<Map<String, dynamic>>.from(data);
+      notifyListeners();
     } catch (e) {
       print('Ошибка при загрузке списка баз данных: $e');
       rethrow;

@@ -12,6 +12,9 @@ import 'package:sqflite/sqflite.dart';
 import 'dart:typed_data';
 import 'package:flutter_application_1/models/note_image.dart';
 import 'package:flutter_application_1/models/backup_data.dart';
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../providers/database_provider.dart';
 
 /// Класс для работы с базой данных, реализующий CRUD-операции для всех сущностей.
 class DatabaseHelper {
@@ -19,7 +22,10 @@ class DatabaseHelper {
   factory DatabaseHelper() => _instance;
   DatabaseHelper._internal();
 
-  Database? _database;
+  static Database? _database;
+  static const String _dbName = 'notes.db';
+  static const int _dbVersion = 1;
+  static final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
   Future<Database> get database async {
     if (_database != null) return _database!;
@@ -39,12 +45,12 @@ class DatabaseHelper {
         await dbDir.create(recursive: true);
       }
       
-      final path = p.join(dbDir.path, 'notes_app.db');
+      final path = p.join(dbDir.path, _dbName);
       
       // Открываем базу данных
       return await openDatabase(
         path,
-        version: 3,
+        version: _dbVersion,
         onCreate: _onCreate,
         onUpgrade: _onUpgrade,
       );
@@ -189,12 +195,11 @@ class DatabaseHelper {
     });
   }
 
-  Future<int> insertNote(Map<String, dynamic> note, [Transaction? txn]) async {
-    if (txn != null) {
-      return await txn.insert('notes', note);
-    }
+  Future<int> insertNote(Map<String, dynamic> note) async {
     final db = await database;
-    return await db.insert('notes', note);
+    final id = await db.insert('notes', note);
+    _notifyDatabaseChanged();
+    return id;
   }
 
   // Методы для работы с расписанием
@@ -204,12 +209,11 @@ class DatabaseHelper {
     return List.generate(maps.length, (i) => ScheduleEntry.fromMap(maps[i]));
   }
 
-  Future<int> insertScheduleEntry(Map<String, dynamic> entry, [Transaction? txn]) async {
-    if (txn != null) {
-      return await txn.insert('schedule_entries', entry);
-    }
+  Future<int> insertScheduleEntry(Map<String, dynamic> entry) async {
     final db = await database;
-    return await db.insert('schedule_entries', entry);
+    final id = await db.insert('schedule_entries', entry);
+    _notifyDatabaseChanged();
+    return id;
   }
 
   // Методы для работы с заметками на доске
@@ -580,5 +584,12 @@ class DatabaseHelper {
       where: 'id = ?',
       whereArgs: [connection['id']],
     );
+  }
+
+  void _notifyDatabaseChanged() {
+    final context = navigatorKey.currentContext;
+    if (context != null) {
+      context.read<DatabaseProvider>().setNeedsUpdate(true);
+    }
   }
 } 

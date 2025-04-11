@@ -205,8 +205,9 @@ namespace NotesServer.Services
         {
             try
             {
+                // Проверяем существование базы данных
                 var database = await _context.CollaborationDatabases
-                    .FirstOrDefaultAsync(db => db.Id == databaseId && db.UserId == userId);
+                    .FirstOrDefaultAsync(db => db.Id == databaseId);
 
                 if (database == null)
                 {
@@ -238,8 +239,9 @@ namespace NotesServer.Services
         {
             try
             {
+                // Проверяем существование базы данных
                 var database = await _context.CollaborationDatabases
-                    .FirstOrDefaultAsync(db => db.Id == databaseId && db.UserId == userId);
+                    .FirstOrDefaultAsync(db => db.Id == databaseId);
 
                 if (database == null)
                 {
@@ -250,22 +252,7 @@ namespace NotesServer.Services
                 
                 if (!File.Exists(backupPath))
                 {
-                    // Если резервная копия не существует, создаем пустую
-                    var backupData = new BackupData
-                    {
-                        Notes = new List<Note>(),
-                        Folders = new List<Folder>(),
-                        ScheduleEntries = new List<ScheduleEntry>(),
-                        PinboardNotes = new List<PinboardNote>(),
-                        Connections = new List<Connection>(),
-                        NoteImages = new List<NoteImage>(),
-                        LastModified = DateTime.UtcNow,
-                        DatabaseId = databaseId.ToString(),
-                        UserId = userId
-                    };
-
-                    await SaveDatabaseBackupAsync(databaseId, userId, backupData);
-                    return backupData;
+                    throw new Exception("Резервная копия не найдена");
                 }
 
                 var json = await File.ReadAllTextAsync(backupPath);
@@ -291,7 +278,7 @@ namespace NotesServer.Services
             try
             {
                 var database = await _context.CollaborationDatabases
-                    .FirstOrDefaultAsync(db => db.Id == databaseId && db.UserId == userId);
+                    .FirstOrDefaultAsync(db => db.Id == databaseId);
 
                 if (database == null)
                 {

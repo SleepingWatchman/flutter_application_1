@@ -18,6 +18,8 @@ import 'dart:ffi';
 import 'package:flutter_markdown/flutter_markdown.dart' show ElementBuilder;
 import 'dart:convert';
 import 'package:image_picker/image_picker.dart';
+import '../providers/database_provider.dart';
+import 'package:provider/provider.dart';
 
 
 /// Экран заметок и папок с использованием БД для заметок
@@ -28,7 +30,7 @@ class NotesScreen extends StatefulWidget {
   _NotesScreenState createState() => _NotesScreenState();
 }
 
-class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClientMixin {
+class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClientMixin, WidgetsBindingObserver {
   final DatabaseHelper _dbHelper = DatabaseHelper();
   List<Folder> _folders = [];
   List<Note> _notes = [];
@@ -44,6 +46,7 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
   final FocusNode _noteTitleFocusNode = FocusNode();
   bool _isLoading = false;
   DateTime? _lastSave;
+  bool _isActive = true;
   
   // Кэш для отфильтрованных заметок
   Map<int?, List<Note>> _notesCache = {};
@@ -63,16 +66,43 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadData();
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _loadData();
+    
+    if (Provider.of<DatabaseProvider>(context, listen: false).needsUpdate) {
+      _loadData();
+      Provider.of<DatabaseProvider>(context, listen: false).resetUpdateFlag();
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _noteTitleController.dispose();
     _noteContentController.dispose();
     _noteContentFocusNode.dispose();
     _noteTitleFocusNode.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && !_isActive) {
+      setState(() {
+        _isActive = true;
+      });
+      _loadData();
+    } else if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
+      setState(() {
+        _isActive = false;
+      });
+    }
   }
 
   Future<void> _loadData() async {
@@ -231,43 +261,7 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
   }
 
   Future<void> _updateNote(Note note) async {
-    if (note.id == null) return;
-    
-    try {
-      await _dbHelper.updateNote(note);
-      if (!mounted) return;
-      
-      setState(() {
-        // Обновляем заметку в списке
-        final index = _notes.indexWhere((n) => n.id == note.id);
-        if (index != -1) {
-          _notes[index] = note;
-        }
-        
-        // Если это текущая выбранная заметка, обновляем её
-        if (_selectedNote?.id == note.id) {
-          _selectedNote = note;
-        }
-        
-        // Обновляем кэш заметок
-        _updateNotesCache();
-      });
-      
-      showCustomToastWithIcon(
-        "Заметка успешно обновлена",
-        accentColor: Colors.green,
-        fontSize: 14.0,
-        icon: const Icon(Icons.check, size: 20, color: Colors.green),
-      );
-    } catch (e) {
-      print('Ошибка обновления заметки: $e');
-      showCustomToastWithIcon(
-        "Ошибка обновления заметки",
-        accentColor: Colors.yellow,
-        fontSize: 14.0,
-        icon: const Icon(Icons.warning, size: 20, color: Colors.yellow),
-      );
-    }
+    await _dbHelper.updateNote(note);
   }
 
   Future<void> _addFolder() async {
@@ -1148,200 +1142,251 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
       return const Center(child: CircularProgressIndicator());
     }
 
-    return Scaffold(
-      body: Row(
-        children: [
-          // Левая панель
-          SizedBox(
-            width: MediaQuery.of(context).size.width * _previewWidth,
-            child: Column(
-              children: [
-                // Панель инструментов
-                Padding(
-                  padding: const EdgeInsets.all(8.0),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.add),
-                        onPressed: _createNote,
+    return Consumer<DatabaseProvider>(
+      builder: (context, databaseProvider, child) {
+        if (databaseProvider.needsUpdate) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              _loadData();
+              databaseProvider.resetUpdateFlag();
+            }
+          });
+        }
+        
+        return Scaffold(
+          body: Row(
+            children: [
+              // Левая панель
+              SizedBox(
+                width: MediaQuery.of(context).size.width * _previewWidth,
+                child: Column(
+                  children: [
+                    // Панель инструментов
+                    Padding(
+                      padding: const EdgeInsets.all(8.0),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.add),
+                            onPressed: _createNote,
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.create_new_folder),
+                            onPressed: _addFolder,
+                          ),
+                        ],
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.create_new_folder),
-                        onPressed: _addFolder,
-                      ),
-                    ],
-                  ),
-                ),
-                // Список папок и заметок
-                Expanded(
-                  child: Container(
-                    constraints: BoxConstraints(
-                      maxHeight: MediaQuery.of(context).size.height,
                     ),
-                    child: _buildCombinedList(),
-                  ),
+                    // Список папок и заметок
+                    Expanded(
+                      child: Container(
+                        constraints: BoxConstraints(
+                          maxHeight: MediaQuery.of(context).size.height,
+                        ),
+                        child: _buildCombinedList(),
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-          ),
-          // Разделитель с возможностью перетаскивания
-          MouseRegion(
-            cursor: SystemMouseCursors.resizeColumn,
-            child: GestureDetector(
-              onHorizontalDragUpdate: (details) {
-                setState(() {
-                  _previewWidth += details.delta.dx / MediaQuery.of(context).size.width;
-                  // Ограничиваем ширину от 20% до 60% экрана
-                  _previewWidth = _previewWidth.clamp(0.2, 0.6);
-                });
-              },
-              child: Container(
-                width: 8,
-                color: Colors.black,
-                child: Center(
+              ),
+              // Разделитель с возможностью перетаскивания
+              MouseRegion(
+                cursor: SystemMouseCursors.resizeColumn,
+                child: GestureDetector(
+                  onHorizontalDragUpdate: (details) {
+                    setState(() {
+                      _previewWidth += details.delta.dx / MediaQuery.of(context).size.width;
+                      // Ограничиваем ширину от 20% до 60% экрана
+                      _previewWidth = _previewWidth.clamp(0.2, 0.6);
+                    });
+                  },
                   child: Container(
-                    width: 2,
-                    height: double.infinity,
-                    color: Colors.cyan,
+                    width: 8,
+                    color: Colors.black,
+                    child: Center(
+                      child: Container(
+                        width: 2,
+                        height: double.infinity,
+                        color: Colors.cyan,
+                      ),
+                    ),
                   ),
                 ),
               ),
-            ),
-          ),
-          // Правая панель
-          Expanded(
-            child: _selectedNote == null
-                ? const Center(child: Text('Выберите заметку'))
-                : Column(
-                    children: [
-                      // Заголовок заметки
-                      Padding(
-                        padding: const EdgeInsets.all(8.0),
-                        child: TextField(
-                          controller: _noteTitleController,
-                          decoration: const InputDecoration(
-                            hintText: 'Новая заметка',
-                            border: OutlineInputBorder(),
-                          ),
-                          onChanged: _updateNoteTitle,
-                        ),
-                      ),
-                      // Панель инструментов
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
-                        decoration: BoxDecoration(
-                          border: Border(
-                            bottom: BorderSide(color: Colors.grey),
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            IconButton(
-                              icon: const Icon(Icons.image),
-                              onPressed: () {
-                                if (!_isEditing) {
-                                  setState(() {
-                                    _isEditing = true;
-                                  });
-                                }
-                                _handleImageSelection();
-                              },
-                              tooltip: 'Вставить изображение',
+              // Правая панель
+              Expanded(
+                child: _selectedNote == null
+                    ? const Center(child: Text('Выберите заметку'))
+                    : Column(
+                        children: [
+                          // Заголовок заметки
+                          Padding(
+                            padding: const EdgeInsets.all(8.0),
+                            child: TextField(
+                              controller: _noteTitleController,
+                              decoration: const InputDecoration(
+                                hintText: 'Новая заметка',
+                                border: OutlineInputBorder(),
+                              ),
+                              onChanged: _updateNoteTitle,
                             ),
-                          ],
-                        ),
-                      ),
-                      // Объединенный редактор/предпросмотр
-                      Expanded(
-                        child: Container(
-                          padding: const EdgeInsets.all(8.0),
-                          child: _isEditing
-                              ? Container(
-                                  decoration: BoxDecoration(
-                                    border: Border.all(color: Colors.grey),
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                  child: TextField(
-                                    controller: _noteContentController,
-                                    focusNode: _noteContentFocusNode,
-                                    maxLines: null,
-                                    expands: true,
-                                    autofocus: true,
-                                    decoration: const InputDecoration(
-                                      hintText: 'Содержание заметки (поддерживается Markdown). Нажмите Enter для новой строки. Нажмите на кнопку изображения для вставки.',
-                                      border: InputBorder.none,
-                                      contentPadding: EdgeInsets.all(8),
-                                    ),
-                                    onChanged: _updateNoteContent,
-                                    onSubmitted: (value) {
+                          ),
+                          // Панель инструментов
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+                            decoration: BoxDecoration(
+                              border: Border(
+                                bottom: BorderSide(color: Colors.grey),
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.end,
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.image),
+                                  onPressed: () {
+                                    if (!_isEditing) {
                                       setState(() {
-                                        _isEditing = false;
+                                        _isEditing = true;
                                       });
-                                    },
-                                    keyboardType: TextInputType.multiline,
-                                    textInputAction: TextInputAction.newline,
-                                    style: const TextStyle(
-                                      fontSize: 16,
-                                      height: 1.5,
-                                    ),
-                                    cursorColor: Colors.cyan,
-                                    enableInteractiveSelection: true,
-                                    showCursor: true,
-                                    readOnly: false,
-                                    onTapOutside: (event) {
-                                      setState(() {
-                                        _isEditing = false;
-                                      });
-                                    },
-                                    onEditingComplete: () {
-                                      _debounceSave();
-                                    },
-                                  ),
-                                )
-                              : GestureDetector(
-                                  onTap: () {
-                                    setState(() {
-                                      _isEditing = true;
-                                    });
+                                    }
+                                    _handleImageSelection();
                                   },
-                                  child: Container(
-                                    decoration: BoxDecoration(
-                                      border: Border.all(color: Colors.grey),
-                                      borderRadius: BorderRadius.circular(4),
-                                    ),
-                                    child: SingleChildScrollView(
-                                      padding: const EdgeInsets.all(8),
-                                      child: ConstrainedBox(
-                                        constraints: BoxConstraints(
-                                          minHeight: 0,
-                                          maxHeight: MediaQuery.of(context).size.height,
+                                  tooltip: 'Вставить изображение',
+                                ),
+                              ],
+                            ),
+                          ),
+                          // Объединенный редактор/предпросмотр
+                          Expanded(
+                            child: Container(
+                              padding: const EdgeInsets.all(8.0),
+                              child: _isEditing
+                                  ? Container(
+                                      decoration: BoxDecoration(
+                                        border: Border.all(color: Colors.grey),
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: TextField(
+                                        controller: _noteContentController,
+                                        focusNode: _noteContentFocusNode,
+                                        maxLines: null,
+                                        expands: true,
+                                        autofocus: true,
+                                        decoration: const InputDecoration(
+                                          hintText: 'Содержание заметки (поддерживается Markdown). Нажмите Enter для новой строки. Нажмите на кнопку изображения для вставки.',
+                                          border: InputBorder.none,
+                                          contentPadding: EdgeInsets.all(8),
                                         ),
-                                        child: _selectedNote?.content?.isEmpty ?? true
-                                            ? Column(
-                                                children: [
-                                                  Text(
-                                                  'Содержание заметки (поддерживается Markdown). Нажмите Enter для новой строки. Для вставки изображения перетащите его сюда.',
-                                                  style: TextStyle(
-                                                    color: Colors.grey,
-                                                    fontSize: 16,
-                                                  ),
-                                                ),
-                                                ]
-                                              )
-                                            : _buildMarkdownPreview(_selectedNote?.content ?? ''),
+                                        onChanged: _updateNoteContent,
+                                        onSubmitted: (value) {
+                                          setState(() {
+                                            _isEditing = false;
+                                          });
+                                        },
+                                        keyboardType: TextInputType.multiline,
+                                        textInputAction: TextInputAction.newline,
+                                        style: const TextStyle(
+                                          fontSize: 16,
+                                          height: 1.5,
+                                        ),
+                                        cursorColor: Colors.cyan,
+                                        enableInteractiveSelection: true,
+                                        showCursor: true,
+                                        readOnly: false,
+                                        onTapOutside: (event) {
+                                          setState(() {
+                                            _isEditing = false;
+                                          });
+                                        },
+                                        onEditingComplete: () {
+                                          _debounceSave();
+                                        },
+                                      ),
+                                    )
+                                  : GestureDetector(
+                                      onTap: () {
+                                        setState(() {
+                                          _isEditing = true;
+                                        });
+                                      },
+                                      child: Container(
+                                        decoration: BoxDecoration(
+                                          border: Border.all(color: Colors.grey),
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                        child: SingleChildScrollView(
+                                          padding: const EdgeInsets.all(8),
+                                          child: ConstrainedBox(
+                                            constraints: BoxConstraints(
+                                              minHeight: 0,
+                                              maxHeight: MediaQuery.of(context).size.height,
+                                            ),
+                                            child: _selectedNote?.content?.isEmpty ?? true
+                                                ? Column(
+                                                    children: [
+                                                      Text(
+                                                        'Содержание заметки (поддерживается Markdown). Нажмите Enter для новой строки. Для вставки изображения перетащите его сюда.',
+                                                        style: TextStyle(
+                                                          color: Colors.grey,
+                                                          fontSize: 16,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  )
+                                                : _buildMarkdownPreview(_selectedNote?.content ?? ''),
+                                          ),
+                                        ),
                                       ),
                                     ),
-                                  ),
-                                ),
-                        ),
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
+  }
+
+  Future<void> _handleNoteUpdate(Note note) async {
+    await _dbHelper.updateNote(note);
+  }
+
+  Future<void> _handleNoteDelete(Note note) async {
+    await _dbHelper.deleteNote(note.id!);
+  }
+
+  Future<void> _handleNoteMove(Note note, int newFolderId) async {
+    final updatedNote = note.copyWith(
+      folderId: newFolderId,
+      updatedAt: DateTime.now(),
+    );
+    await _dbHelper.updateNote(updatedNote);
+  }
+
+  Future<void> _handleNoteCopy(Note note) async {
+    final newNote = Note(
+      title: '${note.title} (копия)',
+      content: note.content,
+      folderId: note.folderId,
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+    );
+    await _dbHelper.insertNote(newNote.toMap());
+  }
+
+  Future<void> _saveNote() async {
+    if (_selectedNote != null) {
+      final updatedNote = _selectedNote!.copyWith(
+        title: _noteTitleController.text,
+        content: _noteContentController.text,
+        updatedAt: DateTime.now(),
+      );
+      await _dbHelper.updateNote(updatedNote);
+    }
   }
 } 

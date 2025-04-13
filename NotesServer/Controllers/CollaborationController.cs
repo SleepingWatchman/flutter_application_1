@@ -100,14 +100,12 @@ namespace NotesServer.Controllers
                     return Unauthorized();
                 }
 
-                // Проверяем существование базы данных
                 var database = await _collaborationService.GetDatabaseAsync(databaseId, userId);
                 if (database == null)
                 {
                     return NotFound("База данных не найдена");
                 }
 
-                // Сохраняем резервную копию
                 await _collaborationService.SaveDatabaseBackupAsync(databaseId, userId, backupData);
                 return Ok(new { message = "Резервная копия успешно сохранена" });
             }
@@ -131,7 +129,6 @@ namespace NotesServer.Controllers
 
                 try
                 {
-                    // Получаем резервную копию без проверки владельца
                     var backup = await _collaborationService.GetDatabaseBackupAsync(databaseId, userId);
                     return Ok(backup);
                 }
@@ -172,6 +169,27 @@ namespace NotesServer.Controllers
             {
                 _logger.LogError(ex, "Ошибка при получении информации о базе данных");
                 return StatusCode(500, "Ошибка при получении информации о базе данных");
+            }
+        }
+
+        [HttpPost("databases/{databaseId}/replace")]
+        public async Task<IActionResult> ReplaceLocalDatabase(int databaseId, [FromBody] BackupData backupData)
+        {
+            try
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId))
+                {
+                    return Unauthorized();
+                }
+
+                await _collaborationService.ReplaceLocalDatabaseAsync(databaseId, userId, backupData);
+                return Ok(new { message = "Данные в локальной базе успешно заменены" });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Ошибка при замене данных в локальной базе");
+                return StatusCode(500, "Ошибка при замене данных в локальной базе");
             }
         }
     }

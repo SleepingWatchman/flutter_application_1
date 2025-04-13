@@ -99,13 +99,84 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
   Future<void> _loadSchedule() async {
     if (_selectedDate != null) {
       String dateKey = DateFormat('yyyy-MM-dd').format(_selectedDate!);
-      List<ScheduleEntry> entries =
-          await DatabaseHelper().getScheduleEntries();
+      List<ScheduleEntry> entries = await DatabaseHelper().getScheduleEntries();
       setState(() {
         _schedule = entries.where((entry) => entry.date == dateKey).toList();
+        // Сортируем события по времени начала и окончания
+        _schedule.sort((a, b) {
+          final aTimes = a.time.split(' - ');
+          final bTimes = b.time.split(' - ');
+          final aStart = aTimes[0].split(':');
+          final bStart = bTimes[0].split(':');
+          final aEnd = aTimes[1].split(':');
+          final bEnd = bTimes[1].split(':');
+          
+          final aStartMinutes = int.parse(aStart[0]) * 60 + int.parse(aStart[1]);
+          final bStartMinutes = int.parse(bStart[0]) * 60 + int.parse(bStart[1]);
+          
+          if (aStartMinutes != bStartMinutes) {
+            return aStartMinutes.compareTo(bStartMinutes);
+          }
+          
+          final aEndMinutes = int.parse(aEnd[0]) * 60 + int.parse(aEnd[1]);
+          final bEndMinutes = int.parse(bEnd[0]) * 60 + int.parse(bEnd[1]);
+          
+          return aEndMinutes.compareTo(bEndMinutes);
+        });
         _selectedIndex = null;
       });
     }
+  }
+
+  bool _checkTimeOverlap(String newTime, {int? excludeIndex}) {
+    final newTimes = newTime.split(' - ');
+    final newStart = newTimes[0].split(':');
+    final newEnd = newTimes[1].split(':');
+    final newStartMinutes = int.parse(newStart[0]) * 60 + int.parse(newStart[1]);
+    final newEndMinutes = int.parse(newEnd[0]) * 60 + int.parse(newEnd[1]);
+
+    for (int i = 0; i < _schedule.length; i++) {
+      if (excludeIndex != null && i == excludeIndex) continue;
+      
+      final entry = _schedule[i];
+      final entryTimes = entry.time.split(' - ');
+      final entryStart = entryTimes[0].split(':');
+      final entryEnd = entryTimes[1].split(':');
+      final entryStartMinutes = int.parse(entryStart[0]) * 60 + int.parse(entryStart[1]);
+      final entryEndMinutes = int.parse(entryEnd[0]) * 60 + int.parse(entryEnd[1]);
+
+      if ((newStartMinutes >= entryStartMinutes && newStartMinutes < entryEndMinutes) ||
+          (newEndMinutes > entryStartMinutes && newEndMinutes <= entryEndMinutes) ||
+          (newStartMinutes <= entryStartMinutes && newEndMinutes >= entryEndMinutes)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  Future<bool> _showTimeOverlapDialog() async {
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Предупреждение'),
+        content: const Text('Выбранный временной интервал пересекается с существующим событием.'),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop('cancel');
+            },
+            child: const Text('Отменить и выбрать другое время'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop('continue');
+            },
+            child: const Text('Сохранить с текущим временем'),
+          ),
+        ],
+      ),
+    );
+    return result == 'continue';
   }
 
   // Метод добавления нового интервала с предустановленной маской для поля времени.
@@ -273,6 +344,45 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                       return;
                     }
 
+                    if (_checkTimeOverlap(timeController.text)) {
+                      _showTimeOverlapDialog().then((shouldContinue) {
+                        if (shouldContinue != true) {
+                          return;
+                        }
+                        // Продолжаем с сохранением
+                        Map<String, String> dynamicMap = {};
+                        for (var field in dynamicFields) {
+                          String key = field.keyController.text.trim();
+                          if (key.isNotEmpty) {
+                            dynamicMap[key] = field.valueController.text;
+                          }
+                        }
+                        ScheduleEntry newEntry = ScheduleEntry(
+                          time: timeController.text.trim(),
+                          date: DateFormat('yyyy-MM-dd').format(_selectedDate!),
+                          note: shortNoteController.text.trim(),
+                          dynamicFieldsJson: jsonEncode(dynamicMap),
+                        );
+                        DatabaseHelper().insertScheduleEntry(newEntry.toMap()).then((id) {
+                          newEntry.id = id;
+                          setState(() {
+                            _schedule.add(newEntry);
+                          });
+                          _loadSchedule();
+                          showCustomToastWithIcon(
+                            "Интервал успешно создан",
+                            accentColor: Colors.green,
+                            fontSize: 14.0,
+                            icon: const Icon(Icons.check,
+                                size: 20, color: Colors.green),
+                          );
+                          Navigator.of(outerContext).pop();
+                        });
+                      });
+                      return;
+                    }
+
+                    // Сохранение при отсутствии наложения
                     Map<String, String> dynamicMap = {};
                     for (var field in dynamicFields) {
                       String key = field.keyController.text.trim();
@@ -291,6 +401,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                       setState(() {
                         _schedule.add(newEntry);
                       });
+                      _loadSchedule();
                       showCustomToastWithIcon(
                         "Интервал успешно создан",
                         accentColor: Colors.green,
@@ -491,6 +602,41 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                       return;
                     }
                     
+                    if (_checkTimeOverlap(timeController.text, excludeIndex: index)) {
+                      _showTimeOverlapDialog().then((shouldContinue) {
+                        if (shouldContinue != true) {
+                          return;
+                        }
+                        // Продолжаем с сохранением
+                        Map<String, String> dynamicMap = {};
+                        for (var field in dynamicFields) {
+                          String key = field.keyController.text.trim();
+                          if (key.isNotEmpty) {
+                            dynamicMap[key] = field.valueController.text;
+                          }
+                        }
+                        entry.time = timeController.text;
+                        entry.note = shortNoteController.text.trim();
+                        entry.dynamicFieldsJson = jsonEncode(dynamicMap);
+                        DatabaseHelper().updateScheduleEntry(entry).then((_) {
+                          setState(() {
+                            _schedule[index] = entry;
+                          });
+                          _loadSchedule();
+                          showCustomToastWithIcon(
+                            "Интервал успешно обновлён",
+                            accentColor: Colors.yellow,
+                            fontSize: 14.0,
+                            icon: const Icon(Icons.edit,
+                                size: 20, color: Colors.yellow),
+                          );
+                          Navigator.of(outerContext).pop();
+                        });
+                      });
+                      return;
+                    }
+
+                    // Сохранение при отсутствии наложения
                     Map<String, String> dynamicMap = {};
                     for (var field in dynamicFields) {
                       String key = field.keyController.text.trim();
@@ -505,6 +651,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                       setState(() {
                         _schedule[index] = entry;
                       });
+                      _loadSchedule();
                       showCustomToastWithIcon(
                         "Интервал успешно обновлён",
                         accentColor: Colors.yellow,

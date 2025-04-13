@@ -6,7 +6,7 @@ import '../../providers/auth_provider.dart';
 import '../../providers/backup_provider.dart';
 import 'edit_profile_screen.dart';
 import '../auth/login_screen.dart';
-import '../collaboration/collaboration_screen.dart';
+import '../collaboration/shared_databases_screen.dart';
 
 class AccountScreen extends StatelessWidget {
   const AccountScreen({Key? key}) : super(key: key);
@@ -65,6 +65,17 @@ class AccountScreen extends StatelessWidget {
                       );
                     },
                     child: const Text('Редактировать профиль'),
+                  ),
+                  const SizedBox(height: 8),
+                  ElevatedButton(
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const SharedDatabasesScreen(),
+                        ),
+                      );
+                    },
+                    child: const Text('Совместное редактирование'),
                   ),
                   const SizedBox(height: 8),
                   ElevatedButton(
@@ -166,17 +177,6 @@ class AccountScreen extends StatelessWidget {
                       );
                     },
                     child: const Text('Резервное копирование'),
-                  ),
-                  const SizedBox(height: 8),
-                  ElevatedButton(
-                    onPressed: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const CollaborationScreen(),
-                        ),
-                      );
-                    },
-                    child: const Text('Совместное редактирование'),
                   ),
                   const SizedBox(height: 8),
                   ElevatedButton(

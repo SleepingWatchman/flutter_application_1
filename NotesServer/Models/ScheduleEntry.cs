@@ -1,6 +1,7 @@
 using SQLite;
 using System.ComponentModel.DataAnnotations;
 using System.Text.Json.Serialization;
+using System;
 
 namespace NotesServer.Models
 {
@@ -19,7 +20,7 @@ namespace NotesServer.Models
         [JsonPropertyName("note")]
         public string Note { get; set; } = string.Empty;
         [JsonPropertyName("dynamicFieldsJson")]
-        public string? DynamicFieldsJson { get; set; }
+        public string DynamicFieldsJson { get; set; } = "{}";
         [JsonPropertyName("startTime")]
         public DateTime StartTime { get; set; }
         [JsonPropertyName("endTime")]

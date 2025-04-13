@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using NotesServer.Models;
 
 namespace NotesServer.Data
@@ -17,6 +18,7 @@ namespace NotesServer.Data
         public DbSet<Connection> Connections { get; set; }
         public DbSet<NoteImage> NoteImages { get; set; }
         public DbSet<CollaborationDatabase> CollaborationDatabases { get; set; }
+        public DbSet<SharedDatabase> SharedDatabases { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -40,6 +42,20 @@ namespace NotesServer.Data
             modelBuilder.Entity<CollaborationDatabase>()
                 .Property(c => c.ConnectionString)
                 .IsRequired();
+
+            modelBuilder.Entity<SharedDatabase>()
+                .Property(db => db.Collaborators)
+                .HasConversion(
+                    v => string.Join(',', v),
+                    v => v.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList()
+                )
+                .Metadata.SetValueComparer(
+                    new ValueComparer<List<string>>(
+                        (c1, c2) => c1.SequenceEqual(c2),
+                        c => c.Aggregate(0, (a, v) => HashCode.Combine(a, v.GetHashCode())),
+                        c => c.ToList()
+                    )
+                );
         }
     }
 } 

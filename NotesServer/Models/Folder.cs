@@ -1,6 +1,7 @@
 using SQLite;
 using System.ComponentModel.DataAnnotations;
 using System.Text.Json.Serialization;
+using System;
 
 namespace NotesServer.Models
 {
@@ -15,8 +16,8 @@ namespace NotesServer.Models
         public int? ParentId { get; set; }
         public DateTime CreatedAt { get; set; }
         [JsonPropertyName("color")]
-        public string Color { get; set; } = "FF424242";
+        public int Color { get; set; }
         [JsonPropertyName("isExpanded")]
-        public bool IsExpanded { get; set; }
+        public bool IsExpanded { get; set; } = true;
     }
 } 

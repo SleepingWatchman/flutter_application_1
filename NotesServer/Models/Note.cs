@@ -3,6 +3,7 @@ using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.ComponentModel.DataAnnotations.Schema;
+using System;
 
 namespace NotesServer.Models
 {
@@ -30,10 +31,10 @@ namespace NotesServer.Models
         public int? FolderId { get; set; }
 
         [JsonPropertyName("createdAt")]
-        public DateTime CreatedAt { get; set; }
+        public string CreatedAt { get; set; } = string.Empty;
 
         [JsonPropertyName("updatedAt")]
-        public DateTime UpdatedAt { get; set; }
+        public string UpdatedAt { get; set; } = string.Empty;
 
         [JsonPropertyName("imagesList")]
         [NotMapped]

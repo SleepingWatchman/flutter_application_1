@@ -62,7 +62,6 @@ class _CollaborationScreenState extends State<CollaborationScreen> {
   @override
   void initState() {
     super.initState();
-    // Загружаем список баз данных при открытии экрана
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<CollaborationProvider>().loadDatabases();
     });
@@ -105,16 +104,9 @@ class _CollaborationScreenState extends State<CollaborationScreen> {
                               keyboardType: TextInputType.number,
                               onSubmitted: (value) async {
                                 try {
-                                  // Преобразуем строку ID в числовой идентификатор базы данных
                                   final databaseId = int.parse(value);
-                                  
-                                  // Загружаем базу данных с сервера напрямую по ID
                                   final backupData = await downloadDatabase(databaseId);
-                                  
-                                  // Создаем новую базу данных
                                   await provider.createNewDatabase();
-                                  
-                                  // Загружаем данные в новую базу
                                   await uploadDatabase(backupData, provider.databases.last['id']);
 
                                   if (context.mounted) {
@@ -176,42 +168,15 @@ class _CollaborationScreenState extends State<CollaborationScreen> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           IconButton(
-                            icon: const Icon(Icons.edit),
-                            onPressed: () async {
-                              try {
-                                // Создаем резервную копию пользовательской базы данных
-                                await context.read<BackupProvider>().uploadBackup();
-                                
-                                // Загружаем базу данных с сервера
-                                final backupData = await downloadDatabase(db['id']);
-                                
-                                // Загружаем данные в текущую базу
-                                await uploadDatabase(backupData, db['id']);
-
-                                if (context.mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('База данных успешно обновлена')),
-                                  );
-                                }
-                              } catch (e) {
-                                if (context.mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(content: Text('Ошибка при обновлении базы данных: $e')),
-                                  );
-                                }
-                              }
-                            },
-                            tooltip: 'Редактировать базу данных',
-                          ),
-                          IconButton(
                             icon: const Icon(Icons.download),
                             onPressed: () async {
                               try {
-                                // Создаем резервную копию пользовательской базы данных
+                                // 1. Создаем резервную копию пользовательской базы данных
                                 await context.read<BackupProvider>().uploadBackup();
                                 
-                                // Загружаем базу данных с сервера
-                                final backupData = await downloadDatabase(db['id']);
+                                // 2. Загружаем базу данных с сервера и заменяем локальную
+                                final backupData = await context.read<CollaborationProvider>().downloadDatabase(db['id']);
+                                await context.read<CollaborationProvider>().replaceLocalDatabase(backupData, db['id']);
 
                                 if (context.mounted) {
                                   ScaffoldMessenger.of(context).showSnackBar(
@@ -231,13 +196,11 @@ class _CollaborationScreenState extends State<CollaborationScreen> {
                             icon: const Icon(Icons.sync),
                             onPressed: () async {
                               try {
-                                // Создаем резервную копию текущей базы данных
-                                await context.read<BackupProvider>().uploadBackup();
+                                // 1. Загружаем данные из локальной базы на сервер
+                                final backupData = await context.read<CollaborationProvider>().downloadDatabase(db['id']);
+                                await context.read<CollaborationProvider>().uploadDatabase(backupData, db['id']);
                                 
-                                // Загружаем её на сервер
-                                await uploadDatabase({'databaseId': db['id']}, db['id']);
-                                
-                                // Восстанавливаем пользовательскую базу данных
+                                // 2. Восстанавливаем пользовательскую базу данных
                                 await context.read<BackupProvider>().downloadBackup();
 
                                 if (context.mounted) {
@@ -286,18 +249,16 @@ class _CollaborationScreenState extends State<CollaborationScreen> {
                                             throw Exception('Ошибка при удалении базы данных: ${response.statusCode}');
                                           }
 
-                                          // Обновляем список баз данных
-                                          await context.read<CollaborationProvider>().loadDatabases();
-
                                           if (context.mounted) {
                                             Navigator.of(context).pop();
                                             ScaffoldMessenger.of(context).showSnackBar(
                                               const SnackBar(content: Text('База данных успешно удалена')),
                                             );
                                           }
+
+                                          await provider.loadDatabases();
                                         } catch (e) {
                                           if (context.mounted) {
-                                            Navigator.of(context).pop();
                                             ScaffoldMessenger.of(context).showSnackBar(
                                               SnackBar(content: Text('Ошибка при удалении базы данных: $e')),
                                             );

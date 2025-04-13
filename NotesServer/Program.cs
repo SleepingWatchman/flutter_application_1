@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.Extensions.FileProviders;
 using NotesServer.Data;
+using NotesServer.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -19,7 +20,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 
 // Добавляем контекст базы данных
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseSqlite("Data Source=./Data/collaboration.db"));
+    options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 // Register AuthService
 builder.Services.AddScoped<IAuthService, AuthService>();
@@ -95,7 +96,7 @@ using (var scope = app.Services.CreateScope())
     context.Database.EnsureCreated();
 
     var applicationDbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-    applicationDbContext.Database.EnsureCreated();
+    applicationDbContext.Database.Migrate();
 }
 
 // Create uploads directory if it doesn't exist

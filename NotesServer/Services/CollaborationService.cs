@@ -20,6 +20,7 @@ namespace NotesServer.Services
         Task SaveDatabaseBackupAsync(int databaseId, string userId, BackupData backupData);
         Task<BackupData> GetDatabaseBackupAsync(int databaseId, string userId);
         Task<CollaborationDatabase> GetDatabaseAsync(int databaseId, string userId);
+        Task ReplaceLocalDatabaseAsync(int databaseId, string userId, BackupData backupData);
     }
 
     public class CollaborationService : ICollaborationService
@@ -65,67 +66,63 @@ namespace NotesServer.Services
                 {
                     // Создаем таблицы с явным указанием типов колонок
                     db.Execute(@"
-                        CREATE TABLE IF NOT EXISTS Notes (
-                            Id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            Title TEXT NOT NULL,
-                            Content TEXT NOT NULL,
-                            FolderId INTEGER,
-                            CreatedAt TEXT NOT NULL,
-                            UpdatedAt TEXT NOT NULL,
-                            ImagesJson TEXT DEFAULT '[]',
-                            MetadataJson TEXT DEFAULT '{}',
-                            ContentJson TEXT,
-                            DatabaseId INTEGER NOT NULL
+                        CREATE TABLE IF NOT EXISTS folders (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            name TEXT NOT NULL,
+                            color INTEGER NOT NULL,
+                            is_expanded INTEGER NOT NULL DEFAULT 1
                         );
                         
-                        CREATE TABLE IF NOT EXISTS Folders (
-                            Id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            Name TEXT NOT NULL,
-                            ParentId INTEGER,
-                            CreatedAt TEXT NOT NULL,
-                            UpdatedAt TEXT NOT NULL,
-                            DatabaseId INTEGER NOT NULL
+                        CREATE TABLE IF NOT EXISTS notes (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            title TEXT NOT NULL,
+                            content TEXT,
+                            folder_id INTEGER,
+                            created_at TEXT NOT NULL,
+                            updated_at TEXT NOT NULL,
+                            images TEXT,
+                            metadata TEXT,
+                            content_json TEXT,
+                            FOREIGN KEY (folder_id) REFERENCES folders (id) ON DELETE SET NULL
                         );
                         
-                        CREATE TABLE IF NOT EXISTS ScheduleEntries (
-                            Id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            Title TEXT NOT NULL,
-                            Description TEXT,
-                            StartTime TEXT NOT NULL,
-                            EndTime TEXT NOT NULL,
-                            CreatedAt TEXT NOT NULL,
-                            UpdatedAt TEXT NOT NULL,
-                            DatabaseId INTEGER NOT NULL
+                        CREATE TABLE IF NOT EXISTS schedule_entries(
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            time TEXT,
+                            date TEXT,
+                            note TEXT,
+                            dynamic_fields_json TEXT
                         );
                         
-                        CREATE TABLE IF NOT EXISTS PinboardNotes (
-                            Id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            Title TEXT NOT NULL,
-                            Content TEXT NOT NULL,
-                            PositionX REAL NOT NULL,
-                            PositionY REAL NOT NULL,
-                            CreatedAt TEXT NOT NULL,
-                            UpdatedAt TEXT NOT NULL,
-                            DatabaseId INTEGER NOT NULL
+                        CREATE TABLE IF NOT EXISTS pinboard_notes(
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            title TEXT,
+                            content TEXT,
+                            position_x REAL,
+                            position_y REAL,
+                            width REAL,
+                            height REAL,
+                            background_color INTEGER,
+                            icon INTEGER
                         );
                         
-                        CREATE TABLE IF NOT EXISTS Connections (
-                            Id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            SourceId INTEGER NOT NULL,
-                            TargetId INTEGER NOT NULL,
-                            Type TEXT NOT NULL,
-                            CreatedAt TEXT NOT NULL,
-                            UpdatedAt TEXT NOT NULL,
-                            DatabaseId INTEGER NOT NULL
+                        CREATE TABLE IF NOT EXISTS connections(
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            from_note_id INTEGER,
+                            to_note_id INTEGER,
+                            type TEXT,
+                            name TEXT,
+                            connection_color INTEGER,
+                            FOREIGN KEY (from_note_id) REFERENCES pinboard_notes (id),
+                            FOREIGN KEY (to_note_id) REFERENCES pinboard_notes (id)
                         );
                         
-                        CREATE TABLE IF NOT EXISTS NoteImages (
-                            Id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            NoteId INTEGER NOT NULL,
-                            ImagePath TEXT NOT NULL,
-                            CreatedAt TEXT NOT NULL,
-                            UpdatedAt TEXT NOT NULL,
-                            DatabaseId INTEGER NOT NULL
+                        CREATE TABLE IF NOT EXISTS note_images (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            note_id INTEGER NOT NULL,
+                            file_name TEXT NOT NULL,
+                            image_data BLOB NOT NULL,
+                            FOREIGN KEY (note_id) REFERENCES notes (id) ON DELETE CASCADE
                         );
                     ");
                 }
@@ -290,6 +287,226 @@ namespace NotesServer.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, $"Ошибка при получении базы данных {databaseId} для пользователя {userId}");
+                throw;
+            }
+        }
+
+        public async Task ReplaceLocalDatabaseAsync(int databaseId, string userId, BackupData backupData)
+        {
+            try
+            {
+                var database = await _context.CollaborationDatabases
+                    .FirstOrDefaultAsync(db => db.Id == databaseId);
+
+                if (database == null)
+                {
+                    throw new Exception("База данных не найдена");
+                }
+
+                // Создаем таблицы, если они не существуют
+                using (var db = new SQLiteConnection(database.ConnectionString))
+                {
+                    // Создаем таблицу папок
+                    db.Execute(@"
+                        CREATE TABLE IF NOT EXISTS folders (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            name TEXT NOT NULL,
+                            color INTEGER NOT NULL,
+                            is_expanded INTEGER NOT NULL DEFAULT 1
+                        )
+                    ");
+
+                    // Создаем таблицу заметок
+                    db.Execute(@"
+                        CREATE TABLE IF NOT EXISTS notes (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            title TEXT NOT NULL,
+                            content TEXT,
+                            folder_id INTEGER,
+                            created_at TEXT NOT NULL,
+                            updated_at TEXT NOT NULL,
+                            images TEXT,
+                            metadata TEXT,
+                            content_json TEXT,
+                            FOREIGN KEY (folder_id) REFERENCES folders (id) ON DELETE SET NULL
+                        )
+                    ");
+
+                    // Создаем таблицу расписания
+                    db.Execute(@"
+                        CREATE TABLE IF NOT EXISTS schedule_entries(
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            time TEXT,
+                            date TEXT,
+                            note TEXT,
+                            dynamic_fields_json TEXT
+                        )
+                    ");
+
+                    // Создаем таблицу заметок на доске
+                    db.Execute(@"
+                        CREATE TABLE IF NOT EXISTS pinboard_notes(
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            title TEXT,
+                            content TEXT,
+                            position_x REAL,
+                            position_y REAL,
+                            width REAL,
+                            height REAL,
+                            background_color INTEGER,
+                            icon INTEGER
+                        )
+                    ");
+
+                    // Создаем таблицу соединений
+                    db.Execute(@"
+                        CREATE TABLE IF NOT EXISTS connections(
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            from_note_id INTEGER,
+                            to_note_id INTEGER,
+                            type TEXT,
+                            name TEXT,
+                            connection_color INTEGER,
+                            FOREIGN KEY (from_note_id) REFERENCES pinboard_notes (id),
+                            FOREIGN KEY (to_note_id) REFERENCES pinboard_notes (id)
+                        )
+                    ");
+
+                    // Создаем таблицу изображений
+                    db.Execute(@"
+                        CREATE TABLE IF NOT EXISTS note_images (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            note_id INTEGER NOT NULL,
+                            file_name TEXT NOT NULL,
+                            image_data BLOB NOT NULL,
+                            FOREIGN KEY (note_id) REFERENCES notes (id) ON DELETE CASCADE
+                        )
+                    ");
+                }
+
+                // Очищаем существующие данные в базе
+                using (var db = new SQLiteConnection(database.ConnectionString))
+                {
+                    db.Execute("DELETE FROM notes");
+                    db.Execute("DELETE FROM folders");
+                    db.Execute("DELETE FROM schedule_entries");
+                    db.Execute("DELETE FROM pinboard_notes");
+                    db.Execute("DELETE FROM connections");
+                    db.Execute("DELETE FROM note_images");
+                }
+
+                // Загружаем новые данные
+                using (var db = new SQLiteConnection(database.ConnectionString))
+                {
+                    // Загружаем папки
+                    if (backupData.Folders != null)
+                    {
+                        foreach (var folder in backupData.Folders)
+                        {
+                            db.Insert(new Folder
+                            {
+                                Id = folder.Id,
+                                Name = folder.Name,
+                                Color = folder.Color,
+                                IsExpanded = folder.IsExpanded
+                            });
+                        }
+                    }
+
+                    // Загружаем заметки
+                    if (backupData.Notes != null)
+                    {
+                        foreach (var note in backupData.Notes)
+                        {
+                            db.Insert(new Note
+                            {
+                                Id = note.Id,
+                                Title = note.Title,
+                                Content = note.Content,
+                                FolderId = note.FolderId,
+                                CreatedAt = note.CreatedAt,
+                                UpdatedAt = note.UpdatedAt,
+                                Images = note.Images,
+                                Metadata = note.Metadata,
+                                ContentJson = note.ContentJson
+                            });
+                        }
+                    }
+
+                    // Загружаем записи расписания
+                    if (backupData.ScheduleEntries != null)
+                    {
+                        foreach (var entry in backupData.ScheduleEntries)
+                        {
+                            db.Insert(new ScheduleEntry
+                            {
+                                Id = entry.Id,
+                                Time = entry.Time,
+                                Date = entry.Date,
+                                Note = entry.Note,
+                                DynamicFieldsJson = entry.DynamicFieldsJson
+                            });
+                        }
+                    }
+
+                    // Загружаем заметки на доске
+                    if (backupData.PinboardNotes != null)
+                    {
+                        foreach (var note in backupData.PinboardNotes)
+                        {
+                            db.Insert(new PinboardNote
+                            {
+                                Id = note.Id,
+                                Title = note.Title,
+                                Content = note.Content,
+                                PositionX = note.PositionX,
+                                PositionY = note.PositionY,
+                                Width = note.Width,
+                                Height = note.Height,
+                                BackgroundColor = note.BackgroundColor,
+                                Icon = note.Icon
+                            });
+                        }
+                    }
+
+                    // Загружаем связи
+                    if (backupData.Connections != null)
+                    {
+                        foreach (var connection in backupData.Connections)
+                        {
+                            db.Insert(new Connection
+                            {
+                                Id = connection.Id,
+                                FromNoteId = connection.FromNoteId,
+                                ToNoteId = connection.ToNoteId,
+                                Type = connection.Type,
+                                Name = connection.Name,
+                                ConnectionColor = connection.ConnectionColor
+                            });
+                        }
+                    }
+
+                    // Загружаем изображения
+                    if (backupData.NoteImages != null)
+                    {
+                        foreach (var image in backupData.NoteImages)
+                        {
+                            db.Insert(new NoteImage
+                            {
+                                Id = image.Id,
+                                NoteId = image.NoteId,
+                                FileName = image.FileName,
+                                ImageData = image.ImageData
+                            });
+                        }
+                    }
+                }
+
+                _logger.LogInformation($"Данные в базе данных {databaseId} успешно заменены для пользователя {userId}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Ошибка при замене данных в базе данных {databaseId} для пользователя {userId}");
                 throw;
             }
         }

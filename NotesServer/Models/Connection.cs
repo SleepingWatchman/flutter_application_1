@@ -1,6 +1,7 @@
 using SQLite;
 using System.ComponentModel.DataAnnotations;
 using System.Text.Json.Serialization;
+using System;
 
 namespace NotesServer.Models
 {
@@ -10,20 +11,22 @@ namespace NotesServer.Models
         [JsonPropertyName("id")]
         public int Id { get; set; }
 
-        [JsonPropertyName("fromId")]
-        public int FromId { get; set; }
+        [JsonPropertyName("fromNoteId")]
+        public int FromNoteId { get; set; }
 
-        [JsonPropertyName("toId")]
-        public int ToId { get; set; }
+        [JsonPropertyName("toNoteId")]
+        public int ToNoteId { get; set; }
+
+        [Required]
+        [JsonPropertyName("type")]
+        public string Type { get; set; } = string.Empty;
 
         [JsonPropertyName("name")]
         public string Name { get; set; } = string.Empty;
 
         [JsonPropertyName("connectionColor")]
-        public string ConnectionColor { get; set; } = string.Empty;
+        public int ConnectionColor { get; set; }
 
-        [Required]
-        public string Type { get; set; } = string.Empty;
         [Required]
         public string ConnectionString { get; set; } = string.Empty;
         public DateTime CreatedAt { get; set; }

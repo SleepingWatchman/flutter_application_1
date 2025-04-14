@@ -198,10 +198,11 @@ class UserBackupService {
 class CollaborationBackupService {
   final DatabaseHelper _dbHelper;
   final String _baseUrl;
+  final String _token;
 
-  CollaborationBackupService(this._dbHelper, this._baseUrl);
+  CollaborationBackupService(this._dbHelper, this._baseUrl, this._token);
 
-  Future<void> createAndUploadBackup(int databaseId) async {
+  Future<void> createAndUploadBackup(String databaseId) async {
     try {
       print('Начало создания резервной копии для совместной работы...');
       final backupData = await _createBackup(databaseId);
@@ -216,27 +217,27 @@ class CollaborationBackupService {
     }
   }
 
-  Future<BackupData> _createBackup(int databaseId) async {
-    final notes = await _dbHelper.getNotesForBackup();
+  Future<BackupData> _createBackup(String databaseId) async {
+    final notes = await _dbHelper.getAllNotes(databaseId);
     print('Получено заметок: ${notes.length}');
 
-    final pinboardNotes = await _dbHelper.getPinboardNotesForBackup();
+    final pinboardNotes = await _dbHelper.getPinboardNotes(databaseId);
     print('Получено заметок на доске: ${pinboardNotes.length}');
 
-    final connections = await _dbHelper.getConnectionsForBackup();
+    final connections = await _dbHelper.getConnectionsDB(databaseId);
     print('Получено соединений: ${connections.length}');
 
     return BackupData(
       folders: [],
-      notes: notes,
+      notes: notes.map((note) => note.toMap()).toList(),
       scheduleEntries: [],
-      pinboardNotes: pinboardNotes,
-      connections: connections,
+      pinboardNotes: pinboardNotes.map((note) => note.toMap()).toList(),
+      connections: connections.map((conn) => conn.toMap()).toList(),
       noteImages: [],
     );
   }
 
-  Future<void> _uploadBackup(int databaseId, BackupData backupData) async {
+  Future<void> _uploadBackup(String databaseId, BackupData backupData) async {
     final url = Uri.parse('$_baseUrl/api/CollaborationBackup/$databaseId/upload');
     final jsonData = jsonEncode(backupData.toJson());
     
@@ -246,8 +247,10 @@ class CollaborationBackupService {
           'file',
           jsonData,
           filename: 'backup.json',
+          contentType: MediaType('application', 'json; charset=utf-8'),
         ),
-      );
+      )
+      ..headers['Authorization'] = 'Bearer $_token';
 
     final response = await request.send();
     
@@ -256,7 +259,7 @@ class CollaborationBackupService {
     }
   }
 
-  Future<void> restoreFromLatestBackup(int databaseId) async {
+  Future<void> restoreFromLatestBackup(String databaseId) async {
     try {
       print('Начало восстановления из резервной копии...');
       final backupData = await _downloadLatestBackup(databaseId);
@@ -268,43 +271,52 @@ class CollaborationBackupService {
     }
   }
 
-  Future<BackupData> _downloadLatestBackup(int databaseId) async {
+  Future<BackupData> _downloadLatestBackup(String databaseId) async {
     final url = Uri.parse('$_baseUrl/api/CollaborationBackup/$databaseId/download/latest');
-    final response = await http.get(url);
+    final response = await http.get(
+      url,
+      headers: {
+        'Authorization': 'Bearer $_token',
+        'Accept-Charset': 'utf-8',
+      },
+    );
 
     if (response.statusCode != 200) {
       throw Exception('Ошибка при загрузке резервной копии: ${response.statusCode}');
     }
 
-    return BackupData.fromJson(jsonDecode(response.body));
+    return BackupData.fromJson(jsonDecode(utf8.decode(response.bodyBytes)));
   }
 
-  Future<void> _restoreFromBackup(int databaseId, BackupData backupData) async {
+  Future<void> _restoreFromBackup(String databaseId, BackupData backupData) async {
     await _dbHelper.transaction((txn) async {
       // Очищаем существующие данные только для указанной базы данных
-      await _dbHelper.clearDatabaseTables(databaseId, txn);
+      await _dbHelper.clearDatabaseTablesForBackup(databaseId, txn);
 
-      // Восстанавливаем данные
-      await _restoreNotes(backupData.notes, txn);
-      await _restorePinboardNotes(backupData.pinboardNotes, txn);
-      await _restoreConnections(backupData.connections, txn);
+      // Восстанавливаем данные с указанным database_id
+      await _restoreNotes(databaseId, backupData.notes, txn);
+      await _restorePinboardNotes(databaseId, backupData.pinboardNotes, txn);
+      await _restoreConnections(databaseId, backupData.connections, txn);
     });
   }
 
-  Future<void> _restoreNotes(List<Map<String, dynamic>> notes, Transaction txn) async {
+  Future<void> _restoreNotes(String databaseId, List<Map<String, dynamic>> notes, Transaction txn) async {
     for (var note in notes) {
+      note['database_id'] = databaseId;
       await _dbHelper.insertNoteForBackup(note, txn);
     }
   }
 
-  Future<void> _restorePinboardNotes(List<Map<String, dynamic>> notes, Transaction txn) async {
+  Future<void> _restorePinboardNotes(String databaseId, List<Map<String, dynamic>> notes, Transaction txn) async {
     for (var note in notes) {
+      note['database_id'] = databaseId;
       await _dbHelper.insertPinboardNoteForBackup(note, txn);
     }
   }
 
-  Future<void> _restoreConnections(List<Map<String, dynamic>> connections, Transaction txn) async {
+  Future<void> _restoreConnections(String databaseId, List<Map<String, dynamic>> connections, Transaction txn) async {
     for (var connection in connections) {
+      connection['database_id'] = databaseId;
       await _dbHelper.insertConnectionForBackup(connection, txn);
     }
   }

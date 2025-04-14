@@ -8,6 +8,8 @@ using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using System.Security.Claims;
+using System.IO;
+using SQLite;
 
 namespace NotesServer.Controllers
 {
@@ -17,10 +19,14 @@ namespace NotesServer.Controllers
     public class SharedDatabaseController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
+        private readonly IWebHostEnvironment _environment;
+        private readonly ILogger<SharedDatabaseController> _logger;
 
-        public SharedDatabaseController(ApplicationDbContext context)
+        public SharedDatabaseController(ApplicationDbContext context, IWebHostEnvironment environment, ILogger<SharedDatabaseController> logger)
         {
             _context = context;
+            _environment = environment;
+            _logger = logger;
         }
 
         [HttpGet]
@@ -30,8 +36,14 @@ namespace NotesServer.Controllers
             if (userId == null) return Unauthorized();
 
             var databases = await _context.SharedDatabases
-                .Where(db => db.OwnerId == userId || db.Collaborators.Contains(userId))
+                .Where(db => db.OwnerId == userId)
                 .ToListAsync();
+
+            var sharedDatabases = await _context.SharedDatabases
+                .Where(db => db.OwnerId != userId)
+                .ToListAsync();
+
+            databases.AddRange(sharedDatabases.Where(db => db.Collaborators.Contains(userId)));
 
             return Ok(databases);
         }
@@ -48,13 +60,34 @@ namespace NotesServer.Controllers
 
             Console.WriteLine($"Creating database for user {userId} with name {request.Name}");
 
+            // Создаем физический файл базы данных
+            var databaseId = Guid.NewGuid().ToString();
+            var databaseFileName = $"{databaseId}.db";
+            var databasePath = Path.Combine(_environment.ContentRootPath, "Databases", databaseFileName);
+            
+            // Создаем директорию для баз данных, если она не существует
+            System.IO.Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
+            
+            // Создаем новую базу данных SQLite
+            using (var db = new SQLiteConnection(databasePath))
+            {
+                // Инициализация таблиц
+                db.CreateTable<Note>();
+                db.CreateTable<Folder>();
+                db.CreateTable<ScheduleEntry>();
+                db.CreateTable<PinboardNote>();
+                db.CreateTable<Connection>();
+                db.CreateTable<NoteImage>();
+            }
+
             var database = new SharedDatabase
             {
-                Id = GenerateDatabaseId(),
+                Id = databaseId,
                 Name = request.Name,
                 OwnerId = userId,
                 CreatedAt = DateTime.UtcNow,
-                Collaborators = new List<string> { userId }
+                Collaborators = new List<string> { userId },
+                DatabasePath = databasePath
             };
 
             _context.SharedDatabases.Add(database);
@@ -90,13 +123,30 @@ namespace NotesServer.Controllers
 
             if (database == null) return NotFound();
 
-            if (!database.Collaborators.Contains(userId))
+            try
             {
+                if (database.Collaborators.Contains(userId))
+                {
+                    return Ok(database);
+                }
+
+                // Проверяем существование физического файла базы
+                if (!System.IO.File.Exists(database.DatabasePath))
+                {
+                    return NotFound("Физический файл базы данных не найден");
+                }
+
+                // Добавляем пользователя в список коллабораторов
                 database.Collaborators.Add(userId);
                 await _context.SaveChangesAsync();
-            }
 
-            return Ok();
+                return Ok(database);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Ошибка при импорте базы данных {id} для пользователя {userId}");
+                return StatusCode(500, $"Ошибка при импорте базы данных: {ex.Message}");
+            }
         }
 
         [HttpDelete("{id}")]
@@ -123,9 +173,7 @@ namespace NotesServer.Controllers
             if (userId == null) return Unauthorized();
 
             var database = await _context.SharedDatabases
-                .FirstOrDefaultAsync(db => db.Id == id && 
-                    db.Collaborators.Contains(userId) && 
-                    db.OwnerId != userId);
+                .FirstOrDefaultAsync(db => db.Id == id && db.Collaborators.Contains(userId));
 
             if (database == null) return NotFound();
 
@@ -133,14 +181,6 @@ namespace NotesServer.Controllers
             await _context.SaveChangesAsync();
 
             return NoContent();
-        }
-
-        private string GenerateDatabaseId()
-        {
-            const string chars = "0123456789";
-            var random = new Random();
-            return new string(Enumerable.Repeat(chars, 12)
-                .Select(s => s[random.Next(s.Length)]).ToArray());
         }
     }
 

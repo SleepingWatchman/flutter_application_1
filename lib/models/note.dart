@@ -13,6 +13,7 @@ class Note {
   List<String>? images; // Список путей к изображениям
   Map<String, dynamic>? metadata; // Дополнительные метаданные
   final String? content_json; // JSON-представление контента
+  final String? database_id; // ID базы данных для совместной работы
   
   Note({
     this.id,
@@ -24,6 +25,7 @@ class Note {
     this.images,
     this.metadata,
     this.content_json,
+    this.database_id,
   });
   
   // Преобразование в HTML для отображения
@@ -43,6 +45,7 @@ class Note {
       'images': images != null ? jsonEncode(images) : null,
       'metadata': metadata,
       'content_json': content_json,
+      'database_id': database_id,
     };
   }
 
@@ -58,6 +61,7 @@ class Note {
       images: map['images'] != null ? List<String>.from(jsonDecode(map['images'])) : null,
       metadata: map['metadata'],
       content_json: map['content_json'] as String?,
+      database_id: map['database_id'] as String?,
     );
   }
 
@@ -82,6 +86,7 @@ class Note {
     List<String>? images,
     Map<String, dynamic>? metadata,
     String? content_json,
+    String? database_id,
   }) {
     return Note(
       id: id ?? this.id,
@@ -93,6 +98,7 @@ class Note {
       images: images ?? this.images,
       metadata: metadata ?? this.metadata,
       content_json: content_json ?? this.content_json,
+      database_id: database_id ?? this.database_id,
     );
   }
 
@@ -102,6 +108,7 @@ class Note {
     String? content,
     DateTime? createdAt,
     DateTime? updatedAt,
+    String? database_id,
   }) {
     return Note(
       id: id ?? this.id,
@@ -113,6 +120,7 @@ class Note {
       images: this.images,
       metadata: this.metadata,
       content_json: this.content_json,
+      database_id: database_id ?? this.database_id,
     );
   }
 } 

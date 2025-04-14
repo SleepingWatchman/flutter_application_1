@@ -15,11 +15,11 @@ class SharedDatabase {
 
   factory SharedDatabase.fromJson(Map<String, dynamic> json) {
     return SharedDatabase(
-      id: json['id'],
-      name: json['name'],
-      ownerId: json['ownerId'],
-      createdAt: DateTime.parse(json['createdAt']),
-      collaborators: List<String>.from(json['collaborators']),
+      id: json['id'] as String,
+      name: json['name'] as String,
+      ownerId: json['ownerId'] as String,
+      createdAt: DateTime.parse(json['createdAt'] as String),
+      collaborators: List<String>.from(json['collaborators'] as List),
     );
   }
 

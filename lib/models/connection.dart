@@ -7,6 +7,7 @@ class ConnectionDB {
   int toId;
   String name;
   int connectionColor; // цвет в формате ARGB
+  String? database_id;
 
   ConnectionDB({
     this.id,
@@ -14,6 +15,7 @@ class ConnectionDB {
     required this.toId,
     this.name = "",
     this.connectionColor = 0xFF00FFFF, // например, дефолтный – ярко-циановый
+    this.database_id,
   });
 
   Map<String, dynamic> toMap() {
@@ -23,6 +25,7 @@ class ConnectionDB {
       'to_note_id': toId,
       'name': name,
       'connection_color': connectionColor,
+      'database_id': database_id,
     };
   }
 
@@ -33,6 +36,7 @@ class ConnectionDB {
       toId: map['to_note_id'] ?? 0,
       name: map['name'] ?? "",
       connectionColor: map['connection_color'] ?? 0xFF00FFFF,
+      database_id: map['database_id'] as String?,
     );
   }
 }

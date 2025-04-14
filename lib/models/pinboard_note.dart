@@ -11,6 +11,7 @@ class PinboardNoteDB {
   double height;
   int backgroundColor;
   String icon;
+  String? database_id;
 
   PinboardNoteDB({
     this.id,
@@ -22,6 +23,7 @@ class PinboardNoteDB {
     this.height = 150.0,
     this.backgroundColor = 0xFF424242, // Темно-серый по умолчанию
     this.icon = 'person',
+    this.database_id,
   });
 
   Map<String, dynamic> toMap() {
@@ -35,6 +37,7 @@ class PinboardNoteDB {
       'height': height,
       'background_color': backgroundColor,
       'icon': _getIconCodePoint(icon), // Сохраняем codePoint иконки
+      'database_id': database_id,
     };
   }
 
@@ -49,6 +52,7 @@ class PinboardNoteDB {
       height: map['height'] ?? 150.0,
       backgroundColor: map['background_color'] ?? 0xFF424242,
       icon: _getIconKey(map['icon'] ?? Icons.person.codePoint), // Преобразуем codePoint в ключ
+      database_id: map['database_id'] as String?,
     );
   }
 

@@ -4,6 +4,7 @@ import '../db/database_helper.dart';
 import '../utils/config.dart';
 import 'auth_provider.dart';
 import 'database_provider.dart';
+import '../models/backup_data.dart';
 
 class BackupProvider extends ChangeNotifier {
   final AuthProvider _authProvider;
@@ -13,7 +14,7 @@ class BackupProvider extends ChangeNotifier {
   bool _isLoading = false;
   String? _error;
   bool _needsReload = false;
-  late final DatabaseProvider _databaseProvider;
+  DatabaseProvider? _databaseProvider;
   bool _disposed = false;
 
   BackupProvider(this._authProvider) {
@@ -25,6 +26,7 @@ class BackupProvider extends ChangeNotifier {
     _collaborationBackupService = CollaborationBackupService(
       _dbHelper,
       Config.apiBaseUrl,
+      _authProvider.token ?? '',
     );
   }
 
@@ -63,11 +65,11 @@ class BackupProvider extends ChangeNotifier {
     await _userBackupService.restoreFromLatestBackup();
   }
 
-  Future<void> createAndUploadCollaborationBackup(int databaseId) async {
+  Future<void> createAndUploadCollaborationBackup(String databaseId) async {
     await _collaborationBackupService.createAndUploadBackup(databaseId);
   }
 
-  Future<void> restoreFromLatestCollaborationBackup(int databaseId) async {
+  Future<void> restoreFromLatestCollaborationBackup(String databaseId) async {
     await _collaborationBackupService.restoreFromLatestBackup(databaseId);
   }
 
@@ -99,7 +101,7 @@ class BackupProvider extends ChangeNotifier {
       
       // После успешного восстановления уведомляем о необходимости обновления данных
       _needsReload = true;
-      _databaseProvider.setNeedsUpdate(true);
+      _databaseProvider?.setNeedsUpdate(true);
       _isLoading = false;
       _notifyIfNotDisposed();
     } catch (e) {
@@ -114,5 +116,20 @@ class BackupProvider extends ChangeNotifier {
   void resetReloadFlag() {
     _needsReload = false;
     _notifyIfNotDisposed();
+  }
+
+  Future<BackupData> createBackup() async {
+    final backup = await _dbHelper.createBackup();
+    return backup;
+  }
+
+  Future<void> restoreFromBackup() async {
+    await _dbHelper.restoreFromBackup();
+    _databaseProvider?.setNeedsUpdate(true);
+  }
+
+  Future<void> restoreFromBackupData(BackupData backupData) async {
+    await _dbHelper.replaceDatabase(backupData);
+    _databaseProvider?.setNeedsUpdate(true);
   }
 } 

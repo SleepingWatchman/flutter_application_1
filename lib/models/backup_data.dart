@@ -8,6 +8,10 @@ class BackupData {
   final List<Map<String, dynamic>> pinboardNotes;
   final List<Map<String, dynamic>> connections;
   final List<Map<String, dynamic>> noteImages;
+  final String? databaseId;
+  final String? userId;
+  final DateTime lastModified;
+  final DateTime createdAt;
 
   BackupData({
     required this.folders,
@@ -16,7 +20,13 @@ class BackupData {
     required this.pinboardNotes,
     required this.connections,
     required this.noteImages,
-  });
+    this.databaseId,
+    this.userId,
+    DateTime? lastModified,
+    DateTime? createdAt,
+  }) : 
+    this.lastModified = lastModified ?? DateTime.now(),
+    this.createdAt = createdAt ?? DateTime.now();
 
   Map<String, dynamic> toJson() {
     return {
@@ -26,7 +36,10 @@ class BackupData {
       'pinboardNotes': _encodeList(pinboardNotes),
       'connections': _encodeList(connections),
       'images': _encodeImages(noteImages),
-      'lastModified': DateTime.now().toIso8601String(),
+      'lastModified': lastModified.toIso8601String(),
+      'createdAt': createdAt.toIso8601String(),
+      'databaseId': databaseId,
+      'userId': userId,
     };
   }
 
@@ -62,6 +75,14 @@ class BackupData {
       pinboardNotes: _decodeList(json['pinboardNotes'] ?? []),
       connections: _decodeList(json['connections'] ?? []),
       noteImages: _decodeImages(json['images'] ?? []),
+      databaseId: json['databaseId'] as String?,
+      userId: json['userId'] as String?,
+      lastModified: json['lastModified'] != null 
+        ? DateTime.parse(json['lastModified'] as String)
+        : null,
+      createdAt: json['createdAt'] != null 
+        ? DateTime.parse(json['createdAt'] as String)
+        : null,
     );
   }
 
@@ -91,9 +112,25 @@ class BackupData {
       var decoded = Map<String, dynamic>.from(image);
       if (decoded['image_data'] is String) {
         try {
-          decoded['image_data'] = base64Decode(decoded['image_data'] as String);
+          // Декодируем base64 в бинарные данные
+          final String base64Data = decoded['image_data'] as String;
+          if (base64Data.isNotEmpty) {
+            decoded['image_data'] = base64Decode(base64Data);
+          } else {
+            print('Предупреждение: пустые данные изображения');
+            decoded['image_data'] = null;
+          }
         } catch (e) {
           print('Ошибка при декодировании изображения: $e');
+          decoded['image_data'] = null;
+        }
+      } else if (decoded['image_data'] is List) {
+        // Если данные уже в виде списка байтов, преобразуем их в Uint8List
+        try {
+          decoded['image_data'] = Uint8List.fromList(List<int>.from(decoded['image_data']));
+        } catch (e) {
+          print('Ошибка при преобразовании списка байтов: $e');
+          decoded['image_data'] = null;
         }
       }
       return decoded;

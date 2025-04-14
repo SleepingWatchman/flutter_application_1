@@ -83,6 +83,7 @@ class DatabaseHelper {
         images TEXT,
         metadata TEXT,
         content_json TEXT,
+        database_id TEXT,
         FOREIGN KEY (folder_id) REFERENCES folders (id) ON DELETE SET NULL
       )
     ''');
@@ -109,7 +110,8 @@ class DatabaseHelper {
         width REAL,
         height REAL,
         background_color INTEGER,
-        icon INTEGER
+        icon INTEGER,
+        database_id TEXT
       )
     ''');
 
@@ -122,6 +124,7 @@ class DatabaseHelper {
         type TEXT,
         name TEXT,
         connection_color INTEGER,
+        database_id TEXT,
         FOREIGN KEY (from_note_id) REFERENCES pinboard_notes (id),
         FOREIGN KEY (to_note_id) REFERENCES pinboard_notes (id)
       )
@@ -175,8 +178,16 @@ class DatabaseHelper {
   }
 
   // Методы для работы с заметками
-  Future<List<Note>> getAllNotes() async {
+  Future<List<Note>> getAllNotes([String? databaseId]) async {
     final db = await database;
+    if (databaseId != null) {
+      final List<Map<String, dynamic>> maps = await db.query(
+        'notes',
+        where: 'database_id = ?',
+        whereArgs: [databaseId],
+      );
+      return List.generate(maps.length, (i) => Note.fromMap(maps[i]));
+    }
     final List<Map<String, dynamic>> maps = await db.query('notes');
     return List.generate(maps.length, (i) => Note.fromMap(maps[i]));
   }
@@ -197,6 +208,10 @@ class DatabaseHelper {
 
   Future<int> insertNote(Map<String, dynamic> note) async {
     final db = await database;
+    // Удаляем database_id из карты, если это локальная заметка
+    if (note['database_id'] == null) {
+      note.remove('database_id');
+    }
     final id = await db.insert('notes', note);
     _notifyDatabaseChanged();
     return id;
@@ -217,13 +232,26 @@ class DatabaseHelper {
   }
 
   // Методы для работы с заметками на доске
-  Future<List<PinboardNoteDB>> getPinboardNotes() async {
+  Future<List<PinboardNoteDB>> getPinboardNotes([String? databaseId]) async {
     final db = await database;
+    if (databaseId != null) {
+      final List<Map<String, dynamic>> maps = await db.query(
+        'pinboard_notes',
+        where: 'database_id = ?',
+        whereArgs: [databaseId],
+      );
+      return List.generate(maps.length, (i) => PinboardNoteDB.fromMap(maps[i]));
+    }
     final List<Map<String, dynamic>> maps = await db.query('pinboard_notes');
     return List.generate(maps.length, (i) => PinboardNoteDB.fromMap(maps[i]));
   }
 
   Future<int> insertPinboardNote(Map<String, dynamic> note, [Transaction? txn]) async {
+    // Удаляем database_id из карты, если это локальная заметка
+    if (note['database_id'] == null) {
+      note.remove('database_id');
+    }
+    
     if (txn != null) {
       return await txn.insert('pinboard_notes', note);
     }
@@ -232,13 +260,26 @@ class DatabaseHelper {
   }
 
   // Методы для работы с соединениями
-  Future<List<ConnectionDB>> getConnectionsDB() async {
+  Future<List<ConnectionDB>> getConnectionsDB([String? databaseId]) async {
     final db = await database;
+    if (databaseId != null) {
+      final List<Map<String, dynamic>> maps = await db.query(
+        'connections',
+        where: 'database_id = ?',
+        whereArgs: [databaseId],
+      );
+      return List.generate(maps.length, (i) => ConnectionDB.fromMap(maps[i]));
+    }
     final List<Map<String, dynamic>> maps = await db.query('connections');
     return List.generate(maps.length, (i) => ConnectionDB.fromMap(maps[i]));
   }
 
   Future<int> insertConnection(Map<String, dynamic> connection, [Transaction? txn]) async {
+    // Удаляем database_id из карты, если это локальное соединение
+    if (connection['database_id'] == null) {
+      connection.remove('database_id');
+    }
+    
     if (txn != null) {
       return await txn.insert('connections', connection);
     }
@@ -283,24 +324,33 @@ class DatabaseHelper {
     await txn.delete('note_images');
   }
 
-  Future<void> clearDatabaseTables(int databaseId, Transaction txn) async {
+  Future<void> clearDatabaseTables(String databaseId, Transaction txn) async {
     await txn.delete('notes', where: 'database_id = ?', whereArgs: [databaseId]);
     await txn.delete('pinboard_notes', where: 'database_id = ?', whereArgs: [databaseId]);
     await txn.delete('connections', where: 'database_id = ?', whereArgs: [databaseId]);
   }
 
-  Future<List<Map<String, dynamic>>> getNotesForDatabase() async {
+  Future<List<Map<String, dynamic>>> getNotesForDatabase([String? databaseId]) async {
     final db = await database;
+    if (databaseId != null) {
+      return await db.query('notes', where: 'database_id = ?', whereArgs: [databaseId]);
+    }
     return await db.query('notes');
   }
 
-  Future<List<Map<String, dynamic>>> getPinboardNotesForDatabase() async {
+  Future<List<Map<String, dynamic>>> getPinboardNotesForDatabase([String? databaseId]) async {
     final db = await database;
+    if (databaseId != null) {
+      return await db.query('pinboard_notes', where: 'database_id = ?', whereArgs: [databaseId]);
+    }
     return await db.query('pinboard_notes');
   }
 
-  Future<List<Map<String, dynamic>>> getConnectionsForDatabase() async {
+  Future<List<Map<String, dynamic>>> getConnectionsForDatabase([String? databaseId]) async {
     final db = await database;
+    if (databaseId != null) {
+      return await db.query('connections', where: 'database_id = ?', whereArgs: [databaseId]);
+    }
     return await db.query('connections');
   }
 
@@ -308,9 +358,15 @@ class DatabaseHelper {
     if (note.id == null) return;
     
     final db = await database;
+    final Map<String, dynamic> noteMap = note.toMap();
+    // Удаляем database_id из карты, если это локальная заметка
+    if (noteMap['database_id'] == null) {
+      noteMap.remove('database_id');
+    }
+    
     await db.update(
       'notes',
-      note.toMap(),
+      noteMap,
       where: 'id = ?',
       whereArgs: [note.id],
     );
@@ -436,7 +492,7 @@ class DatabaseHelper {
     await txn.delete('note_images');
   }
 
-  Future<void> clearDatabaseTablesForBackup(int databaseId, Transaction txn) async {
+  Future<void> clearDatabaseTablesForBackup(String databaseId, Transaction txn) async {
     await txn.delete('notes', where: 'database_id = ?', whereArgs: [databaseId]);
     await txn.delete('pinboard_notes', where: 'database_id = ?', whereArgs: [databaseId]);
     await txn.delete('connections', where: 'database_id = ?', whereArgs: [databaseId]);
@@ -550,9 +606,15 @@ class DatabaseHelper {
     if (note.id == null) return;
     
     final db = await database;
+    final Map<String, dynamic> noteMap = note.toMap();
+    // Удаляем database_id из карты, если это локальная заметка
+    if (noteMap['database_id'] == null) {
+      noteMap.remove('database_id');
+    }
+    
     await db.update(
       'pinboard_notes',
-      note.toMap(),
+      noteMap,
       where: 'id = ?',
       whereArgs: [note.id],
     );
@@ -578,18 +640,126 @@ class DatabaseHelper {
 
   Future<void> updateConnection(Map<String, dynamic> connection) async {
     final db = await database;
+    final Map<String, dynamic> connectionMap = Map<String, dynamic>.from(connection);
+    // Удаляем database_id из карты, если это локальное соединение
+    if (connectionMap['database_id'] == null) {
+      connectionMap.remove('database_id');
+    }
+    
     await db.update(
       'connections',
-      connection,
+      connectionMap,
       where: 'id = ?',
       whereArgs: [connection['id']],
     );
+  }
+
+  Future<void> replaceDatabase(BackupData backupData) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      // Очищаем все таблицы
+      await clearAllTablesForBackup(txn);
+
+      // Восстанавливаем папки
+      for (var folder in backupData.folders) {
+        await insertFolderForBackup(folder, txn);
+      }
+
+      // Восстанавливаем заметки
+      for (var note in backupData.notes) {
+        await insertNoteForBackup(note, txn);
+      }
+
+      // Восстанавливаем записи расписания
+      for (var entry in backupData.scheduleEntries) {
+        await insertScheduleEntryForBackup(entry, txn);
+      }
+
+      // Восстанавливаем заметки на доске
+      for (var note in backupData.pinboardNotes) {
+        await insertPinboardNoteForBackup(note, txn);
+      }
+
+      // Восстанавливаем соединения
+      for (var connection in backupData.connections) {
+        await insertConnectionForBackup(connection, txn);
+      }
+
+      // Восстанавливаем изображения
+      for (var image in backupData.noteImages) {
+        var imageData = image['image_data'];
+        if (imageData is String) {
+          // Если данные в формате base64
+          imageData = base64Decode(imageData);
+        } else if (imageData is List) {
+          // Если данные в формате списка
+          imageData = Uint8List.fromList(imageData.cast<int>());
+        }
+        
+        await insertImageForBackup(
+          image['note_id'],
+          image['file_name'],
+          imageData,
+          txn
+        );
+      }
+    });
+
+    // Уведомляем об изменении базы данных
+    _notifyDatabaseChanged();
   }
 
   void _notifyDatabaseChanged() {
     final context = navigatorKey.currentContext;
     if (context != null) {
       context.read<DatabaseProvider>().setNeedsUpdate(true);
+    }
+  }
+
+  Future<BackupData> createBackup() async {
+    final folders = await getFoldersForBackup();
+    final notes = await getNotesForBackup();
+    final scheduleEntries = await getScheduleEntriesForBackup();
+    final pinboardNotes = await getPinboardNotesForBackup();
+    final connections = await getConnectionsForBackup();
+    final images = await getAllImagesForBackup();
+
+    return BackupData(
+      folders: folders,
+      notes: notes,
+      scheduleEntries: scheduleEntries,
+      pinboardNotes: pinboardNotes,
+      connections: connections,
+      noteImages: images,
+    );
+  }
+
+  Future<void> restoreFromBackup() async {
+    final db = await database;
+    final backupPath = await getDatabasesPath();
+    final backupFile = File('$backupPath/backup.db');
+    
+    try {
+      if (await backupFile.exists()) {
+        // Закрываем соединение с базой данных
+        await db.close();
+        _database = null;
+        
+        // Восстанавливаем базу из резервной копии
+        final currentDb = File('$backupPath/notes.db');
+        if (await currentDb.exists()) {
+          await currentDb.delete();
+        }
+        await backupFile.copy(currentDb.path);
+      } else {
+        throw Exception('Резервная копия не найдена');
+      }
+    } catch (e) {
+      print('Ошибка при восстановлении из резервной копии: $e');
+      rethrow;
+    } finally {
+      // Переоткрываем соединение с базой данных
+      _database = await _initDatabase();
     }
   }
 } 

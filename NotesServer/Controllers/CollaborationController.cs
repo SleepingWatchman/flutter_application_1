@@ -68,8 +68,8 @@ namespace NotesServer.Controllers
             }
         }
 
-        [HttpDelete("databases/{id}")]
-        public async Task<IActionResult> DeleteDatabase(int id)
+        [HttpDelete("databases/{databaseId}")]
+        public async Task<IActionResult> DeleteDatabase(string databaseId)
         {
             try
             {
@@ -79,18 +79,18 @@ namespace NotesServer.Controllers
                     return Unauthorized();
                 }
 
-                await _collaborationService.DeleteDatabaseAsync(id, userId);
+                await _collaborationService.DeleteDatabaseAsync(databaseId, userId);
                 return Ok();
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Ошибка при удалении базы данных {id}");
-                return StatusCode(500, "Ошибка при удалении базы данных");
+                _logger.LogError(ex, $"Ошибка при удалении базы данных {databaseId}");
+                return BadRequest($"Ошибка при удалении базы данных: {ex.Message}");
             }
         }
 
         [HttpPost("databases/{databaseId}/backup")]
-        public async Task<IActionResult> UploadDatabaseBackup(int databaseId, [FromBody] BackupData backupData)
+        public async Task<IActionResult> SaveDatabaseBackup(string databaseId, [FromBody] BackupData backupData)
         {
             try
             {
@@ -100,24 +100,18 @@ namespace NotesServer.Controllers
                     return Unauthorized();
                 }
 
-                var database = await _collaborationService.GetDatabaseAsync(databaseId, userId);
-                if (database == null)
-                {
-                    return NotFound("База данных не найдена");
-                }
-
                 await _collaborationService.SaveDatabaseBackupAsync(databaseId, userId, backupData);
-                return Ok(new { message = "Резервная копия успешно сохранена" });
+                return Ok();
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Ошибка при сохранении резервной копии базы данных");
-                return StatusCode(500, "Ошибка при сохранении резервной копии базы данных");
+                _logger.LogError(ex, $"Ошибка при сохранении резервной копии базы данных {databaseId}");
+                return BadRequest($"Ошибка при сохранении резервной копии: {ex.Message}");
             }
         }
 
         [HttpGet("databases/{databaseId}/backup")]
-        public async Task<IActionResult> DownloadDatabaseBackup(int databaseId)
+        public async Task<IActionResult> GetDatabaseBackup(string databaseId)
         {
             try
             {
@@ -127,25 +121,18 @@ namespace NotesServer.Controllers
                     return Unauthorized();
                 }
 
-                try
-                {
-                    var backup = await _collaborationService.GetDatabaseBackupAsync(databaseId, userId);
-                    return Ok(backup);
-                }
-                catch (Exception ex) when (ex.Message == "Резервная копия не найдена" || ex.Message == "База данных не найдена")
-                {
-                    return NotFound(ex.Message);
-                }
+                var backup = await _collaborationService.GetDatabaseBackupAsync(databaseId, userId);
+                return Ok(backup);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Ошибка при получении резервной копии базы данных");
-                return StatusCode(500, "Ошибка при получении резервной копии базы данных");
+                _logger.LogError(ex, $"Ошибка при получении резервной копии базы данных {databaseId}");
+                return BadRequest($"Ошибка при получении резервной копии: {ex.Message}");
             }
         }
 
         [HttpGet("databases/{databaseId}")]
-        public async Task<IActionResult> GetDatabase(int databaseId)
+        public async Task<IActionResult> GetDatabase(string databaseId)
         {
             try
             {
@@ -173,7 +160,7 @@ namespace NotesServer.Controllers
         }
 
         [HttpPost("databases/{databaseId}/replace")]
-        public async Task<IActionResult> ReplaceLocalDatabase(int databaseId, [FromBody] BackupData backupData)
+        public async Task<IActionResult> ReplaceLocalDatabase(string databaseId, [FromBody] BackupData backupData)
         {
             try
             {
@@ -184,12 +171,12 @@ namespace NotesServer.Controllers
                 }
 
                 await _collaborationService.ReplaceLocalDatabaseAsync(databaseId, userId, backupData);
-                return Ok(new { message = "Данные в локальной базе успешно заменены" });
+                return Ok();
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Ошибка при замене данных в локальной базе");
-                return StatusCode(500, "Ошибка при замене данных в локальной базе");
+                _logger.LogError(ex, $"Ошибка при замене данных в базе данных {databaseId}");
+                return BadRequest($"Ошибка при замене данных: {ex.Message}");
             }
         }
     }

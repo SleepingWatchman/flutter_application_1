@@ -1,10 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using Microsoft.EntityFrameworkCore;
 
 namespace NotesServer.Models
 {
+    [Index(nameof(OwnerId))]
     public class SharedDatabase
     {
         [Key]
@@ -19,19 +23,17 @@ namespace NotesServer.Models
         [Required]
         public DateTime CreatedAt { get; set; }
         
-        private string _collaboratorsJson = "[]";
-        
         [Required]
+        public string CollaboratorsJson { get; set; } = "[]";
+        
+        [NotMapped]
         public List<string> Collaborators 
         { 
-            get => JsonSerializer.Deserialize<List<string>>(_collaboratorsJson) ?? new List<string>();
-            set => _collaboratorsJson = JsonSerializer.Serialize(value);
+            get => JsonSerializer.Deserialize<List<string>>(CollaboratorsJson) ?? new List<string>();
+            set => CollaboratorsJson = JsonSerializer.Serialize(value);
         }
-        
-        public string CollaboratorsJson
-        {
-            get => _collaboratorsJson;
-            set => _collaboratorsJson = value;
-        }
+
+        [Required]
+        public required string DatabasePath { get; set; }
     }
 } 

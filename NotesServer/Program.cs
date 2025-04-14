@@ -16,11 +16,13 @@ builder.Services.AddControllers();
 
 // Configure database
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlite("Data Source=NotesServer.db"));
+    options.UseSqlite(builder.Configuration.GetConnectionString("AuthConnection") ?? 
+        "Data Source=Data/AuthServer.db"));
 
 // Добавляем контекст базы данных
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
+    options.UseSqlite(builder.Configuration.GetConnectionString("NotesConnection") ?? 
+        "Data Source=Data/NotesServer.db"));
 
 // Register AuthService
 builder.Services.AddScoped<IAuthService, AuthService>();
@@ -89,35 +91,25 @@ builder.WebHost.ConfigureKestrel(serverOptions =>
 
 var app = builder.Build();
 
-// Ensure database is created
+// Create necessary directories
+var dataPath = Path.Combine(app.Environment.ContentRootPath, "Data");
+var databasesPath = Path.Combine(app.Environment.ContentRootPath, "Databases");
+var uploadsPath = Path.Combine(app.Environment.ContentRootPath, "uploads");
+var backupsPath = Path.Combine(app.Environment.ContentRootPath, "backups");
+
+Directory.CreateDirectory(dataPath);
+Directory.CreateDirectory(databasesPath);
+Directory.CreateDirectory(uploadsPath);
+Directory.CreateDirectory(backupsPath);
+
+// Ensure databases are created
 using (var scope = app.Services.CreateScope())
 {
-    var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    context.Database.EnsureCreated();
+    var authContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    authContext.Database.EnsureCreated();
 
-    var applicationDbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-    applicationDbContext.Database.Migrate();
-}
-
-// Create uploads directory if it doesn't exist
-var uploadsPath = Path.Combine(app.Environment.ContentRootPath, "uploads");
-if (!Directory.Exists(uploadsPath))
-{
-    Directory.CreateDirectory(uploadsPath);
-}
-
-// Create backups directory if it doesn't exist
-var backupsPath = Path.Combine(app.Environment.ContentRootPath, "backups");
-if (!Directory.Exists(backupsPath))
-{
-    Directory.CreateDirectory(backupsPath);
-}
-
-// Create databases directory if it doesn't exist
-var databasesPath = Path.Combine(app.Environment.ContentRootPath, "Databases");
-if (!Directory.Exists(databasesPath))
-{
-    Directory.CreateDirectory(databasesPath);
+    var notesContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+    notesContext.Database.Migrate();
 }
 
 // Configure the HTTP request pipeline.

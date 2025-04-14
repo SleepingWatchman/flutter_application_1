@@ -28,6 +28,10 @@ namespace NotesServer.Data
                 .HasKey(c => c.Id);
 
             modelBuilder.Entity<CollaborationDatabase>()
+                .Property(c => c.Id)
+                .ValueGeneratedOnAdd();
+
+            modelBuilder.Entity<CollaborationDatabase>()
                 .Property(c => c.UserId)
                 .IsRequired();
 
@@ -51,9 +55,9 @@ namespace NotesServer.Data
                 )
                 .Metadata.SetValueComparer(
                     new ValueComparer<List<string>>(
-                        (c1, c2) => c1.SequenceEqual(c2),
-                        c => c.Aggregate(0, (a, v) => HashCode.Combine(a, v.GetHashCode())),
-                        c => c.ToList()
+                        (c1, c2) => (c1 == null && c2 == null) || (c1 != null && c2 != null && c1.SequenceEqual(c2)),
+                        c => c == null ? 0 : c.Aggregate(0, (a, v) => HashCode.Combine(a, v.GetHashCode())),
+                        c => c == null ? new List<string>() : c.ToList()
                     )
                 );
         }

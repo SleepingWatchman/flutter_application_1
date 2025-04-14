@@ -105,11 +105,11 @@ public class CollaborationBackupController : ControllerBase
     }
 
     [HttpPost("{databaseId}/upload")]
-    public async Task<IActionResult> UploadCollaborationBackup(int databaseId, [FromForm] IFormFile file)
+    public async Task<IActionResult> UploadCollaborationBackup(string databaseId, [FromForm] IFormFile file)
     {
         try
         {
-            var collabBackupDir = Path.Combine(COLLAB_BACKUPS_DIR, databaseId.ToString());
+            var collabBackupDir = Path.Combine(COLLAB_BACKUPS_DIR, databaseId);
             Directory.CreateDirectory(collabBackupDir);
 
             var backupPath = Path.Combine(collabBackupDir, $"backup_{DateTime.Now:yyyyMMdd_HHmmss}.json");
@@ -127,11 +127,11 @@ public class CollaborationBackupController : ControllerBase
     }
 
     [HttpGet("{databaseId}/download/latest")]
-    public async Task<IActionResult> DownloadLatestCollaborationBackup(int databaseId)
+    public async Task<IActionResult> DownloadLatestCollaborationBackup(string databaseId)
     {
         try
         {
-            var collabBackupDir = Path.Combine(COLLAB_BACKUPS_DIR, databaseId.ToString());
+            var collabBackupDir = Path.Combine(COLLAB_BACKUPS_DIR, databaseId);
             if (!Directory.Exists(collabBackupDir))
             {
                 return NotFound(new { message = "Резервные копии не найдены" });

@@ -29,8 +29,8 @@ namespace NotesServer.Controllers
             _logger = logger;
         }
 
-        [HttpPost("{databaseId}/backup")]
-        public async Task<IActionResult> CreateBackup(int databaseId)
+        [HttpGet("{databaseId}")]
+        public async Task<IActionResult> GetDatabase(string databaseId)
         {
             try
             {
@@ -40,30 +40,44 @@ namespace NotesServer.Controllers
                     return Unauthorized();
                 }
 
-                var backupData = new BackupData
+                var database = await _collaborationService.GetDatabaseAsync(databaseId, userId);
+                if (database == null)
                 {
-                    DatabaseId = databaseId.ToString(),
-                    UserId = userId,
-                    Notes = await _context.Notes.Where(n => n.DatabaseId == databaseId).ToListAsync(),
-                    Folders = await _context.Folders.Where(f => f.DatabaseId == databaseId).ToListAsync(),
-                    ScheduleEntries = await _context.ScheduleEntries.Where(s => s.DatabaseId == databaseId).ToListAsync(),
-                    PinboardNotes = await _context.PinboardNotes.Where(p => p.DatabaseId == databaseId).ToListAsync(),
-                    Connections = await _context.Connections.Where(c => c.DatabaseId == databaseId).ToListAsync(),
-                    NoteImages = await _context.NoteImages.Where(i => i.DatabaseId == databaseId).ToListAsync()
-                };
+                    return NotFound();
+                }
+
+                return Ok(database);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Ошибка при получении базы данных {databaseId}");
+                return BadRequest($"Ошибка при получении базы данных: {ex.Message}");
+            }
+        }
+
+        [HttpPost("{databaseId}/backup")]
+        public async Task<IActionResult> SaveDatabaseBackup(string databaseId, [FromBody] BackupData backupData)
+        {
+            try
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId))
+                {
+                    return Unauthorized();
+                }
 
                 await _collaborationService.SaveDatabaseBackupAsync(databaseId, userId, backupData);
                 return Ok();
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error creating backup for database {DatabaseId}", databaseId);
-                return StatusCode(500, "Internal server error occurred while creating backup");
+                _logger.LogError(ex, $"Ошибка при сохранении резервной копии базы данных {databaseId}");
+                return BadRequest($"Ошибка при сохранении резервной копии: {ex.Message}");
             }
         }
 
         [HttpGet("{databaseId}/backup")]
-        public async Task<IActionResult> GetBackup(int databaseId)
+        public async Task<IActionResult> GetDatabaseBackup(string databaseId)
         {
             try
             {
@@ -73,23 +87,18 @@ namespace NotesServer.Controllers
                     return Unauthorized();
                 }
 
-                var backupData = await _collaborationService.GetDatabaseBackupAsync(databaseId, userId);
-                if (backupData == null)
-                {
-                    return NotFound("Backup not found");
-                }
-
-                return Ok(backupData);
+                var backup = await _collaborationService.GetDatabaseBackupAsync(databaseId, userId);
+                return Ok(backup);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error retrieving backup for database {DatabaseId}", databaseId);
-                return StatusCode(500, "Internal server error occurred while retrieving backup");
+                _logger.LogError(ex, $"Ошибка при получении резервной копии базы данных {databaseId}");
+                return BadRequest($"Ошибка при получении резервной копии: {ex.Message}");
             }
         }
 
         [HttpPost("{databaseId}/backup/restore")]
-        public async Task<IActionResult> RestoreFromBackup(int databaseId)
+        public async Task<IActionResult> RestoreFromBackup(string databaseId)
         {
             try
             {
@@ -106,12 +115,12 @@ namespace NotesServer.Controllers
                 }
 
                 // Удаляем существующие данные
-                var existingNotes = _context.Notes.Where(n => n.DatabaseId == databaseId);
-                var existingFolders = _context.Folders.Where(f => f.DatabaseId == databaseId);
-                var existingScheduleEntries = _context.ScheduleEntries.Where(s => s.DatabaseId == databaseId);
-                var existingPinboardNotes = _context.PinboardNotes.Where(p => p.DatabaseId == databaseId);
-                var existingConnections = _context.Connections.Where(c => c.DatabaseId == databaseId);
-                var existingNoteImages = _context.NoteImages.Where(i => i.DatabaseId == databaseId);
+                var existingNotes = _context.Notes.Where(n => n.DatabaseId == int.Parse(databaseId));
+                var existingFolders = _context.Folders.Where(f => f.DatabaseId == int.Parse(databaseId));
+                var existingScheduleEntries = _context.ScheduleEntries.Where(s => s.DatabaseId == int.Parse(databaseId));
+                var existingPinboardNotes = _context.PinboardNotes.Where(p => p.DatabaseId == int.Parse(databaseId));
+                var existingConnections = _context.Connections.Where(c => c.DatabaseId == int.Parse(databaseId));
+                var existingNoteImages = _context.NoteImages.Where(i => i.DatabaseId == int.Parse(databaseId));
 
                 _context.Notes.RemoveRange(existingNotes);
                 _context.Folders.RemoveRange(existingFolders);
@@ -133,8 +142,8 @@ namespace NotesServer.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error restoring backup for database {DatabaseId}", databaseId);
-                return StatusCode(500, "Internal server error occurred while restoring backup");
+                _logger.LogError(ex, $"Ошибка при восстановлении из резервной копии базы данных {databaseId}");
+                return BadRequest($"Ошибка при восстановлении из резервной копии: {ex.Message}");
             }
         }
     }

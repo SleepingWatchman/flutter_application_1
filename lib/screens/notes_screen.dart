@@ -8,7 +8,6 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:oktoast/oktoast.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
-import 'package:file_picker/file_picker.dart';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
@@ -20,6 +19,7 @@ import 'dart:convert';
 import 'package:image_picker/image_picker.dart';
 import '../providers/database_provider.dart';
 import 'package:provider/provider.dart';
+import '../providers/collaborative_database_provider.dart';
 
 
 /// Экран заметок и папок с использованием БД для заметок
@@ -106,14 +106,24 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
   }
 
   Future<void> _loadData() async {
-    if (!mounted) return;
     
     setState(() => _isLoading = true);
     try {
-      // Загружаем данные параллельно
+      // Получаем провайдеры для доступа к текущему database_id
+      final databaseProvider = Provider.of<DatabaseProvider>(context, listen: false);
+      final collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
+      
+      // Получаем текущий ID базы данных
+      final currentDatabaseId = collabProvider.isUsingSharedDatabase 
+          ? collabProvider.currentDatabaseId 
+          : null;
+      
+      print('Загрузка данных для базы: ${currentDatabaseId ?? "локальной"}');
+      
+      // Загружаем данные параллельно с учетом текущей базы
       final results = await Future.wait([
-        _dbHelper.getAllFolders(),
-        _dbHelper.getAllNotes(),
+        _dbHelper.getFolders(currentDatabaseId),
+        _dbHelper.getAllNotes(currentDatabaseId),
       ]);
       
       if (!mounted) return;
@@ -177,20 +187,39 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
 
   Future<void> _createNote() async {
     try {
+      // Получаем провайдер для доступа к текущему database_id
+      final collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
+      final currentDatabaseId = collabProvider.isUsingSharedDatabase 
+          ? collabProvider.currentDatabaseId 
+          : null;
+      
       final now = DateTime.now();
-      final newNote = Note(
-        title: '',  // Пустой заголовок при создании
-        content: '',
-        folderId: _selectedFolder?.id,
-        createdAt: now,
-        updatedAt: now,
-      );
-
-      final id = await _dbHelper.insertNote(newNote.toMap());
+      Map<String, dynamic> noteMap = {
+        'title': '',
+        'content': '',
+        'folder_id': _selectedFolder?.id,
+        'created_at': now.toIso8601String(),
+        'updated_at': now.toIso8601String(),
+      };
+      
+      // Добавляем database_id только если мы в совместной базе
+      if (currentDatabaseId != null) {
+        noteMap['database_id'] = currentDatabaseId;
+      }
+      
+      final id = await _dbHelper.insertNote(noteMap);
       if (!mounted) return;
 
       setState(() {
-        _selectedNote = newNote.copyWith(id: id);
+        _selectedNote = Note(
+          id: id,
+          title: '',
+          content: '',
+          folderId: _selectedFolder?.id,
+          createdAt: now,
+          updatedAt: now,
+          database_id: currentDatabaseId,
+        );
         _notes.add(_selectedNote!);
         _noteTitleController.text = '';  // Пустой заголовок в контроллере
         _noteContentController.text = '';
@@ -318,10 +347,18 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
 
     if (result != null) {
       try {
+        // Получаем провайдер для доступа к текущему database_id
+        final collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
+        final currentDatabaseId = collabProvider.isUsingSharedDatabase 
+            ? collabProvider.currentDatabaseId 
+            : null;
+            
         final folder = Folder(
           name: result['name'],
           color: result['color'],
+          database_id: currentDatabaseId,
         );
+        
         await _dbHelper.insertFolder(folder.toMap());
         _loadData();
         showCustomToastWithIcon(
@@ -453,6 +490,7 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
           id: folder.id,
           name: result['name'],
           color: result['color'],
+          database_id: folder.database_id, // Сохраняем database_id исходной папки
         );
         await _dbHelper.updateFolder(updatedFolder.toMap());
         _loadData();
@@ -478,10 +516,28 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
     if (note.id == null) return;
     
     try {
+      // Проверяем, что папка принадлежит той же базе данных
+      if (folder != null && folder.id != 0) {
+        // Получаем database_id заметки и папки
+        final noteDbId = note.database_id;
+        final folderDbId = folder.database_id;
+        
+        print('Перемещение заметки из базы "${noteDbId ?? 'локальная'}" в папку из базы "${folderDbId ?? 'локальная'}"');
+        
+        // Проверяем, что они из одной базы данных
+        if (noteDbId != folderDbId) {
+          print('Ошибка: нельзя переместить заметку в папку из другой базы данных');
+          showToast('Нельзя переместить заметку в папку из другой базы данных');
+          return;
+        }
+      }
+      
       // Обновляем локальный объект заметки
       final updatedNote = note.copyWith(
         folderId: folder?.id,
         updatedAt: DateTime.now(),
+        // Сохраняем database_id заметки
+        database_id: note.database_id,
       );
       
       // Обновляем заметку в базе данных
@@ -502,6 +558,9 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
         // Обновляем кэш заметок
         _updateNotesCache();
       });
+      
+      // Показываем уведомление об успешном перемещении
+      showToast('Заметка успешно перемещена');
     } catch (e) {
       print('Ошибка перемещения заметки: $e');
       showToast('Ошибка перемещения заметки');
@@ -1056,27 +1115,86 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
                 try {
                   // Получаем имя файла из URI
                   final fileName = uri.pathSegments.last;
-                  final imageData = imageMap[fileName];
+                  var imageData = imageMap[fileName];
                   
                   if (imageData == null) {
                     print('Изображение не найдено в базе данных: $fileName');
-                    return Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.grey[200],
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.broken_image, color: Colors.grey[600]),
-                          const SizedBox(width: 8),
-                          Text(
-                            'Изображение не найдено',
-                            style: TextStyle(color: Colors.grey[600]),
+                    
+                    // Дополнительная проверка: пытаемся найти изображение по пути
+                    return FutureBuilder<Uint8List?>(
+                      future: _dbHelper.findImageInAllDatabases(fileName),
+                      builder: (context, imageSnapshot) {
+                        if (imageSnapshot.connectionState == ConnectionState.waiting) {
+                          return Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.grey[200],
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                ),
+                                SizedBox(width: 8),
+                                Text('Поиск изображения...'),
+                              ],
+                            ),
+                          );
+                        }
+                        
+                        if (imageSnapshot.hasData && imageSnapshot.data != null) {
+                          // Изображение найдено
+                          return Image.memory(
+                            imageSnapshot.data!,
+                            fit: BoxFit.contain,
+                            errorBuilder: (context, error, stackTrace) {
+                              print('Ошибка при отображении найденного изображения: $error');
+                              return Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: Colors.grey[200],
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.broken_image, color: Colors.grey[600]),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      'Ошибка отображения',
+                                      style: TextStyle(color: Colors.grey[600]),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          );
+                        }
+                        
+                        // Изображение не найдено
+                        return Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.grey[200],
+                            borderRadius: BorderRadius.circular(4),
                           ),
-                        ],
-                      ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.broken_image, color: Colors.grey[600]),
+                              const SizedBox(width: 8),
+                              Text(
+                                'Изображение не найдено',
+                                style: TextStyle(color: Colors.grey[600]),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
                     );
                   }
 

@@ -27,10 +27,25 @@ namespace NotesServer.Models
         public string CollaboratorsJson { get; set; } = "[]";
         
         [NotMapped]
+        [JsonIgnore]
         public List<string> Collaborators 
         { 
-            get => JsonSerializer.Deserialize<List<string>>(CollaboratorsJson) ?? new List<string>();
-            set => CollaboratorsJson = JsonSerializer.Serialize(value);
+            get 
+            {
+                try
+                {
+                    if (string.IsNullOrEmpty(CollaboratorsJson) || CollaboratorsJson == "null")
+                    {
+                        return new List<string>();
+                    }
+                    return JsonSerializer.Deserialize<List<string>>(CollaboratorsJson) ?? new List<string>();
+                }
+                catch (JsonException)
+                {
+                    return new List<string>();
+                }
+            }
+            set => CollaboratorsJson = JsonSerializer.Serialize(value ?? new List<string>());
         }
 
         [Required]

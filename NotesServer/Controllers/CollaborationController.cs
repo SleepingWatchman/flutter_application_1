@@ -20,7 +20,9 @@ namespace NotesServer.Controllers
         private readonly ICollaborationService _collaborationService;
         private readonly ILogger<CollaborationController> _logger;
 
-        public CollaborationController(ICollaborationService collaborationService, ILogger<CollaborationController> logger)
+        public CollaborationController(
+            ICollaborationService collaborationService,
+            ILogger<CollaborationController> logger)
         {
             _collaborationService = collaborationService;
             _logger = logger;
@@ -34,7 +36,7 @@ namespace NotesServer.Controllers
                 var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 if (string.IsNullOrEmpty(userId))
                 {
-                    return Unauthorized();
+                    return Unauthorized("User not authenticated");
                 }
 
                 var databases = await _collaborationService.GetUserDatabasesAsync(userId);
@@ -42,33 +44,33 @@ namespace NotesServer.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Ошибка при получении списка баз данных");
-                return StatusCode(500, "Ошибка при получении списка баз данных");
+                _logger.LogError(ex, "Error getting databases");
+                return StatusCode(500, "Error getting databases");
             }
         }
 
-        [HttpPost("databases")]
-        public async Task<IActionResult> CreateDatabase()
+        [HttpPost("database")]
+        public async Task<IActionResult> CreateDatabase([FromBody] CreateDatabaseRequest request)
         {
             try
             {
                 var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 if (string.IsNullOrEmpty(userId))
                 {
-                    return Unauthorized();
+                    return Unauthorized("User not authenticated");
                 }
-
-                var database = await _collaborationService.CreateDatabaseAsync(userId);
+                
+                var database = await _collaborationService.CreateDatabaseAsync(userId, request.Name);
                 return Ok(database);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Ошибка при создании базы данных");
-                return StatusCode(500, "Ошибка при создании базы данных");
+                _logger.LogError(ex, "Error creating database with name {Name}", request.Name);
+                return StatusCode(500, "Error creating database");
             }
         }
 
-        [HttpDelete("databases/{databaseId}")]
+        [HttpDelete("database/{databaseId}")]
         public async Task<IActionResult> DeleteDatabase(string databaseId)
         {
             try
@@ -76,16 +78,16 @@ namespace NotesServer.Controllers
                 var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 if (string.IsNullOrEmpty(userId))
                 {
-                    return Unauthorized();
+                    return Unauthorized("User not authenticated");
                 }
-
+                
                 await _collaborationService.DeleteDatabaseAsync(databaseId, userId);
                 return Ok();
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Ошибка при удалении базы данных {databaseId}");
-                return BadRequest($"Ошибка при удалении базы данных: {ex.Message}");
+                _logger.LogError(ex, "Error deleting database {DatabaseId}", databaseId);
+                return StatusCode(500, "Error deleting database");
             }
         }
 
@@ -122,6 +124,10 @@ namespace NotesServer.Controllers
                 }
 
                 var backup = await _collaborationService.GetDatabaseBackupAsync(databaseId, userId);
+                if (backup == null)
+                {
+                    return Ok(new BackupData { DatabaseId = databaseId, UserId = userId });
+                }
                 return Ok(backup);
             }
             catch (Exception ex)
@@ -177,6 +183,55 @@ namespace NotesServer.Controllers
             {
                 _logger.LogError(ex, $"Ошибка при замене данных в базе данных {databaseId}");
                 return BadRequest($"Ошибка при замене данных: {ex.Message}");
+            }
+        }
+
+        [HttpGet("database/{databaseId}/note/{noteId}")]
+        public async Task<ActionResult<Note>> GetNote(string databaseId, string noteId)
+        {
+            try
+            {
+                var note = await _collaborationService.GetNoteAsync(databaseId, noteId);
+                if (note == null)
+                {
+                    return NotFound();
+                }
+                return Ok(note);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting note {NoteId} from database {DatabaseId}", noteId, databaseId);
+                return StatusCode(500, "Error getting note");
+            }
+        }
+
+        [HttpPost("database/{databaseId}/note")]
+        public async Task<IActionResult> SaveNote(string databaseId, [FromBody] Note note)
+        {
+            try
+            {
+                await _collaborationService.SaveNoteAsync(databaseId, note);
+                return Ok();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error saving note {NoteId} to database {DatabaseId}", note.Id, databaseId);
+                return StatusCode(500, "Error saving note");
+            }
+        }
+
+        [HttpDelete("database/{databaseId}/note/{noteId}")]
+        public async Task<IActionResult> DeleteNote(string databaseId, string noteId)
+        {
+            try
+            {
+                await _collaborationService.DeleteNoteAsync(databaseId, noteId);
+                return Ok();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error deleting note {NoteId} from database {DatabaseId}", noteId, databaseId);
+                return StatusCode(500, "Error deleting note");
             }
         }
     }

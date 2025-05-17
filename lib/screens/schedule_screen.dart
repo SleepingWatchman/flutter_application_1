@@ -9,6 +9,7 @@ import '../models/dynamic_field_entry.dart';
 import '../utils/toast_utils.dart';
 import '../providers/database_provider.dart';
 import 'package:provider/provider.dart';
+import '../providers/collaborative_database_provider.dart';
 
 /// Экран расписания. Если день не выбран (_selectedDate == null), показывается календарная сетка.
 /// Если выбран день, отображается детальный режим с интервалами и предпросмотром заметки.
@@ -31,26 +32,69 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    // При запуске ни один день не выбран – отображается календарь.
-    _selectedDate = null;
-    _highlightedDate = null;
-    _currentMonth = DateTime.now();
+    
+    // Добавляем слушатель изменений для обновления интерфейса при переключении базы данных
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      try {
+        // Подписываемся на изменения в DatabaseProvider
+        final dbProvider = Provider.of<DatabaseProvider>(context, listen: false);
+        dbProvider.addListener(_handleDatabaseChanges);
+        
+        // Подписываемся на изменения в CollaborativeDatabaseProvider
+        final collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
+        collabProvider.addListener(_handleCollaborativeDatabaseChanges);
+      } catch (e) {
+        print('Ошибка при добавлении слушателей: $e');
+      }
+      
+      // Загружаем данные расписания при запуске, если выбрана дата
+      if (_selectedDate != null) {
+        _loadSchedule();
+      }
+    });
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    // Обновление при изменении в обычной базе данных
     if (Provider.of<DatabaseProvider>(context, listen: false).needsUpdate) {
       if (_selectedDate != null) {
         _loadSchedule();
       }
       Provider.of<DatabaseProvider>(context, listen: false).resetUpdateFlag();
     }
+    
+    // Проверяем, используется ли совместная база данных
+    try {
+      final collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
+      if (collabProvider.isUsingSharedDatabase) {
+        // Обновляем данные при необходимости
+        if (_selectedDate != null) {
+          _loadSchedule();
+        }
+      }
+    } catch (e) {
+      print('Ошибка при проверке совместной базы данных: $e');
+    }
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    
+    // Удаляем слушатели при удалении виджета
+    try {
+      final dbProvider = Provider.of<DatabaseProvider>(context, listen: false);
+      dbProvider.removeListener(_handleDatabaseChanges);
+      
+      final collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
+      collabProvider.removeListener(_handleCollaborativeDatabaseChanges);
+    } catch (e) {
+      print('Ошибка при удалении слушателей: $e');
+    }
+    
     super.dispose();
   }
 
@@ -96,35 +140,186 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
     });
   }
 
+  // Обработчик изменений базы данных
+  void _handleDatabaseChanges() {
+    if (mounted) {
+      print('Обновление экрана расписания из-за изменений в базе данных');
+      if (_selectedDate != null) {
+        _loadSchedule();
+      }
+    }
+  }
+  
+  // Обработчик изменений совместной базы данных
+  void _handleCollaborativeDatabaseChanges() {
+    if (mounted) {
+      print('Обновление экрана расписания из-за изменений в совместной базе данных');
+      if (_selectedDate != null) {
+        _loadSchedule();
+      }
+    }
+  }
+
   Future<void> _loadSchedule() async {
     if (_selectedDate != null) {
       String dateKey = DateFormat('yyyy-MM-dd').format(_selectedDate!);
-      List<ScheduleEntry> entries = await DatabaseHelper().getScheduleEntries();
-      setState(() {
-        _schedule = entries.where((entry) => entry.date == dateKey).toList();
-        // Сортируем события по времени начала и окончания
-        _schedule.sort((a, b) {
-          final aTimes = a.time.split(' - ');
-          final bTimes = b.time.split(' - ');
-          final aStart = aTimes[0].split(':');
-          final bStart = bTimes[0].split(':');
-          final aEnd = aTimes[1].split(':');
-          final bEnd = bTimes[1].split(':');
-          
-          final aStartMinutes = int.parse(aStart[0]) * 60 + int.parse(aStart[1]);
-          final bStartMinutes = int.parse(bStart[0]) * 60 + int.parse(bStart[1]);
-          
-          if (aStartMinutes != bStartMinutes) {
-            return aStartMinutes.compareTo(bStartMinutes);
+      
+      try {
+        // Проверяем, используется ли совместная база данных
+        String? databaseId;
+        try {
+          final collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
+          if (collabProvider.isUsingSharedDatabase) {
+            databaseId = collabProvider.currentDatabaseId;
           }
+        } catch (e) {
+          print('Ошибка при получении информации о совместной базе: $e');
+        }
+        
+        // Получаем все записи из базы данных
+        List<ScheduleEntry> allEntries = await DatabaseHelper().getScheduleEntries(databaseId);
+        
+        // Фильтруем записи, которые непосредственно для выбранной даты
+        List<ScheduleEntry> directEntries = allEntries.where((entry) => entry.date == dateKey).toList();
+        
+        // Список для повторяющихся событий, которые должны быть показаны на выбранную дату
+        List<ScheduleEntry> recurringEntries = [];
+        
+        // Проверяем повторяющиеся события
+        for (var entry in allEntries) {
+          // Пропускаем непосредственные записи для этой даты (уже включены выше)
+          if (entry.date == dateKey) continue;
           
-          final aEndMinutes = int.parse(aEnd[0]) * 60 + int.parse(aEnd[1]);
-          final bEndMinutes = int.parse(bEnd[0]) * 60 + int.parse(bEnd[1]);
+          // Пропускаем записи без повторения
+          if (entry.recurrence.type == RecurrenceType.none) continue;
           
-          return aEndMinutes.compareTo(bEndMinutes);
-        });
-        _selectedIndex = null;
-      });
+          // Проверяем, должно ли это повторяющееся событие отображаться в выбранный день
+          if (_shouldShowRecurringEntry(entry, _selectedDate!)) {
+            // Клонируем запись с датой выбранного дня
+            ScheduleEntry clonedEntry = ScheduleEntry(
+              id: entry.id,
+              time: entry.time,
+              date: dateKey,
+              note: entry.note,
+              dynamicFieldsJson: entry.dynamicFieldsJson,
+              recurrence: entry.recurrence,
+            );
+            recurringEntries.add(clonedEntry);
+          }
+        }
+        
+        if (mounted) {
+          setState(() {
+            // Объединяем прямые записи и повторяющиеся
+            _schedule = [...directEntries, ...recurringEntries];
+            
+            // Сортируем события по времени начала и окончания
+            _schedule.sort((a, b) {
+              final aTimes = a.time.split(' - ');
+              final bTimes = b.time.split(' - ');
+              
+              if (aTimes.length < 2 || bTimes.length < 2) {
+                // Обработка некорректного формата времени
+                return 0;
+              }
+              
+              final aStart = aTimes[0].split(':');
+              final bStart = bTimes[0].split(':');
+              
+              if (aStart.length < 2 || bStart.length < 2) {
+                // Обработка некорректного формата времени
+                return 0;
+              }
+              
+              try {
+                final aStartMinutes = int.parse(aStart[0]) * 60 + int.parse(aStart[1]);
+                final bStartMinutes = int.parse(bStart[0]) * 60 + int.parse(bStart[1]);
+                
+                if (aStartMinutes != bStartMinutes) {
+                  return aStartMinutes.compareTo(bStartMinutes);
+                }
+                
+                final aEnd = aTimes[1].split(':');
+                final bEnd = bTimes[1].split(':');
+                
+                if (aEnd.length < 2 || bEnd.length < 2) {
+                  // Обработка некорректного формата времени
+                  return 0;
+                }
+                
+                final aEndMinutes = int.parse(aEnd[0]) * 60 + int.parse(aEnd[1]);
+                final bEndMinutes = int.parse(bEnd[0]) * 60 + int.parse(bEnd[1]);
+                
+                return aEndMinutes.compareTo(bEndMinutes);
+              } catch (e) {
+                print('Ошибка при сортировке записей расписания: $e');
+                return 0;
+              }
+            });
+            _selectedIndex = null;
+          });
+        }
+      } catch (e) {
+        print('Ошибка при загрузке расписания: $e');
+        
+        // Повторная попытка загрузки данных после небольшой задержки
+        if (mounted) {
+          Future.delayed(Duration(milliseconds: 500), () {
+            if (mounted) {
+              _loadSchedule();
+            }
+          });
+        }
+      }
+    }
+  }
+  
+  // Определяет, должно ли повторяющееся событие отображаться на указанную дату
+  bool _shouldShowRecurringEntry(ScheduleEntry entry, DateTime targetDate) {
+    // Если запись не является повторяющейся, возвращаем false
+    if (entry.recurrence.type == RecurrenceType.none) return false;
+    
+    // Парсим дату начала события
+    DateTime startDate = DateFormat('yyyy-MM-dd').parse(entry.date);
+    
+    // Проверяем, не превышает ли целевая дата дату окончания
+    if (entry.recurrence.endDate != null && targetDate.isAfter(entry.recurrence.endDate!)) {
+      return false;
+    }
+    
+    // Интервал повторения
+    int interval = entry.recurrence.interval ?? 1;
+    
+    switch (entry.recurrence.type) {
+      case RecurrenceType.daily:
+        // Для ежедневного повторения проверяем кратность дней
+        int daysDifference = targetDate.difference(startDate).inDays;
+        return daysDifference > 0 && daysDifference % interval == 0;
+        
+      case RecurrenceType.weekly:
+        // Для еженедельного повторения проверяем, что день недели совпадает и прошло нужное количество недель
+        if (targetDate.weekday != startDate.weekday) return false;
+        int weeksDifference = targetDate.difference(startDate).inDays ~/ 7;
+        return weeksDifference > 0 && weeksDifference % interval == 0;
+        
+      case RecurrenceType.monthly:
+        // Для ежемесячного повторения проверяем день месяца
+        if (targetDate.day != startDate.day) return false;
+        
+        // Вычисляем количество месяцев между датами
+        int monthsDifference = (targetDate.year - startDate.year) * 12 + targetDate.month - startDate.month;
+        return monthsDifference > 0 && monthsDifference % interval == 0;
+        
+      case RecurrenceType.yearly:
+        // Для ежегодного повторения проверяем день и месяц
+        if (targetDate.day != startDate.day || targetDate.month != startDate.month) return false;
+        
+        // Вычисляем количество лет между датами
+        int yearsDifference = targetDate.year - startDate.year;
+        return yearsDifference > 0 && yearsDifference % interval == 0;
+        
+      default:
+        return false;
     }
   }
 
@@ -192,14 +387,30 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
     ];
     String? timeError;
 
+    // Параметры повторяемости
+    Recurrence recurrence = Recurrence();
+    final TextEditingController intervalController = TextEditingController(text: '1');
+    final TextEditingController countController = TextEditingController();
+    DateTime? selectedEndDate;
+
+    // Получаем идентификатор текущей базы данных для правильного сохранения
+    String? databaseId;
+    try {
+      final collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
+      if (collabProvider.isUsingSharedDatabase) {
+        databaseId = collabProvider.currentDatabaseId;
+      }
+    } catch (e) {
+      print('Ошибка при получении информации о совместной базе: $e');
+    }
+
     showDialog(
       context: context,
-      builder: (BuildContext outerContext) {
+      builder: (BuildContext context) {
         return StatefulBuilder(
-          builder: (BuildContext innerContext,
-              void Function(void Function()) setStateDialog) {
+          builder: (BuildContext context, StateSetter setState) {
             return AlertDialog(
-              title: const Text('Добавить интервал'),
+              title: const Text('Новая запись в расписании'),
               content: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -207,14 +418,183 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                     TextField(
                       controller: timeController,
                       inputFormatters: [timeMaskFormatter],
-                      keyboardType: TextInputType.number,
                       decoration: InputDecoration(
-                        labelText: 'Время (HH:MM - HH:MM)',
+                        labelText: 'Время (чч:мм - чч:мм)',
+                        hintText: '12:00 - 13:30',
                         errorText: timeError,
-                        helperText: 'Допустимые значения: 00:00 - 23:59',
                       ),
                     ),
                     const SizedBox(height: 10),
+                    
+                    // Секция повторяемости
+                    const Divider(),
+                    const Text(
+                      'Повторяемость',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    
+                    // Выбор типа повторения
+                    DropdownButtonFormField<RecurrenceType>(
+                      value: recurrence.type,
+                      decoration: const InputDecoration(
+                        labelText: 'Тип повторения',
+                      ),
+                      items: RecurrenceType.values.map((type) {
+                        String label;
+                        switch (type) {
+                          case RecurrenceType.none:
+                            label = 'Без повторения';
+                            break;
+                          case RecurrenceType.daily:
+                            label = 'Ежедневно';
+                            break;
+                          case RecurrenceType.weekly:
+                            label = 'Еженедельно';
+                            break;
+                          case RecurrenceType.monthly:
+                            label = 'Ежемесячно';
+                            break;
+                          case RecurrenceType.yearly:
+                            label = 'Ежегодно';
+                            break;
+                        }
+                        return DropdownMenuItem<RecurrenceType>(
+                          value: type,
+                          child: Text(label),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        setState(() {
+                          recurrence.type = value!;
+                        });
+                      },
+                    ),
+                    
+                    // Показываем дополнительные настройки только если тип не "Без повторения"
+                    if (recurrence.type != RecurrenceType.none) ...[
+                      const SizedBox(height: 10),
+                      
+                      // Интервал
+                      TextField(
+                        controller: intervalController,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                          labelText: 'Интервал',
+                          helperText: _getIntervalHelperText(recurrence.type),
+                        ),
+                        onChanged: (value) {
+                          int? interval = int.tryParse(value);
+                          if (interval != null && interval > 0) {
+                            recurrence.interval = interval;
+                          }
+                        },
+                      ),
+                      
+                      const SizedBox(height: 10),
+                      
+                      // Тип ограничения (по дате или количеству)
+                      Row(
+                        children: [
+                          const Text('Ограничение: '),
+                          Radio<String>(
+                            value: 'none',
+                            groupValue: selectedEndDate != null 
+                                ? 'date' 
+                                : (recurrence.count != null ? 'count' : 'none'),
+                            onChanged: (value) {
+                              setState(() {
+                                selectedEndDate = null;
+                                recurrence.endDate = null;
+                                recurrence.count = null;
+                                countController.text = '';
+                              });
+                            },
+                          ),
+                          const Text('Без ограничения'),
+                          
+                          Radio<String>(
+                            value: 'date',
+                            groupValue: selectedEndDate != null 
+                                ? 'date' 
+                                : (recurrence.count != null ? 'count' : 'none'),
+                            onChanged: (value) {
+                              setState(() {
+                                selectedEndDate = DateTime.now().add(const Duration(days: 30));
+                                recurrence.endDate = selectedEndDate;
+                                recurrence.count = null;
+                                countController.text = '';
+                              });
+                            },
+                          ),
+                          const Text('По дате'),
+                          
+                          Radio<String>(
+                            value: 'count',
+                            groupValue: selectedEndDate != null 
+                                ? 'date' 
+                                : (recurrence.count != null ? 'count' : 'none'),
+                            onChanged: (value) {
+                              setState(() {
+                                selectedEndDate = null;
+                                recurrence.endDate = null;
+                                recurrence.count = 10;
+                                countController.text = '10';
+                              });
+                            },
+                          ),
+                          const Text('По количеству'),
+                        ],
+                      ),
+                      
+                      const SizedBox(height: 10),
+                      
+                      // Ввод даты окончания
+                      if (selectedEndDate != null)
+                        Row(
+                          children: [
+                            const Text('Дата окончания: '),
+                            TextButton(
+                              onPressed: () async {
+                                final DateTime? picked = await showDatePicker(
+                                  context: context,
+                                  initialDate: selectedEndDate!,
+                                  firstDate: DateTime.now(),
+                                  lastDate: DateTime(2100),
+                                  locale: const Locale('ru', 'RU'),
+                                );
+                                if (picked != null && picked != selectedEndDate) {
+                                  setState(() {
+                                    selectedEndDate = picked;
+                                    recurrence.endDate = picked;
+                                  });
+                                }
+                              },
+                              child: Text(
+                                DateFormat('dd.MM.yyyy').format(selectedEndDate!),
+                              ),
+                            ),
+                          ],
+                        ),
+                      
+                      // Ввод количества повторений
+                      if (recurrence.count != null)
+                        TextField(
+                          controller: countController,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Количество повторений',
+                          ),
+                          onChanged: (value) {
+                            int? count = int.tryParse(value);
+                            if (count != null && count > 0) {
+                              recurrence.count = count;
+                            }
+                          },
+                        ),
+                    ],
+                    
+                    const Divider(),
+                    
                     // Динамические поля
                     Column(
                       children: dynamicFields.map((field) {
@@ -240,7 +620,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                             ),
                             IconButton(
                               onPressed: () {
-                                setStateDialog(() {
+                                setState(() {
                                   dynamicFields.removeAt(fieldIndex);
                                 });
                               },
@@ -254,7 +634,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                       alignment: Alignment.centerLeft,
                       child: TextButton(
                         onPressed: () {
-                          setStateDialog(() {
+                          setState(() {
                             dynamicFields.add(DynamicFieldEntry(
                                 key: 'Новое поле', value: ''));
                           });
@@ -277,19 +657,27 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
               actions: [
                 TextButton(
                   onPressed: () {
-                    // Проверка: если маска не заполнена полностью (т.е. меньше 8 цифр)
-                    if (timeMaskFormatter.getUnmaskedText().length < 8) {
-                      setStateDialog(() {
-                        timeError = 'Заполните время полностью';
+                    Navigator.pop(context);
+                  },
+                  child: const Text('Отмена'),
+                ),
+                TextButton(
+                  onPressed: () async {
+                    if (timeController.text.isEmpty ||
+                        !RegExp(r'^([0-9]{2}):([0-9]{2}) - ([0-9]{2}):([0-9]{2})$')
+                            .hasMatch(timeController.text)) {
+                      setState(() {
+                        timeError = 'Введите время в формате чч:мм - чч:мм';
                       });
                       return;
                     }
 
-                    // Проверка корректности времени
+                    // Дополнительная проверка корректности времени
                     String timeStr = timeController.text.trim();
                     List<String> timeParts = timeStr.split(' - ');
+                    // Проверка формата уже была выше, но для полноты оставим частичную проверку
                     if (timeParts.length != 2) {
-                      setStateDialog(() {
+                      setState(() {
                         timeError = 'Неверный формат времени';
                       });
                       return;
@@ -298,7 +686,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                     // Проверка начального времени
                     List<String> startTimeParts = timeParts[0].split(':');
                     if (startTimeParts.length != 2) {
-                      setStateDialog(() {
+                      setState(() {
                         timeError = 'Неверный формат времени начала';
                       });
                       return;
@@ -308,7 +696,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                     int startMinute = int.tryParse(startTimeParts[1]) ?? -1;
                     
                     if (startHour < 0 || startHour > 23 || startMinute < 0 || startMinute > 59) {
-                      setStateDialog(() {
+                      setState(() {
                         timeError = 'Время начала должно быть от 00:00 до 23:59';
                       });
                       return;
@@ -317,7 +705,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                     // Проверка конечного времени
                     List<String> endTimeParts = timeParts[1].split(':');
                     if (endTimeParts.length != 2) {
-                      setStateDialog(() {
+                      setState(() {
                         timeError = 'Неверный формат времени окончания';
                       });
                       return;
@@ -327,7 +715,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                     int endMinute = int.tryParse(endTimeParts[1]) ?? -1;
                     
                     if (endHour < 0 || endHour > 23 || endMinute < 0 || endMinute > 59) {
-                      setStateDialog(() {
+                      setState(() {
                         timeError = 'Время окончания должно быть от 00:00 до 23:59';
                       });
                       return;
@@ -338,85 +726,51 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                     final endTimeMinutes = endHour * 60 + endMinute;
                     
                     if (startTimeMinutes >= endTimeMinutes) {
-                      setStateDialog(() {
+                      setState(() {
                         timeError = 'Время начала должно быть раньше времени окончания';
                       });
                       return;
                     }
+                    
+                    // Сбрасываем ошибку, если все проверки пройдены
+                    setState(() {
+                      timeError = null;
+                    });
 
-                    if (_checkTimeOverlap(timeController.text)) {
-                      _showTimeOverlapDialog().then((shouldContinue) {
-                        if (shouldContinue != true) {
-                          return;
-                        }
-                        // Продолжаем с сохранением
-                        Map<String, String> dynamicMap = {};
-                        for (var field in dynamicFields) {
-                          String key = field.keyController.text.trim();
-                          if (key.isNotEmpty) {
-                            dynamicMap[key] = field.valueController.text;
-                          }
-                        }
-                        ScheduleEntry newEntry = ScheduleEntry(
-                          time: timeController.text.trim(),
-                          date: DateFormat('yyyy-MM-dd').format(_selectedDate!),
-                          note: shortNoteController.text.trim(),
-                          dynamicFieldsJson: jsonEncode(dynamicMap),
-                        );
-                        DatabaseHelper().insertScheduleEntry(newEntry.toMap()).then((id) {
-                          newEntry.id = id;
-                          setState(() {
-                            _schedule.add(newEntry);
-                          });
-                          _loadSchedule();
-                          showCustomToastWithIcon(
-                            "Интервал успешно создан",
-                            accentColor: Colors.green,
-                            fontSize: 14.0,
-                            icon: const Icon(Icons.check,
-                                size: 20, color: Colors.green),
-                          );
-                          Navigator.of(outerContext).pop();
-                        });
-                      });
-                      return;
-                    }
-
-                    // Сохранение при отсутствии наложения
+                    // Собираем динамические поля
                     Map<String, String> dynamicMap = {};
                     for (var field in dynamicFields) {
-                      String key = field.keyController.text.trim();
-                      if (key.isNotEmpty) {
-                        dynamicMap[key] = field.valueController.text;
-                      }
+                      dynamicMap[field.keyController.text] = field.valueController.text;
                     }
-                    ScheduleEntry newEntry = ScheduleEntry(
-                      time: timeController.text.trim(),
+
+                    // Создаем объект записи
+                    ScheduleEntry entry = ScheduleEntry(
+                      time: timeController.text,
                       date: DateFormat('yyyy-MM-dd').format(_selectedDate!),
                       note: shortNoteController.text.trim(),
                       dynamicFieldsJson: jsonEncode(dynamicMap),
+                      recurrence: recurrence,
+                      databaseId: databaseId, // Добавляем ID базы данных
                     );
-                    DatabaseHelper().insertScheduleEntry(newEntry.toMap()).then((id) {
-                      newEntry.id = id;
+
+                    print('Создание записи расписания в базе: ${databaseId ?? "локальная"}');
+                    // Сохраняем запись в БД
+                    DatabaseHelper().insertScheduleEntry(entry.toMap()).then((_) {
+                      if (!mounted) return;
+                      // Обновляем список записей
                       setState(() {
-                        _schedule.add(newEntry);
+                        _loadSchedule();
                       });
-                      _loadSchedule();
+                      Navigator.pop(context);
                       showCustomToastWithIcon(
-                        "Интервал успешно создан",
+                        "Запись успешно добавлена",
                         accentColor: Colors.green,
                         fontSize: 14.0,
-                        icon: const Icon(Icons.check,
-                            size: 20, color: Colors.green),
+                        icon: const Icon(Icons.check, size: 20, color: Colors.green),
                       );
-                      Navigator.of(outerContext).pop();
                     });
                   },
                   child: const Text('Сохранить'),
-                ),
-                TextButton(
-                  onPressed: () => Navigator.of(outerContext).pop(),
-                  child: const Text('Отмена'),
                 ),
               ],
             );
@@ -424,6 +778,22 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
         );
       },
     );
+  }
+
+  // Вспомогательный метод для определения подсказки интервала
+  String _getIntervalHelperText(RecurrenceType type) {
+    switch (type) {
+      case RecurrenceType.daily:
+        return 'Повторять каждые X дней';
+      case RecurrenceType.weekly:
+        return 'Повторять каждые X недель';
+      case RecurrenceType.monthly:
+        return 'Повторять каждые X месяцев';
+      case RecurrenceType.yearly:
+        return 'Повторять каждые X лет';
+      default:
+        return '';
+    }
   }
 
   // Метод редактирования интервала с использованием маски для поля времени.
@@ -452,6 +822,14 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
     }
     String? timeError;
     
+    // Параметры повторяемости
+    Recurrence recurrence = entry.recurrence;
+    final TextEditingController intervalController = TextEditingController(text: '${recurrence.interval ?? 1}');
+    final TextEditingController countController = TextEditingController(
+      text: recurrence.count != null ? '${recurrence.count}' : ''
+    );
+    DateTime? selectedEndDate = recurrence.endDate;
+    
     showDialog(
       context: context,
       builder: (BuildContext outerContext) {
@@ -475,6 +853,176 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                       ),
                     ),
                     const SizedBox(height: 10),
+                    
+                    // Секция повторяемости
+                    const Divider(),
+                    const Text(
+                      'Повторяемость',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    
+                    // Выбор типа повторения
+                    DropdownButtonFormField<RecurrenceType>(
+                      value: recurrence.type,
+                      decoration: const InputDecoration(
+                        labelText: 'Тип повторения',
+                      ),
+                      items: RecurrenceType.values.map((type) {
+                        String label;
+                        switch (type) {
+                          case RecurrenceType.none:
+                            label = 'Без повторения';
+                            break;
+                          case RecurrenceType.daily:
+                            label = 'Ежедневно';
+                            break;
+                          case RecurrenceType.weekly:
+                            label = 'Еженедельно';
+                            break;
+                          case RecurrenceType.monthly:
+                            label = 'Ежемесячно';
+                            break;
+                          case RecurrenceType.yearly:
+                            label = 'Ежегодно';
+                            break;
+                        }
+                        return DropdownMenuItem<RecurrenceType>(
+                          value: type,
+                          child: Text(label),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        setStateDialog(() {
+                          recurrence.type = value!;
+                        });
+                      },
+                    ),
+                    
+                    // Показываем дополнительные настройки только если тип не "Без повторения"
+                    if (recurrence.type != RecurrenceType.none) ...[
+                      const SizedBox(height: 10),
+                      
+                      // Интервал
+                      TextField(
+                        controller: intervalController,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                          labelText: 'Интервал',
+                          helperText: _getIntervalHelperText(recurrence.type),
+                        ),
+                        onChanged: (value) {
+                          int? interval = int.tryParse(value);
+                          if (interval != null && interval > 0) {
+                            recurrence.interval = interval;
+                          }
+                        },
+                      ),
+                      
+                      const SizedBox(height: 10),
+                      
+                      // Тип ограничения (по дате или количеству)
+                      Row(
+                        children: [
+                          const Text('Ограничение: '),
+                          Radio<String>(
+                            value: 'none',
+                            groupValue: selectedEndDate != null 
+                                ? 'date' 
+                                : (recurrence.count != null ? 'count' : 'none'),
+                            onChanged: (value) {
+                              setStateDialog(() {
+                                selectedEndDate = null;
+                                recurrence.endDate = null;
+                                recurrence.count = null;
+                                countController.text = '';
+                              });
+                            },
+                          ),
+                          const Text('Без ограничения'),
+                          
+                          Radio<String>(
+                            value: 'date',
+                            groupValue: selectedEndDate != null 
+                                ? 'date' 
+                                : (recurrence.count != null ? 'count' : 'none'),
+                            onChanged: (value) {
+                              setStateDialog(() {
+                                selectedEndDate = DateTime.now().add(const Duration(days: 30));
+                                recurrence.endDate = selectedEndDate;
+                                recurrence.count = null;
+                                countController.text = '';
+                              });
+                            },
+                          ),
+                          const Text('По дате'),
+                          
+                          Radio<String>(
+                            value: 'count',
+                            groupValue: selectedEndDate != null 
+                                ? 'date' 
+                                : (recurrence.count != null ? 'count' : 'none'),
+                            onChanged: (value) {
+                              setStateDialog(() {
+                                selectedEndDate = null;
+                                recurrence.endDate = null;
+                                recurrence.count = 10;
+                                countController.text = '10';
+                              });
+                            },
+                          ),
+                          const Text('По количеству'),
+                        ],
+                      ),
+                      
+                      const SizedBox(height: 10),
+                      
+                      // Ввод даты окончания
+                      if (selectedEndDate != null)
+                        Row(
+                          children: [
+                            const Text('Дата окончания: '),
+                            TextButton(
+                              onPressed: () async {
+                                final DateTime? picked = await showDatePicker(
+                                  context: innerContext,
+                                  initialDate: selectedEndDate!,
+                                  firstDate: DateTime.now(),
+                                  lastDate: DateTime(2100),
+                                  locale: const Locale('ru', 'RU'),
+                                );
+                                if (picked != null && picked != selectedEndDate) {
+                                  setStateDialog(() {
+                                    selectedEndDate = picked;
+                                    recurrence.endDate = picked;
+                                  });
+                                }
+                              },
+                              child: Text(
+                                DateFormat('dd.MM.yyyy').format(selectedEndDate!),
+                              ),
+                            ),
+                          ],
+                        ),
+                      
+                      // Ввод количества повторений
+                      if (recurrence.count != null)
+                        TextField(
+                          controller: countController,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Количество повторений',
+                          ),
+                          onChanged: (value) {
+                            int? count = int.tryParse(value);
+                            if (count != null && count > 0) {
+                              recurrence.count = count;
+                            }
+                          },
+                        ),
+                    ],
+                    
+                    const Divider(),
+                    
                     Column(
                       children: dynamicFields.map((field) {
                         int fieldIndex = dynamicFields.indexOf(field);
@@ -615,9 +1163,39 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                             dynamicMap[key] = field.valueController.text;
                           }
                         }
+                        
+                        // Финальное обновление параметров повторяемости
+                        if (recurrence.type != RecurrenceType.none) {
+                          recurrence.interval = int.tryParse(intervalController.text) ?? 1;
+                          if (selectedEndDate != null) {
+                            recurrence.endDate = selectedEndDate;
+                            recurrence.count = null;
+                          } else if (countController.text.isNotEmpty) {
+                            recurrence.count = int.tryParse(countController.text);
+                            recurrence.endDate = null;
+                          }
+                        }
+                        
                         entry.time = timeController.text;
                         entry.note = shortNoteController.text.trim();
                         entry.dynamicFieldsJson = jsonEncode(dynamicMap);
+                        entry.recurrence = recurrence;
+                        
+                        // Сохраняем существующий databaseId или устанавливаем новый если нужно
+                        if (entry.databaseId == null) {
+                          try {
+                            final collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
+                            if (collabProvider.isUsingSharedDatabase) {
+                              entry.databaseId = collabProvider.currentDatabaseId;
+                              print('Обновление записи расписания с установкой базы: ${entry.databaseId}');
+                            }
+                          } catch (e) {
+                            print('Ошибка при получении информации о совместной базе: $e');
+                          }
+                        } else {
+                          print('Обновление записи расписания в базе: ${entry.databaseId}');
+                        }
+                        
                         DatabaseHelper().updateScheduleEntry(entry).then((_) {
                           setState(() {
                             _schedule[index] = entry;
@@ -644,9 +1222,43 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                         dynamicMap[key] = field.valueController.text;
                       }
                     }
+                    
+                    // Финальное обновление параметров повторяемости
+                    if (recurrence.type != RecurrenceType.none) {
+                      recurrence.interval = int.tryParse(intervalController.text) ?? 1;
+                      if (selectedEndDate != null) {
+                        recurrence.endDate = selectedEndDate;
+                        recurrence.count = null;
+                      } else if (countController.text.isNotEmpty) {
+                        recurrence.count = int.tryParse(countController.text);
+                        recurrence.endDate = null;
+                      }
+                    } else {
+                      recurrence.interval = 1;
+                      recurrence.endDate = null;
+                      recurrence.count = null;
+                    }
+                    
                     entry.time = timeController.text;
                     entry.note = shortNoteController.text.trim();
                     entry.dynamicFieldsJson = jsonEncode(dynamicMap);
+                    entry.recurrence = recurrence;
+                    
+                    // Сохраняем существующий databaseId или устанавливаем новый если нужно
+                    if (entry.databaseId == null) {
+                      try {
+                        final collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
+                        if (collabProvider.isUsingSharedDatabase) {
+                          entry.databaseId = collabProvider.currentDatabaseId;
+                          print('Обновление записи расписания с установкой базы: ${entry.databaseId}');
+                        }
+                      } catch (e) {
+                        print('Ошибка при получении информации о совместной базе: $e');
+                      }
+                    } else {
+                      print('Обновление записи расписания в базе: ${entry.databaseId}');
+                    }
+                    
                     DatabaseHelper().updateScheduleEntry(entry).then((_) {
                       setState(() {
                         _schedule[index] = entry;
@@ -678,18 +1290,81 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
 
   // Удаление интервала
   void _deleteScheduleEntry(int index) {
-    DatabaseHelper().deleteScheduleEntry(_schedule[index].id!).then((_) {
-      setState(() {
-        _schedule.removeAt(index);
-        _selectedIndex = null;
-      });
-      showCustomToastWithIcon(
-        "Интервал успешно удалён",
-        accentColor: Colors.red,
-        fontSize: 14.0,
-        icon: const Icon(Icons.close, size: 20, color: Colors.red),
+    ScheduleEntry entry = _schedule[index];
+    
+    // Если у события есть повторения, спрашиваем пользователя, что именно удалить
+    if (entry.recurrence.type != RecurrenceType.none) {
+      showDialog(
+        context: context,
+        builder: (BuildContext dialogContext) {
+          return AlertDialog(
+            title: const Text('Удаление повторяющегося события'),
+            content: const Text('Что именно вы хотите удалить?'),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.of(dialogContext).pop();
+                  // Удаляем только текущий экземпляр события
+                  setState(() {
+                    _schedule.removeAt(index);
+                    _selectedIndex = null;
+                  });
+                  
+                  showCustomToastWithIcon(
+                    "Текущий экземпляр события удален",
+                    accentColor: Colors.yellow,
+                    fontSize: 14.0,
+                    icon: const Icon(Icons.close, size: 20, color: Colors.yellow),
+                  );
+                },
+                child: const Text('Только это событие'),
+              ),
+              TextButton(
+                onPressed: () {
+                  Navigator.of(dialogContext).pop();
+                  // Удаляем все повторения
+                  DatabaseHelper().deleteScheduleEntry(entry.id!).then((_) {
+                    setState(() {
+                      _schedule.removeAt(index);
+                      _selectedIndex = null;
+                    });
+                    
+                    showCustomToastWithIcon(
+                      "Все повторения события удалены",
+                      accentColor: Colors.red,
+                      fontSize: 14.0,
+                      icon: const Icon(Icons.close, size: 20, color: Colors.red),
+                    );
+                  });
+                },
+                child: const Text('Все повторения'),
+              ),
+              TextButton(
+                onPressed: () {
+                  Navigator.of(dialogContext).pop();
+                },
+                child: const Text('Отмена'),
+              ),
+            ],
+          );
+        },
       );
-    });
+    } else {
+      // Обычное удаление для непосредственного события без повторений
+      DatabaseHelper().deleteScheduleEntry(entry.id!).then((_) {
+        setState(() {
+          _schedule.removeAt(index);
+          _selectedIndex = null;
+        });
+        
+        showCustomToastWithIcon(
+          "Интервал успешно удалён",
+          accentColor: Colors.red,
+          fontSize: 14.0,
+          icon: const Icon(Icons.close, size: 20, color: Colors.red),
+        );
+      });
+    }
   }
 
   // Контекстное меню для интервала
@@ -715,6 +1390,22 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
     });
   }
 
+  // Метод для определения цвета иконки повторения
+  Color _getRecurrenceColor(RecurrenceType type) {
+    switch (type) {
+      case RecurrenceType.daily:
+        return Colors.green;
+      case RecurrenceType.weekly:
+        return Colors.blue;
+      case RecurrenceType.monthly:
+        return Colors.orange;
+      case RecurrenceType.yearly:
+        return Colors.purple;
+      default:
+        return Colors.grey;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     // Если дата не выбрана, показываем календарь
@@ -734,6 +1425,11 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
           },
           highlightedDate: _highlightedDate,
           onDateHighlighted: _onDateHighlighted,
+          onMonthChanged: (date) {
+            setState(() {
+              _currentMonth = date;
+            });
+          },
         ),
       );
     }
@@ -811,12 +1507,28 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                                       children: [
                                         Expanded(
                                           flex: 2,
-                                          child: Text(
-                                            entry.time,
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontWeight: FontWeight.bold,
-                                            ),
+                                          child: Row(
+                                            children: [
+                                              Text(
+                                                entry.time,
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
+                                              if (entry.recurrence.type != RecurrenceType.none)
+                                                Padding(
+                                                  padding: const EdgeInsets.only(left: 4.0),
+                                                  child: Tooltip(
+                                                    message: entry.recurrence.toString(),
+                                                    child: Icon(
+                                                      Icons.repeat,
+                                                      size: 16,
+                                                      color: _getRecurrenceColor(entry.recurrence.type),
+                                                    ),
+                                                  ),
+                                                ),
+                                            ],
                                           ),
                                         ),
                                         const VerticalDivider(
@@ -825,8 +1537,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                                           flex: 5,
                                           child: Text(
                                             dynamicFieldsDisplay,
-                                            style:
-                                                const TextStyle(color: Colors.white70),
+                                            style: const TextStyle(color: Colors.white70),
+                                            overflow: TextOverflow.ellipsis,
                                           ),
                                         ),
                                       ],

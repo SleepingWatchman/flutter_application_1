@@ -218,22 +218,48 @@ class CollaborationBackupService {
   }
 
   Future<BackupData> _createBackup(String databaseId) async {
-    final notes = await _dbHelper.getAllNotes(databaseId);
+    final folders = await _dbHelper.getFoldersForDatabase(databaseId);
+    print('Получено папок: ${folders.length}');
+    
+    final notes = await _dbHelper.getNotesForDatabase(databaseId);
     print('Получено заметок: ${notes.length}');
 
-    final pinboardNotes = await _dbHelper.getPinboardNotes(databaseId);
+    final scheduleEntries = await _dbHelper.getScheduleEntriesForDatabase(databaseId);
+    print('Получено записей расписания: ${scheduleEntries.length}');
+
+    final pinboardNotes = await _dbHelper.getPinboardNotesForDatabase(databaseId);
     print('Получено заметок на доске: ${pinboardNotes.length}');
 
-    final connections = await _dbHelper.getConnectionsDB(databaseId);
+    final connections = await _dbHelper.getConnectionsForDatabase(databaseId);
     print('Получено соединений: ${connections.length}');
 
+    // Получаем ID всех заметок для этой базы
+    final noteIds = notes
+        .where((note) => note['id'] != null)
+        .map((note) => note['id'] as int)
+        .toList();
+    
+    // Получаем изображения для этих заметок
+    List<Map<String, dynamic>> images = [];
+    if (noteIds.isNotEmpty) {
+      final db = await _dbHelper.database;
+      final placeholders = List.filled(noteIds.length, '?').join(',');
+      images = await db.query(
+        'note_images',
+        where: 'note_id IN ($placeholders)',
+        whereArgs: noteIds,
+      );
+      print('Получено изображений: ${images.length}');
+    }
+
     return BackupData(
-      folders: [],
-      notes: notes.map((note) => note.toMap()).toList(),
-      scheduleEntries: [],
-      pinboardNotes: pinboardNotes.map((note) => note.toMap()).toList(),
-      connections: connections.map((conn) => conn.toMap()).toList(),
-      noteImages: [],
+      folders: folders,
+      notes: notes,
+      scheduleEntries: scheduleEntries,
+      pinboardNotes: pinboardNotes,
+      connections: connections,
+      noteImages: images,
+      databaseId: databaseId,
     );
   }
 
@@ -294,16 +320,35 @@ class CollaborationBackupService {
       await _dbHelper.clearDatabaseTablesForBackup(databaseId, txn);
 
       // Восстанавливаем данные с указанным database_id
+      await _restoreFolders(databaseId, backupData.folders, txn);
       await _restoreNotes(databaseId, backupData.notes, txn);
+      await _restoreScheduleEntries(databaseId, backupData.scheduleEntries, txn);
       await _restorePinboardNotes(databaseId, backupData.pinboardNotes, txn);
       await _restoreConnections(databaseId, backupData.connections, txn);
+      await _restoreImages(databaseId, backupData.noteImages, txn);
+      
+      print('Восстановлены данные для базы $databaseId: папок - ${backupData.folders.length}, заметок - ${backupData.notes.length}, записей расписания - ${backupData.scheduleEntries.length}, изображений - ${backupData.noteImages.length}');
     });
+  }
+
+  Future<void> _restoreFolders(String databaseId, List<Map<String, dynamic>> folders, Transaction txn) async {
+    for (var folder in folders) {
+      folder['database_id'] = databaseId;
+      await _dbHelper.insertFolderForBackup(folder, txn);
+    }
   }
 
   Future<void> _restoreNotes(String databaseId, List<Map<String, dynamic>> notes, Transaction txn) async {
     for (var note in notes) {
       note['database_id'] = databaseId;
       await _dbHelper.insertNoteForBackup(note, txn);
+    }
+  }
+
+  Future<void> _restoreScheduleEntries(String databaseId, List<Map<String, dynamic>> entries, Transaction txn) async {
+    for (var entry in entries) {
+      entry['database_id'] = databaseId;
+      await _dbHelper.insertScheduleEntryForBackup(entry, txn);
     }
   }
 
@@ -318,6 +363,33 @@ class CollaborationBackupService {
     for (var connection in connections) {
       connection['database_id'] = databaseId;
       await _dbHelper.insertConnectionForBackup(connection, txn);
+    }
+  }
+
+  Future<void> _restoreImages(String databaseId, List<Map<String, dynamic>> images, Transaction txn) async {
+    for (var image in images) {
+      try {
+        final int noteId = image['note_id'];
+        final String fileName = image['file_name'];
+        Uint8List imageBytes;
+        
+        // Проверяем, в каком формате пришли данные изображения
+        if (image['image_data'] is String) {
+          // Если данные пришли в base64, декодируем их
+          imageBytes = base64Decode(image['image_data'] as String);
+        } else if (image['image_data'] is List) {
+          // Если данные пришли как список байтов
+          imageBytes = Uint8List.fromList(List<int>.from(image['image_data']));
+        } else {
+          // Если данные уже в формате Uint8List
+          imageBytes = image['image_data'] as Uint8List;
+        }
+        
+        await _dbHelper.insertImageForBackup(noteId, fileName, imageBytes, txn);
+      } catch (e) {
+        print('Ошибка при восстановлении изображения: $e');
+        // Пробрасываем ошибку дальше для обработки
+      }
     }
   }
 } 

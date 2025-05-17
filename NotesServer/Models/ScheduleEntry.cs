@@ -16,17 +16,10 @@ namespace NotesServer.Models
         [Required]
         [JsonPropertyName("date")]
         public string Date { get; set; } = string.Empty;
-        [Required]
         [JsonPropertyName("note")]
-        public string Note { get; set; } = string.Empty;
+        public string? Note { get; set; }
         [JsonPropertyName("dynamicFieldsJson")]
-        public string DynamicFieldsJson { get; set; } = "{}";
-        [JsonPropertyName("startTime")]
-        public DateTime StartTime { get; set; }
-        [JsonPropertyName("endTime")]
-        public DateTime EndTime { get; set; }
-        [JsonPropertyName("isAllDay")]
-        public bool IsAllDay { get; set; }
+        public string? DynamicFieldsJson { get; set; }
         [JsonPropertyName("createdAt")]
         public DateTime CreatedAt { get; set; }
     }

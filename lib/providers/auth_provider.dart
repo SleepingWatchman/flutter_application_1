@@ -7,13 +7,17 @@ class AuthProvider with ChangeNotifier {
   UserModel? _user;
   bool _isLoading = false;
   String? _error;
+  bool _wasTokenExpired = false;
+  bool _isGuestMode = false;
 
   UserModel? get user => _user;
   bool get isLoading => _isLoading;
-  bool get isAuthenticated => _user != null;
+  bool get isAuthenticated => _user != null || _isGuestMode;
   String? get token => _authService.token;
   String? get error => _error;
   AuthService get authService => _authService;
+  bool get wasTokenExpired => _wasTokenExpired;
+  bool get isGuestMode => _isGuestMode;
 
   AuthProvider() {
     _init();
@@ -27,6 +31,11 @@ class AuthProvider with ChangeNotifier {
       // Загружаем сохраненные данные
       await _authService.loadSavedData();
       _user = _authService.currentUser;
+      // Если токен истёк или пользователь не авторизован — signOut
+      if (_authService.isTokenExpired() && _user != null) {
+        _wasTokenExpired = true;
+        await signOut();
+      }
     } catch (e) {
       debugPrint('Error loading saved data: $e');
     } finally {
@@ -72,6 +81,7 @@ class AuthProvider with ChangeNotifier {
 
       await _authService.signOut();
       _user = null;
+      _isGuestMode = false;
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -91,5 +101,20 @@ class AuthProvider with ChangeNotifier {
       _isLoading = false;
       notifyListeners();
     }
+  }
+
+  void resetTokenExpiredFlag() {
+    _wasTokenExpired = false;
+    notifyListeners();
+  }
+
+  void enableGuestMode() {
+    _isGuestMode = true;
+    notifyListeners();
+  }
+
+  void disableGuestMode() {
+    _isGuestMode = false;
+    notifyListeners();
   }
 } 

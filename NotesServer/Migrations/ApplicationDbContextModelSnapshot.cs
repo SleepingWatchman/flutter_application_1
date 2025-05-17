@@ -43,6 +43,33 @@ namespace NotesServer.Migrations
                     b.ToTable("CollaborationDatabases");
                 });
 
+            modelBuilder.Entity("NotesServer.Models.CollaborativeDatabase", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("LastSync")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OwnerId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("CollaborativeDatabases");
+                });
+
             modelBuilder.Entity("NotesServer.Models.Connection", b =>
                 {
                     b.Property<int>("Id")
@@ -54,16 +81,11 @@ namespace NotesServer.Migrations
                         .HasColumnType("INTEGER")
                         .HasAnnotation("Relational:JsonPropertyName", "connectionColor");
 
-                    b.Property<string>("ConnectionString")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
                     b.Property<int>("DatabaseId")
-                        .HasColumnType("INTEGER")
-                        .HasAnnotation("Relational:JsonPropertyName", "databaseId");
+                        .HasColumnType("INTEGER");
 
                     b.Property<int>("FromNoteId")
                         .HasColumnType("INTEGER")
@@ -88,6 +110,30 @@ namespace NotesServer.Migrations
                     b.ToTable("Connections");
                 });
 
+            modelBuilder.Entity("NotesServer.Models.DatabaseCollaborator", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DatabaseId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DatabaseId");
+
+                    b.ToTable("DatabaseCollaborators");
+                });
+
             modelBuilder.Entity("NotesServer.Models.Folder", b =>
                 {
                     b.Property<int>("Id")
@@ -103,8 +149,7 @@ namespace NotesServer.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<int>("DatabaseId")
-                        .HasColumnType("INTEGER")
-                        .HasAnnotation("Relational:JsonPropertyName", "databaseId");
+                        .HasColumnType("INTEGER");
 
                     b.Property<bool>("IsExpanded")
                         .HasColumnType("INTEGER")
@@ -127,30 +172,26 @@ namespace NotesServer.Migrations
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
-                        .HasAnnotation("Relational:JsonPropertyName", "id");
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("Content")
-                        .IsRequired()
-                        .HasColumnType("TEXT")
-                        .HasAnnotation("Relational:JsonPropertyName", "content");
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("ContentJson")
-                        .HasColumnType("TEXT")
-                        .HasAnnotation("Relational:JsonPropertyName", "content_json");
+                        .HasColumnType("TEXT");
 
-                    b.Property<string>("CreatedAt")
-                        .IsRequired()
-                        .HasColumnType("TEXT")
-                        .HasAnnotation("Relational:JsonPropertyName", "createdAt");
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
 
                     b.Property<int>("DatabaseId")
-                        .HasColumnType("INTEGER")
-                        .HasAnnotation("Relational:JsonPropertyName", "databaseId");
+                        .HasColumnType("INTEGER");
 
                     b.Property<int?>("FolderId")
-                        .HasColumnType("INTEGER")
-                        .HasAnnotation("Relational:JsonPropertyName", "folderId");
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Images")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("ImagesJson")
                         .IsRequired()
@@ -162,15 +203,14 @@ namespace NotesServer.Migrations
 
                     b.Property<string>("Title")
                         .IsRequired()
-                        .HasColumnType("TEXT")
-                        .HasAnnotation("Relational:JsonPropertyName", "title");
+                        .HasColumnType("TEXT");
 
-                    b.Property<string>("UpdatedAt")
-                        .IsRequired()
-                        .HasColumnType("TEXT")
-                        .HasAnnotation("Relational:JsonPropertyName", "updatedAt");
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("FolderId");
 
                     b.ToTable("Notes");
                 });
@@ -186,8 +226,7 @@ namespace NotesServer.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<int>("DatabaseId")
-                        .HasColumnType("INTEGER")
-                        .HasAnnotation("Relational:JsonPropertyName", "databaseId");
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("FileName")
                         .IsRequired()
@@ -225,15 +264,15 @@ namespace NotesServer.Migrations
                         .HasAnnotation("Relational:JsonPropertyName", "content");
 
                     b.Property<int>("DatabaseId")
-                        .HasColumnType("INTEGER")
-                        .HasAnnotation("Relational:JsonPropertyName", "databaseId");
+                        .HasColumnType("INTEGER");
 
                     b.Property<double>("Height")
                         .HasColumnType("REAL")
                         .HasAnnotation("Relational:JsonPropertyName", "height");
 
-                    b.Property<int>("Icon")
-                        .HasColumnType("INTEGER")
+                    b.Property<string>("Icon")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
                         .HasAnnotation("Relational:JsonPropertyName", "icon");
 
                     b.Property<double>("PositionX")
@@ -270,8 +309,7 @@ namespace NotesServer.Migrations
                         .HasAnnotation("Relational:JsonPropertyName", "createdAt");
 
                     b.Property<int>("DatabaseId")
-                        .HasColumnType("INTEGER")
-                        .HasAnnotation("Relational:JsonPropertyName", "databaseId");
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("Date")
                         .IsRequired()
@@ -279,26 +317,12 @@ namespace NotesServer.Migrations
                         .HasAnnotation("Relational:JsonPropertyName", "date");
 
                     b.Property<string>("DynamicFieldsJson")
-                        .IsRequired()
                         .HasColumnType("TEXT")
                         .HasAnnotation("Relational:JsonPropertyName", "dynamicFieldsJson");
 
-                    b.Property<DateTime>("EndTime")
-                        .HasColumnType("TEXT")
-                        .HasAnnotation("Relational:JsonPropertyName", "endTime");
-
-                    b.Property<bool>("IsAllDay")
-                        .HasColumnType("INTEGER")
-                        .HasAnnotation("Relational:JsonPropertyName", "isAllDay");
-
                     b.Property<string>("Note")
-                        .IsRequired()
                         .HasColumnType("TEXT")
                         .HasAnnotation("Relational:JsonPropertyName", "note");
-
-                    b.Property<DateTime>("StartTime")
-                        .HasColumnType("TEXT")
-                        .HasAnnotation("Relational:JsonPropertyName", "startTime");
 
                     b.Property<string>("Time")
                         .IsRequired()
@@ -343,6 +367,31 @@ namespace NotesServer.Migrations
                     b.HasIndex("OwnerId");
 
                     b.ToTable("SharedDatabases");
+                });
+
+            modelBuilder.Entity("NotesServer.Models.DatabaseCollaborator", b =>
+                {
+                    b.HasOne("NotesServer.Models.CollaborativeDatabase", "Database")
+                        .WithMany("Collaborators")
+                        .HasForeignKey("DatabaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Database");
+                });
+
+            modelBuilder.Entity("NotesServer.Models.Note", b =>
+                {
+                    b.HasOne("NotesServer.Models.Folder", "Folder")
+                        .WithMany()
+                        .HasForeignKey("FolderId");
+
+                    b.Navigation("Folder");
+                });
+
+            modelBuilder.Entity("NotesServer.Models.CollaborativeDatabase", b =>
+                {
+                    b.Navigation("Collaborators");
                 });
 #pragma warning restore 612, 618
         }

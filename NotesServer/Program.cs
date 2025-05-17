@@ -8,6 +8,9 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.Extensions.FileProviders;
 using NotesServer.Data;
 using NotesServer.Models;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -28,7 +31,8 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IBackupService, BackupService>();
 builder.Services.AddScoped<IImageService, ImageService>();
-builder.Services.AddScoped<ICollaborationService, CollaborationService>();
+builder.Services.AddScoped<IUserService, UserService>();
+builder.Services.AddScoped<IFileService, FileService>();
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -88,6 +92,21 @@ builder.WebHost.ConfigureKestrel(serverOptions =>
 {
     serverOptions.ListenAnyIP(5294);
 });
+
+// Add services to the container
+builder.Services.AddControllers();
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+builder.Services.AddDbContext<ApplicationDbContext>();
+builder.Services.AddScoped<DatabaseInitializationService>();
+
+// Configure SQLite database path
+var databasePath = Path.Combine(builder.Environment.ContentRootPath, "Data", "Databases");
+Directory.CreateDirectory(databasePath);
+
+// Register CollaborationService
+builder.Services.AddScoped<CollaborationService>();
+builder.Services.AddScoped<ICollaborationService>(sp => sp.GetRequiredService<CollaborationService>());
 
 var app = builder.Build();
 

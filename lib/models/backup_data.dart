@@ -29,10 +29,31 @@ class BackupData {
     this.createdAt = createdAt ?? DateTime.now();
 
   Map<String, dynamic> toJson() {
+    // Проверяем наличие и размеры изображений
+    if (noteImages.isNotEmpty) {
+      print('BackupData.toJson: конвертация ${noteImages.length} изображений');
+      int validImages = 0;
+      int invalidImages = 0;
+      
+      for (var image in noteImages) {
+        if (image.containsKey('image_data') && image['image_data'] != null) {
+          if (image['image_data'] is Uint8List && (image['image_data'] as Uint8List).isNotEmpty) {
+            validImages++;
+          } else {
+            invalidImages++;
+          }
+        } else {
+          invalidImages++;
+        }
+      }
+      
+      print('BackupData.toJson: обнаружено $validImages корректных и $invalidImages некорректных изображений');
+    }
+    
     return {
       'folders': _encodeList(folders),
       'notes': _encodeList(notes),
-      'schedule': _encodeList(scheduleEntries),
+      'scheduleEntries': _encodeList(scheduleEntries),
       'pinboardNotes': _encodeList(pinboardNotes),
       'connections': _encodeList(connections),
       'images': _encodeImages(noteImages),
@@ -58,20 +79,58 @@ class BackupData {
   }
 
   List<Map<String, dynamic>> _encodeImages(List<Map<String, dynamic>> images) {
-    return images.map((image) {
-      var encoded = Map<String, dynamic>.from(image);
-      if (encoded['image_data'] is Uint8List) {
-        encoded['image_data'] = base64Encode(encoded['image_data'] as Uint8List);
+    List<Map<String, dynamic>> result = [];
+    int errorCount = 0;
+    
+    for (var image in images) {
+      try {
+        var encoded = Map<String, dynamic>.from(image);
+        if (!encoded.containsKey('image_data') || encoded['image_data'] == null) {
+          print('Ошибка: изображение без данных, пропускаем');
+          errorCount++;
+          continue;
+        }
+        
+        if (encoded['image_data'] is Uint8List) {
+          Uint8List data = encoded['image_data'] as Uint8List;
+          if (data.isEmpty) {
+            print('Ошибка: изображение с пустыми данными, пропускаем');
+            errorCount++;
+            continue;
+          }
+          
+          try {
+            encoded['image_data'] = base64Encode(data);
+          } catch (e) {
+            print('Ошибка при кодировании изображения в base64: $e');
+            errorCount++;
+            continue;
+          }
+        } else {
+          print('Ошибка: неизвестный формат данных изображения: ${encoded['image_data'].runtimeType}');
+          errorCount++;
+          continue;
+        }
+        
+        result.add(encoded);
+      } catch (e) {
+        print('Ошибка при обработке изображения: $e');
+        errorCount++;
       }
-      return encoded;
-    }).toList();
+    }
+    
+    if (errorCount > 0) {
+      print('При кодировании изображений обнаружено $errorCount ошибок');
+    }
+    
+    return result;
   }
 
   factory BackupData.fromJson(Map<String, dynamic> json) {
     return BackupData(
       folders: _decodeList(json['folders'] ?? []),
       notes: _decodeList(json['notes'] ?? []),
-      scheduleEntries: _decodeList(json['schedule'] ?? []),
+      scheduleEntries: _decodeList(json['scheduleEntries'] ?? json['schedule'] ?? []),
       pinboardNotes: _decodeList(json['pinboardNotes'] ?? []),
       connections: _decodeList(json['connections'] ?? []),
       noteImages: _decodeImages(json['images'] ?? []),
@@ -109,28 +168,58 @@ class BackupData {
 
   static List<Map<String, dynamic>> _decodeImages(List<dynamic> images) {
     return images.map((image) {
+      if (image == null) {
+        return <String, dynamic>{
+          'note_id': 0,
+          'file_name': '',
+          'image_data': Uint8List(0)
+        };
+      }
+      
       var decoded = Map<String, dynamic>.from(image);
-      if (decoded['image_data'] is String) {
+      
+      // Проверка обязательного поля note_id
+      if (!decoded.containsKey('note_id') || decoded['note_id'] == null) {
+        decoded['note_id'] = 0;
+        print('Предупреждение: отсутствует note_id для изображения');
+      }
+      
+      // Проверка обязательного поля file_name
+      if (!decoded.containsKey('file_name') || decoded['file_name'] == null) {
+        decoded['file_name'] = 'image_${DateTime.now().millisecondsSinceEpoch}.jpg';
+        print('Предупреждение: отсутствует file_name для изображения, создан временный');
+      }
+      
+      // Обработка данных изображения
+      if (!decoded.containsKey('image_data') || decoded['image_data'] == null) {
+        print('Предупреждение: отсутствуют данные изображения');
+        decoded['image_data'] = Uint8List(0);
+      } else if (decoded['image_data'] is String) {
         try {
           // Декодируем base64 в бинарные данные
           final String base64Data = decoded['image_data'] as String;
           if (base64Data.isNotEmpty) {
-            decoded['image_data'] = base64Decode(base64Data);
+            try {
+              decoded['image_data'] = base64Decode(base64Data);
+            } catch (e) {
+              print('Ошибка при декодировании base64 для ${decoded['file_name']}: $e');
+              decoded['image_data'] = Uint8List(0);
+            }
           } else {
-            print('Предупреждение: пустые данные изображения');
-            decoded['image_data'] = null;
+            print('Предупреждение: пустые данные изображения для ${decoded['file_name']}');
+            decoded['image_data'] = Uint8List(0);
           }
         } catch (e) {
-          print('Ошибка при декодировании изображения: $e');
-          decoded['image_data'] = null;
+          print('Ошибка при декодировании изображения ${decoded['file_name']}: $e');
+          decoded['image_data'] = Uint8List(0);
         }
       } else if (decoded['image_data'] is List) {
         // Если данные уже в виде списка байтов, преобразуем их в Uint8List
         try {
           decoded['image_data'] = Uint8List.fromList(List<int>.from(decoded['image_data']));
         } catch (e) {
-          print('Ошибка при преобразовании списка байтов: $e');
-          decoded['image_data'] = null;
+          print('Ошибка при преобразовании списка байтов для ${decoded['file_name']}: $e');
+          decoded['image_data'] = Uint8List(0);
         }
       }
       return decoded;

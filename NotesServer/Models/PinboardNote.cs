@@ -26,15 +26,15 @@ namespace NotesServer.Models
         public double PositionY { get; set; }
 
         [JsonPropertyName("width")]
-        public double Width { get; set; }
+        public double Width { get; set; } = 200.0;
 
         [JsonPropertyName("height")]
-        public double Height { get; set; }
+        public double Height { get; set; } = 150.0;
 
         [JsonPropertyName("backgroundColor")]
-        public int BackgroundColor { get; set; }
+        public int BackgroundColor { get; set; } = unchecked((int)0xFF424242);
 
         [JsonPropertyName("icon")]
-        public int Icon { get; set; }
+        public string Icon { get; set; } = "person";
     }
 } 

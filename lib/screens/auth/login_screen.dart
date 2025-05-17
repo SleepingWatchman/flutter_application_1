@@ -124,6 +124,14 @@ class _LoginScreenState extends State<LoginScreen> {
                 },
               ),
               const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: () {
+                  final auth = Provider.of<AuthProvider>(context, listen: false);
+                  auth.enableGuestMode();
+                },
+                child: const Text('Продолжить в гостевом режиме'),
+              ),
+              const SizedBox(height: 16),
               TextButton(
                 onPressed: () {
                   Navigator.of(context).pushReplacement(

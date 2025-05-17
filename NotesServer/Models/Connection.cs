@@ -25,10 +25,8 @@ namespace NotesServer.Models
         public string Name { get; set; } = string.Empty;
 
         [JsonPropertyName("connectionColor")]
-        public int ConnectionColor { get; set; }
+        public int ConnectionColor { get; set; } = unchecked((int)0xFF00FFFF);
 
-        [Required]
-        public string ConnectionString { get; set; } = string.Empty;
         public DateTime CreatedAt { get; set; }
     }
 } 

@@ -1,64 +1,67 @@
-using SQLite;
-using System.ComponentModel.DataAnnotations;
-using System.Text.Json;
-using System.Text.Json.Serialization;
-using System.ComponentModel.DataAnnotations.Schema;
 using System;
+using System.Text.Json;
+using SQLite;
 
 namespace NotesServer.Models
 {
     public abstract class DatabaseEntity
     {
-        [JsonPropertyName("databaseId")]
+        [Column("database_id")]
         public int DatabaseId { get; set; }
     }
 
     public class Note : DatabaseEntity
     {
-        [JsonPropertyName("id")]
         [PrimaryKey, AutoIncrement]
+        [Column("id")]
         public int Id { get; set; }
 
-        [JsonPropertyName("title")]
-        [Required]
+        [NotNull]
+        [Column("title")]
         public string Title { get; set; } = string.Empty;
 
-        [JsonPropertyName("content")]
-        [Required]
-        public string Content { get; set; } = string.Empty;
+        [Column("content")]
+        public string? Content { get; set; }
 
-        [JsonPropertyName("folderId")]
+        [Column("folder_id")]
         public int? FolderId { get; set; }
 
-        [JsonPropertyName("createdAt")]
-        public string CreatedAt { get; set; } = string.Empty;
+        [NotNull]
+        [Column("created_at")]
+        public DateTime CreatedAt { get; set; }
 
-        [JsonPropertyName("updatedAt")]
-        public string UpdatedAt { get; set; } = string.Empty;
+        [NotNull]
+        [Column("updated_at")]
+        public DateTime UpdatedAt { get; set; }
 
-        [JsonPropertyName("imagesList")]
-        [NotMapped]
-        public List<string> Images
-        {
-            get => JsonSerializer.Deserialize<List<string>>(ImagesJson) ?? new List<string>();
-            set => ImagesJson = JsonSerializer.Serialize(value);
-        }
+        [Ignore]
+        public List<string> Images { get; set; } = new List<string>();
 
-        [SQLite.Column("images")]
+        [Column("images_json")]
         public string ImagesJson { get; set; } = "[]";
 
-        [JsonPropertyName("metadataDict")]
-        [NotMapped]
-        public Dictionary<string, string> Metadata
-        {
-            get => JsonSerializer.Deserialize<Dictionary<string, string>>(MetadataJson) ?? new Dictionary<string, string>();
-            set => MetadataJson = JsonSerializer.Serialize(value);
-        }
+        [Ignore]
+        public Dictionary<string, string> Metadata { get; set; } = new Dictionary<string, string>();
 
-        [SQLite.Column("metadata")]
+        [Column("metadata_json")]
         public string MetadataJson { get; set; } = "{}";
 
-        [JsonPropertyName("content_json")]
+        [Column("content_json")]
         public string? ContentJson { get; set; }
+
+        [Ignore]
+        public Folder? Folder { get; set; }
+
+        public void UpdateJsonProperties()
+        {
+            ImagesJson = JsonSerializer.Serialize(Images);
+            MetadataJson = JsonSerializer.Serialize(Metadata);
+        }
+
+        public void LoadJsonProperties()
+        {
+            Images = JsonSerializer.Deserialize<List<string>>(ImagesJson) ?? new List<string>();
+            Metadata = JsonSerializer.Deserialize<Dictionary<string, string>>(MetadataJson) ?? new Dictionary<string, string>();
+        }
     }
 } 

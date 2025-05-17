@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../models/shared_database.dart';
 import '../models/shared_database_access.dart';
 import '../services/collaboration_service.dart';
+import '../services/auto_sync_service.dart';
 import '../models/backup_data.dart';
 import '../db/database_helper.dart';
 import '../models/collaboration_database.dart';
@@ -15,7 +16,8 @@ import '../services/auth_service.dart';
 
 class CollaborationProvider with ChangeNotifier {
   final AuthProvider _authProvider;
-  final CollaborationService _collaborationService;
+  late final CollaborationService _collaborationService;
+  late final AutoSyncService _autoSyncService;
   DatabaseProvider? _databaseProvider;
   List<SharedDatabase> _sharedDatabases = [];
   String? _currentDatabaseId;
@@ -26,8 +28,26 @@ class CollaborationProvider with ChangeNotifier {
   String? _error;
   List<CollaborationDatabase>? _collaborationDatabases;
 
-  CollaborationProvider(this._authProvider)
-      : _collaborationService = CollaborationService(_authProvider.authService);
+  CollaborationProvider(this._authProvider) {
+    print('Инициализация CollaborationProvider');
+    print('AuthProvider token: ${_authProvider.token}');
+    _collaborationService = CollaborationService(_authProvider.authService);
+    _autoSyncService = AutoSyncService(
+      _collaborationService,
+      DatabaseHelper(),
+    );
+    _initializeAutoSync();
+  }
+
+  Future<void> _initializeAutoSync() async {
+    await _autoSyncService.initialize();
+  }
+
+  @override
+  void dispose() {
+    _autoSyncService.dispose();
+    super.dispose();
+  }
 
   List<SharedDatabase> get sharedDatabases => _sharedDatabases;
   String? get currentDatabaseId => _currentDatabaseId;
@@ -38,7 +58,24 @@ class CollaborationProvider with ChangeNotifier {
   String? get error => _error;
 
   void setDatabaseProvider(DatabaseProvider provider) {
-    _databaseProvider = provider;
+    try {
+      print('Установка DatabaseProvider в CollaborationProvider');
+      _databaseProvider = provider;
+      provider.setCollaborationProvider(this);
+      print('DatabaseProvider успешно установлен');
+    } catch (e) {
+      print('Ошибка при установке DatabaseProvider: $e');
+      rethrow;
+    }
+  }
+
+  bool get isDatabaseProviderInitialized => _databaseProvider != null;
+
+  void _checkDatabaseProvider() {
+    if (_databaseProvider == null) {
+      print('DatabaseProvider не инициализирован при попытке выполнения операции');
+      throw Exception('DatabaseProvider не инициализирован');
+    }
   }
 
   Future<void> loadSharedDatabases() async {
@@ -63,9 +100,18 @@ class CollaborationProvider with ChangeNotifier {
     notifyListeners();
 
     try {
+      print('Загрузка списка баз данных');
+      print('Текущий токен: ${_authProvider.token}');
+      
+      if (_authProvider.token == null) {
+        throw Exception('Не авторизован');
+      }
+
       _databases = await _collaborationService.getSharedDatabases();
+      print('Загружено баз данных: ${_databases.length}');
       _error = null;
     } catch (e) {
+      print('Ошибка при загрузке баз данных: $e');
       _error = e.toString();
     } finally {
       _isLoading = false;
@@ -74,21 +120,41 @@ class CollaborationProvider with ChangeNotifier {
   }
 
   Future<void> createSharedDatabase(String name) async {
-    if (_authProvider.user == null) return;
+    if (_authProvider.user == null) {
+      throw Exception('Пользователь не авторизован');
+    }
+
+    _checkDatabaseProvider();
 
     try {
       _isLoading = true;
+      _error = null;
       notifyListeners();
 
       print('Создание совместной базы данных с именем: $name');
-      print('Токен пользователя: ${_authProvider.token}');
       
-      await _collaborationService.createSharedDatabase(name);
-      print('Совместная база данных успешно создана');
+      final newDatabase = await _collaborationService.createSharedDatabase(name);
+      if (newDatabase.serverId.isEmpty) {
+        throw Exception('Получен пустой serverId при создании базы данных');
+      }
+      print('Совместная база данных успешно создана с ID: ${newDatabase.serverId}');
       
-      await loadSharedDatabases();
+      // Инициализируем локальную копию базы
+      await _databaseProvider!.initializeSharedDatabase(newDatabase.serverId);
+      print('Локальная копия базы инициализирована');
+      
+      // Обновляем список баз
+      await loadDatabases();
+      print('Список баз обновлен');
+      
+      // Автоматически переключаемся на новую базу
+      await switchToSharedDatabase(newDatabase.serverId);
+      print('Переключение на новую базу выполнено');
+      
+      _error = null;
     } catch (e) {
       print('Ошибка создания совместной базы: $e');
+      _error = e.toString();
       rethrow;
     } finally {
       _isLoading = false;
@@ -106,7 +172,8 @@ class CollaborationProvider with ChangeNotifier {
       print('Начало импорта базы данных с ID: $databaseId');
       print('Токен пользователя: ${_authProvider.token}');
       
-      await _collaborationService.importSharedDatabase(databaseId);
+      final databases = await _collaborationService.importSharedDatabase(databaseId);
+      _databases = databases;
       await loadDatabases();
       
       print('База данных успешно импортирована');
@@ -120,18 +187,18 @@ class CollaborationProvider with ChangeNotifier {
   }
 
   Future<void> switchToSharedDatabase(String databaseId) async {
-    if (_databaseProvider == null) return;
+    _checkDatabaseProvider();
 
     try {
       _isLoading = true;
+      _error = null;
       notifyListeners();
 
-      // Создаем резервную копию текущей базы
-      await _databaseProvider!.createBackup();
+      print('Переключение на совместную базу данных: $databaseId');
 
       // Проверяем существование базы данных на сервере
       final response = await http.get(
-        Uri.parse('$_baseUrl/shareddatabase/$databaseId'),
+        Uri.parse('$_baseUrl/databases/$databaseId'),
         headers: {
           'Authorization': 'Bearer ${_authProvider.token}',
         },
@@ -141,11 +208,22 @@ class CollaborationProvider with ChangeNotifier {
         throw Exception('База данных не найдена на сервере');
       }
 
+      print('База данных найдена на сервере');
+
+      // Создаем резервную копию текущей базы
+      if (_currentDatabaseId != null) {
+        final backupData = await _databaseProvider!.createBackup(_currentDatabaseId);
+        await _databaseProvider!.savePersonalBackup(backupData);
+        print('Создана резервная копия текущей базы');
+      }
+
       // Загружаем данные совместной базы
-      final backupData = await downloadDatabase(databaseId);
+      final sharedBackupData = await downloadDatabase(databaseId);
+      print('Загружены данные совместной базы');
       
       // Заменяем локальную базу данными совместной базы
-      await _replaceLocalDatabase(backupData);
+      await _databaseProvider!.restoreFromBackup(sharedBackupData, databaseId);
+      print('Локальная база заменена данными совместной базы');
 
       _currentDatabaseId = databaseId;
       _isUsingSharedDatabase = true;
@@ -155,8 +233,16 @@ class CollaborationProvider with ChangeNotifier {
       
       // Обновляем список баз
       await loadDatabases();
+      print('Список баз обновлен');
+
+      // Запускаем автоматическую синхронизацию
+      await _autoSyncService.syncIfNeeded();
+      print('Автоматическая синхронизация запущена');
+
+      _error = null;
     } catch (e) {
       print('Ошибка переключения на совместную базу: $e');
+      _error = e.toString();
       rethrow;
     } finally {
       _isLoading = false;
@@ -166,30 +252,39 @@ class CollaborationProvider with ChangeNotifier {
 
   Future<BackupData> downloadDatabase(String databaseId) async {
     try {
+      print('Загрузка базы данных с ID: $databaseId');
+      
       final response = await http.get(
-        Uri.parse('$_baseUrl/shareddatabase/$databaseId/backup'),
+        Uri.parse('$_baseUrl/databases/$databaseId/backup'),
         headers: {
           'Authorization': 'Bearer ${_authProvider.token}',
         },
       );
 
+      print('Статус ответа: ${response.statusCode}');
+
       if (response.statusCode == 200) {
-        return BackupData.fromJson(json.decode(response.body));
+        final data = json.decode(response.body);
+        print('Данные успешно получены');
+        return BackupData.fromJson(data);
+      } else if (response.statusCode == 404) {
+        print('Бэкап не найден, возвращаю пустой объект');
+        return BackupData(
+          folders: const [],
+          notes: const [],
+          scheduleEntries: const [],
+          pinboardNotes: const [],
+          connections: const [],
+          noteImages: const [],
+          databaseId: databaseId,
+          userId: _authProvider.user?.id ?? '',
+        );
       } else {
-        throw Exception('Ошибка при загрузке базы данных: ${response.statusCode} - ${response.body}');
+        print('Ошибка при загрузке базы: ${response.statusCode} - ${response.body}');
+        throw Exception('Ошибка при загрузке базы данных: ${response.statusCode}');
       }
     } catch (e) {
       print('Ошибка загрузки базы данных: $e');
-      rethrow;
-    }
-  }
-
-  Future<void> _replaceLocalDatabase(BackupData backupData) async {
-    try {
-      await DatabaseHelper().replaceDatabase(backupData);
-      notifyListeners();
-    } catch (e) {
-      print('Error replacing local database: $e');
       rethrow;
     }
   }
@@ -201,8 +296,25 @@ class CollaborationProvider with ChangeNotifier {
       _isLoading = true;
       notifyListeners();
 
-      // Восстанавливаем личную базу из резервной копии
-      await _databaseProvider!.restoreFromBackup();
+      print('Переключение на личную базу данных');
+
+      if (_currentDatabaseId != null) {
+        // Если мы находимся в совместной базе, сначала сохраняем изменения
+        final backupData = await _databaseProvider!.createBackup(_currentDatabaseId);
+        await _collaborationService.saveDatabaseBackup(_currentDatabaseId!, backupData);
+        print('Сохранены изменения в совместной базе');
+
+        // Очищаем таблицы текущей базы
+        await _databaseProvider!.clearDatabaseTables(_currentDatabaseId);
+        print('Очищены таблицы совместной базы');
+      }
+
+      // Восстанавливаем личную базу
+      final personalBackup = await _databaseProvider!.getPersonalBackup();
+      if (personalBackup != null) {
+        await _databaseProvider!.restoreFromBackup(personalBackup);
+        print('Восстановлена личная база');
+      }
 
       _currentDatabaseId = null;
       _isUsingSharedDatabase = false;
@@ -212,12 +324,28 @@ class CollaborationProvider with ChangeNotifier {
       
       // Обновляем список баз
       await loadDatabases();
+      print('Список баз обновлен');
+
+      // Останавливаем автоматическую синхронизацию
+      _autoSyncService.dispose();
+      print('Автоматическая синхронизация остановлена');
+
     } catch (e) {
       print('Ошибка переключения на личную базу: $e');
       rethrow;
     } finally {
       _isLoading = false;
       notifyListeners();
+    }
+  }
+
+  Future<void> _replaceLocalDatabase(BackupData backupData, [String? databaseId]) async {
+    try {
+      await _databaseProvider?.restoreFromBackup(backupData, databaseId);
+      notifyListeners();
+    } catch (e) {
+      print('Error replacing local database: $e');
+      rethrow;
     }
   }
 
@@ -410,8 +538,8 @@ class CollaborationProvider with ChangeNotifier {
       print('Начало импорта базы данных с ID: $databaseId');
       print('Токен пользователя: ${_authProvider.token}');
       
-      // Импортируем базу и получаем обновленный список
-      _databases = await _collaborationService.importSharedDatabase(databaseId);
+      final databases = await _collaborationService.importSharedDatabase(databaseId);
+      _databases = databases;
       
       // Проверяем, что база действительно импортирована
       if (!_databases.any((db) => db.id == databaseId && db.collaborators.contains(_authProvider.user?.id))) {
@@ -458,7 +586,7 @@ class CollaborationProvider with ChangeNotifier {
       notifyListeners();
 
       // Создаем резервную копию текущего состояния
-      final backupData = await _databaseProvider!.createBackup();
+      final backupData = await _databaseProvider!.createBackup(_currentDatabaseId);
       
       // Отправляем изменения на сервер
       await _collaborationService.saveDatabaseBackup(_currentDatabaseId!, backupData);
@@ -467,12 +595,44 @@ class CollaborationProvider with ChangeNotifier {
       final latestBackup = await _collaborationService.getDatabaseBackup(_currentDatabaseId!);
       
       // Применяем изменения
-      await _replaceLocalDatabase(latestBackup);
+      await _replaceLocalDatabase(latestBackup, _currentDatabaseId);
       
       // Уведомляем о необходимости обновления данных
       _databaseProvider!.setNeedsUpdate(true);
     } catch (e) {
       print('Ошибка синхронизации совместной базы: $e');
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> joinSharedDatabase(String databaseId) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      await _collaborationService.joinSharedDatabase(databaseId);
+      await loadSharedDatabases();
+    } catch (e) {
+      _error = e.toString();
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> syncDatabase(SharedDatabase database) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      await _collaborationService.syncSharedDatabase(database);
+      await loadSharedDatabases();
+    } catch (e) {
+      _error = e.toString();
     } finally {
       _isLoading = false;
       notifyListeners();

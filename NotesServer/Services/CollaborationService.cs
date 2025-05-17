@@ -9,168 +9,531 @@ using SQLite;
 using Microsoft.Extensions.Logging;
 using Microsoft.AspNetCore.Hosting;
 using System.IO;
+using System.Text.Json;
 
 namespace NotesServer.Services
 {
     public interface ICollaborationService
     {
-        Task<CollaborationDatabase> CreateDatabaseAsync(string userId);
-        Task<List<CollaborationDatabase>> GetUserDatabasesAsync(string userId);
+        Task<SharedDatabase> CreateDatabaseAsync(string userId, string name);
+        Task<List<SharedDatabase>> GetUserDatabasesAsync(string userId);
         Task DeleteDatabaseAsync(string databaseId, string userId);
         Task SaveDatabaseBackupAsync(string databaseId, string userId, BackupData backupData);
         Task<BackupData> GetDatabaseBackupAsync(string databaseId, string userId);
-        Task<CollaborationDatabase?> GetDatabaseAsync(string databaseId, string userId);
+        Task<SharedDatabase?> GetDatabaseAsync(string databaseId, string userId);
         Task ReplaceLocalDatabaseAsync(string databaseId, string userId, BackupData backupData);
+        Task<Note?> GetNoteAsync(string databaseId, string noteId);
+        Task SaveNoteAsync(string databaseId, Note note);
+        Task DeleteNoteAsync(string databaseId, string noteId);
+        Task JoinDatabaseAsync(string databaseId, string userId);
+        Task LeaveDatabaseAsync(string databaseId, string userId);
+        Task TransferOwnershipAsync(string databaseId, string currentOwnerId, string newOwnerId);
     }
 
     public class CollaborationService : ICollaborationService
     {
-        private readonly ApplicationDbContext _context;
         private readonly ILogger<CollaborationService> _logger;
-        private readonly IWebHostEnvironment _environment;
-        private const string BackupDirectoryName = "backups";
+        private readonly string _databasesPath;
+        private readonly ApplicationDbContext _context;
 
         public CollaborationService(
-            ApplicationDbContext context, 
             ILogger<CollaborationService> logger,
-            IWebHostEnvironment environment)
+            IWebHostEnvironment env,
+            ApplicationDbContext context)
         {
-            _context = context;
             _logger = logger;
-            _environment = environment;
+            _databasesPath = Path.Combine(env.ContentRootPath, "Databases");
+            _context = context;
+            
+            // Создаем директорию для баз данных, если она не существует
+            if (!Directory.Exists(_databasesPath))
+            {
+                Directory.CreateDirectory(_databasesPath);
+            }
         }
 
-        public async Task<CollaborationDatabase> CreateDatabaseAsync(string userId)
+        private string GetDatabasePath(string databaseId)
+        {
+            return Path.Combine(_databasesPath, $"{databaseId}.db");
+        }
+
+        public async Task<SharedDatabase> CreateDatabaseAsync(string userId, string name)
         {
             try
             {
-                var databaseFileName = $"{Guid.NewGuid()}.db";
-                var databasePath = Path.Combine(_environment.ContentRootPath, "Data", "Databases", userId, databaseFileName);
+                var databaseId = Guid.NewGuid().ToString();
+                var dbPath = GetDatabasePath(databaseId);
                 
-                // Создаем директорию для баз данных пользователя, если она не существует
-                Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
-                
-                var database = new CollaborationDatabase
+                // Создаем файл базы данных
+                using (var connection = new SQLiteConnection(dbPath))
                 {
-                    Id = Guid.NewGuid().ToString(),
-                    UserId = userId,
+                    _logger.LogInformation("Создаю таблицу для типа: " + typeof(Note).FullName);
+                    connection.CreateTable<Note>();
+                    _logger.LogInformation("Создаю таблицу для типа: " + typeof(Folder).FullName);
+                    connection.CreateTable<Folder>();
+                    _logger.LogInformation("Создаю таблицу для типа: " + typeof(ScheduleEntry).FullName);
+                    connection.CreateTable<ScheduleEntry>();
+                    _logger.LogInformation("Создаю таблицу для типа: " + typeof(PinboardNote).FullName);
+                    connection.CreateTable<PinboardNote>();
+                    _logger.LogInformation("Создаю таблицу для типа: " + typeof(Connection).FullName);
+                    connection.CreateTable<Connection>();
+                    _logger.LogInformation("Создаю таблицу для типа: " + typeof(NoteImage).FullName);
+                    connection.CreateTable<NoteImage>();
+                }
+                
+                _logger.LogInformation($"Created collaboration database: {dbPath}");
+
+                var database = new SharedDatabase
+                {
+                    Id = databaseId,
+                    Name = name,
+                    OwnerId = userId,
                     CreatedAt = DateTime.UtcNow,
-                    DatabaseName = $"collab_db_{Path.GetFileNameWithoutExtension(databaseFileName)}",
-                    ConnectionString = databasePath
+                    DatabasePath = dbPath,
+                    CollaboratorsJson = JsonSerializer.Serialize(new List<string> { userId })
                 };
 
-                _context.CollaborationDatabases.Add(database);
+                _context.SharedDatabases.Add(database);
                 await _context.SaveChangesAsync();
 
-                // Создаем новую базу данных SQLite
-                using (var db = new SQLiteConnection(databasePath))
-                {
-                    // Инициализация таблиц
-                    db.CreateTable<Note>();
-                    db.CreateTable<Folder>();
-                    db.CreateTable<ScheduleEntry>();
-                    db.CreateTable<PinboardNote>();
-                    db.CreateTable<Connection>();
-                    db.CreateTable<NoteImage>();
-                }
-
-                _logger.LogInformation("Создана новая база данных {DatabasePath} для пользователя {UserId}", databasePath, userId);
                 return database;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Ошибка при создании базы данных для пользователя {UserId}", userId);
+                _logger.LogError(ex, $"Error creating collaboration database for user {userId}");
                 throw;
             }
         }
 
-        public async Task<List<CollaborationDatabase>> GetUserDatabasesAsync(string userId)
+        public async Task<List<SharedDatabase>> GetUserDatabasesAsync(string userId)
         {
-            return await _context.CollaborationDatabases
-                .Where(db => db.UserId == userId)
-                .ToListAsync();
+            try
+            {
+                _logger.LogInformation($"Getting databases for user {userId}");
+                
+                // Получаем все базы данных
+                var databases = await _context.SharedDatabases.ToListAsync();
+                
+                // Фильтруем базы, где пользователь является владельцем или коллаборатором
+                var filteredDatabases = databases.Where(db => 
+                {
+                    try
+                    {
+                        var collaborators = JsonSerializer.Deserialize<List<string>>(db.CollaboratorsJson) ?? new List<string>();
+                        return db.OwnerId == userId || collaborators.Contains(userId);
+                    }
+                    catch (JsonException)
+                    {
+                        _logger.LogWarning($"Error deserializing collaborators for database {db.Id}. Using empty list.");
+                        return db.OwnerId == userId;
+                    }
+                }).ToList();
+                
+                _logger.LogInformation($"Found {filteredDatabases.Count} databases for user {userId}");
+                return filteredDatabases;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error getting databases for user {userId}");
+                throw;
+            }
         }
 
         public async Task DeleteDatabaseAsync(string databaseId, string userId)
         {
-            var database = await GetDatabaseAsync(databaseId, userId);
-            if (database == null) return;
-
-            // Удаляем файл базы данных
-            if (File.Exists(database.ConnectionString))
+            try
             {
-                File.Delete(database.ConnectionString);
-            }
+                var database = await _context.SharedDatabases
+                    .FirstOrDefaultAsync(db => db.Id == databaseId && db.OwnerId == userId);
 
-            _context.CollaborationDatabases.Remove(database);
-            await _context.SaveChangesAsync();
+                if (database == null)
+                {
+                    throw new Exception($"Database {databaseId} not found or user {userId} is not the owner");
+                }
+
+                // Удаляем файл базы данных
+                var dbPath = database.DatabasePath;
+                if (File.Exists(dbPath))
+                {
+                    File.Delete(dbPath);
+                }
+
+                _context.SharedDatabases.Remove(database);
+                await _context.SaveChangesAsync();
+                
+                _logger.LogInformation($"Deleted database {databaseId} for user {userId}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error deleting database {databaseId} for user {userId}");
+                throw;
+            }
+        }
+
+        public async Task JoinDatabaseAsync(string databaseId, string userId)
+        {
+            try
+            {
+                var database = await _context.SharedDatabases
+                    .FirstOrDefaultAsync(db => db.Id == databaseId);
+
+                if (database == null)
+                {
+                    throw new Exception($"Database {databaseId} not found");
+                }
+
+                if (database.OwnerId == userId)
+                {
+                    throw new Exception($"User {userId} is already the owner of database {databaseId}");
+                }
+
+                var collaborators = JsonSerializer.Deserialize<List<string>>(database.CollaboratorsJson) ?? new List<string>();
+                
+                if (collaborators.Contains(userId))
+                {
+                    throw new Exception($"User {userId} is already a collaborator of database {databaseId}");
+                }
+
+                collaborators.Add(userId);
+                database.CollaboratorsJson = JsonSerializer.Serialize(collaborators);
+                
+                await _context.SaveChangesAsync();
+                
+                _logger.LogInformation($"User {userId} joined database {databaseId}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error joining database {databaseId} for user {userId}");
+                throw;
+            }
+        }
+
+        public async Task LeaveDatabaseAsync(string databaseId, string userId)
+        {
+            try
+            {
+                var database = await _context.SharedDatabases
+                    .FirstOrDefaultAsync(db => db.Id == databaseId);
+
+                if (database == null)
+                {
+                    throw new Exception($"Database {databaseId} not found");
+                }
+
+                if (database.OwnerId == userId)
+                {
+                    throw new Exception($"Owner cannot leave the database. Please transfer ownership first.");
+                }
+
+                var collaborators = JsonSerializer.Deserialize<List<string>>(database.CollaboratorsJson) ?? new List<string>();
+                
+                if (!collaborators.Contains(userId))
+                {
+                    throw new Exception($"User {userId} is not a collaborator of database {databaseId}");
+                }
+
+                collaborators.Remove(userId);
+                database.CollaboratorsJson = JsonSerializer.Serialize(collaborators);
+                
+                await _context.SaveChangesAsync();
+                
+                _logger.LogInformation($"User {userId} left database {databaseId}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error leaving database {databaseId} for user {userId}");
+                throw;
+            }
         }
 
         public async Task SaveDatabaseBackupAsync(string databaseId, string userId, BackupData backupData)
         {
-            var database = await GetDatabaseAsync(databaseId, userId);
-            if (database == null) throw new Exception("База данных не найдена");
+            try
+            {
+                var database = await GetDatabaseAsync(databaseId, userId);
+                if (database == null)
+                {
+                    throw new Exception($"Database {databaseId} not found or user {userId} does not have access");
+                }
 
-            var backupPath = Path.Combine(_environment.ContentRootPath, BackupDirectoryName, $"{databaseId}_{DateTime.UtcNow:yyyyMMddHHmmss}.json");
-            Directory.CreateDirectory(Path.GetDirectoryName(backupPath)!);
-
-            var json = System.Text.Json.JsonSerializer.Serialize(backupData);
-            await File.WriteAllTextAsync(backupPath, json);
-
-            _logger.LogInformation("Сохранена резервная копия базы данных {DatabaseId} для пользователя {UserId}", databaseId, userId);
+                var dbFilePath = database.DatabasePath;
+                var db = new SQLiteAsyncConnection(dbFilePath);
+                
+                // Очищаем существующие данные
+                await db.DeleteAllAsync<Note>();
+                await db.DeleteAllAsync<Folder>();
+                await db.DeleteAllAsync<ScheduleEntry>();
+                await db.DeleteAllAsync<PinboardNote>();
+                await db.DeleteAllAsync<Connection>();
+                await db.DeleteAllAsync<NoteImage>();
+                
+                // Вставляем новые данные
+                await db.InsertAllAsync(backupData.Notes);
+                await db.InsertAllAsync(backupData.Folders);
+                await db.InsertAllAsync(backupData.ScheduleEntries);
+                await db.InsertAllAsync(backupData.PinboardNotes);
+                await db.InsertAllAsync(backupData.Connections);
+                await db.InsertAllAsync(backupData.NoteImages);
+                
+                await db.CloseAsync();
+                
+                _logger.LogInformation($"Saved database backup for {databaseId} for user {userId}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error saving database backup for {databaseId} for user {userId}");
+                throw;
+            }
         }
 
         public async Task<BackupData> GetDatabaseBackupAsync(string databaseId, string userId)
         {
-            var database = await GetDatabaseAsync(databaseId, userId);
-            if (database == null) throw new Exception("База данных не найдена");
+            try
+            {
+                var database = await GetDatabaseAsync(databaseId, userId);
+                if (database == null)
+                {
+                    throw new Exception($"Database {databaseId} not found or user {userId} does not have access");
+                }
 
-            var backupFiles = Directory.GetFiles(
-                Path.Combine(_environment.ContentRootPath, BackupDirectoryName),
-                $"{databaseId}_*.json"
-            ).OrderByDescending(f => f).ToList();
+                var dbFilePath = database.DatabasePath;
+                
+                // Создаем и инициализируем базу данных, если она не существует
+                using (var connection = new SQLiteConnection(dbFilePath))
+                {
+                    // Создаем таблицы, если их нет
+                    connection.CreateTable<Note>();
+                    connection.CreateTable<Folder>();
+                    connection.CreateTable<ScheduleEntry>();
+                    connection.CreateTable<PinboardNote>();
+                    connection.CreateTable<Connection>();
+                    connection.CreateTable<NoteImage>();
+                }
+                
+                var db = new SQLiteAsyncConnection(dbFilePath);
+                
+                var notes = await db.Table<Note>().ToListAsync();
+                var folders = await db.Table<Folder>().ToListAsync();
+                var scheduleEntries = await db.Table<ScheduleEntry>().ToListAsync();
+                var pinboardNotes = await db.Table<PinboardNote>().ToListAsync();
+                var connections = await db.Table<Connection>().ToListAsync();
+                var noteImages = await db.Table<NoteImage>().ToListAsync();
+                
+                await db.CloseAsync();
 
-            if (!backupFiles.Any()) throw new Exception("Резервная копия не найдена");
+                var backupData = new BackupData
+                {
+                    Notes = notes,
+                    Folders = folders,
+                    ScheduleEntries = scheduleEntries,
+                    PinboardNotes = pinboardNotes,
+                    Connections = connections,
+                    NoteImages = noteImages
+                };
 
-            var json = await File.ReadAllTextAsync(backupFiles.First());
-            return System.Text.Json.JsonSerializer.Deserialize<BackupData>(json) ?? throw new Exception("Не удалось десериализовать резервную копию");
+                return backupData;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error getting database backup for {databaseId} for user {userId}");
+                throw;
+            }
         }
 
-        public async Task<CollaborationDatabase?> GetDatabaseAsync(string databaseId, string userId)
+        public async Task<SharedDatabase?> GetDatabaseAsync(string databaseId, string userId)
         {
-            return await _context.CollaborationDatabases
-                .FirstOrDefaultAsync(db => db.Id == databaseId && db.UserId == userId);
+            try
+            {
+                var database = await _context.SharedDatabases
+                    .FirstOrDefaultAsync(db => db.Id == databaseId);
+
+                if (database == null)
+                {
+                    return null;
+                }
+
+                // Проверяем, является ли пользователь владельцем или коллаборатором
+                var collaborators = JsonSerializer.Deserialize<List<string>>(database.CollaboratorsJson) ?? new List<string>();
+                if (database.OwnerId == userId || collaborators.Contains(userId))
+                {
+                    return database;
+                }
+
+                return null;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error getting database {databaseId} for user {userId}");
+                throw;
+            }
         }
 
         public async Task ReplaceLocalDatabaseAsync(string databaseId, string userId, BackupData backupData)
         {
-            var database = await GetDatabaseAsync(databaseId, userId);
-            if (database == null) throw new Exception("База данных не найдена");
-
-            // Удаляем старую базу данных
-            if (File.Exists(database.ConnectionString))
+            try
             {
-                File.Delete(database.ConnectionString);
+                var database = await GetDatabaseAsync(databaseId, userId);
+                if (database == null)
+                {
+                    throw new Exception($"Database {databaseId} not found or user {userId} does not have access");
+                }
+
+                var dbFilePath = database.DatabasePath;
+                
+                // Удаляем существующую базу данных
+                if (File.Exists(dbFilePath))
+                {
+                    File.Delete(dbFilePath);
+                }
+                
+                // Создаем и инициализируем базу данных
+                using (var connection = new SQLiteConnection(dbFilePath))
+                {
+                    // Создаем таблицы
+                    connection.CreateTable<Note>();
+                    connection.CreateTable<Folder>();
+                    connection.CreateTable<ScheduleEntry>();
+                    connection.CreateTable<PinboardNote>();
+                    connection.CreateTable<Connection>();
+                    connection.CreateTable<NoteImage>();
+                }
+                
+                // Вставляем данные
+                var db = new SQLiteAsyncConnection(dbFilePath);
+                
+                await db.InsertAllAsync(backupData.Notes);
+                await db.InsertAllAsync(backupData.Folders);
+                await db.InsertAllAsync(backupData.ScheduleEntries);
+                await db.InsertAllAsync(backupData.PinboardNotes);
+                await db.InsertAllAsync(backupData.Connections);
+                await db.InsertAllAsync(backupData.NoteImages);
+                
+                await db.CloseAsync();
+                
+                _logger.LogInformation($"Replaced local database {databaseId} for user {userId}");
             }
-
-            // Создаем новую базу данных
-            using (var db = new SQLiteConnection(database.ConnectionString))
+            catch (Exception ex)
             {
-                // Инициализация таблиц
-                db.CreateTable<Note>();
-                db.CreateTable<Folder>();
-                db.CreateTable<ScheduleEntry>();
-                db.CreateTable<PinboardNote>();
-                db.CreateTable<Connection>();
-                db.CreateTable<NoteImage>();
+                _logger.LogError(ex, $"Error replacing local database {databaseId} for user {userId}");
+                throw;
+            }
+        }
 
-                // Восстанавливаем данные
-                db.InsertAll(backupData.Notes);
-                db.InsertAll(backupData.Folders);
-                db.InsertAll(backupData.ScheduleEntries);
-                db.InsertAll(backupData.PinboardNotes);
-                db.InsertAll(backupData.Connections);
-                db.InsertAll(backupData.NoteImages);
+        public async Task<Note?> GetNoteAsync(string databaseId, string noteId)
+        {
+            try
+            {
+                var database = await GetDatabaseAsync(databaseId, string.Empty);
+                if (database == null)
+                {
+                    throw new Exception($"Database {databaseId} not found");
+                }
+
+                var dbFilePath = database.DatabasePath;
+                var db = new SQLiteAsyncConnection(dbFilePath);
+                
+                var note = await db.Table<Note>().FirstOrDefaultAsync(n => n.Id.ToString() == noteId);
+                
+                await db.CloseAsync();
+                
+                return note;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error getting note {noteId} from database {databaseId}");
+                throw;
+            }
+        }
+
+        public async Task SaveNoteAsync(string databaseId, Note note)
+        {
+            try
+            {
+                var database = await GetDatabaseAsync(databaseId, string.Empty);
+                if (database == null)
+                {
+                    throw new Exception($"Database {databaseId} not found");
+                }
+
+                var dbFilePath = database.DatabasePath;
+                var db = new SQLiteAsyncConnection(dbFilePath);
+                
+                await db.InsertOrReplaceAsync(note);
+                
+                await db.CloseAsync();
+                
+                _logger.LogInformation($"Saved note {note.Id} to database {databaseId}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error saving note {note.Id} to database {databaseId}");
+                throw;
+            }
+        }
+
+        public async Task DeleteNoteAsync(string databaseId, string noteId)
+        {
+            try
+            {
+                var database = await GetDatabaseAsync(databaseId, string.Empty);
+                if (database == null)
+                {
+                    throw new Exception($"Database {databaseId} not found");
+                }
+
+                var dbFilePath = database.DatabasePath;
+                var db = new SQLiteAsyncConnection(dbFilePath);
+                
+                await db.DeleteAsync<Note>(noteId);
+                
+                await db.CloseAsync();
+                
+                _logger.LogInformation($"Deleted note {noteId} from database {databaseId}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error deleting note {noteId} from database {databaseId}");
+                throw;
+            }
+        }
+
+        public async Task TransferOwnershipAsync(string databaseId, string currentOwnerId, string newOwnerId)
+        {
+            try
+            {
+                var database = await _context.SharedDatabases
+                    .FirstOrDefaultAsync(db => db.Id == databaseId);
+
+                if (database == null)
+                {
+                    throw new Exception($"Database {databaseId} not found");
+                }
+
+                if (database.OwnerId != currentOwnerId)
+                {
+                    throw new Exception($"User {currentOwnerId} is not the owner of database {databaseId}");
+                }
+
+                var collaborators = JsonSerializer.Deserialize<List<string>>(database.CollaboratorsJson) ?? new List<string>();
+                
+                if (!collaborators.Contains(newOwnerId))
+                {
+                    throw new Exception($"User {newOwnerId} is not a collaborator of database {databaseId}");
+                }
+
+                database.OwnerId = newOwnerId;
+                collaborators.Remove(newOwnerId);
+                collaborators.Add(currentOwnerId);
+                database.CollaboratorsJson = JsonSerializer.Serialize(collaborators);
+                
+                await _context.SaveChangesAsync();
+                
+                _logger.LogInformation($"Ownership of database {databaseId} transferred from {currentOwnerId} to {newOwnerId}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error transferring ownership of database {databaseId} from {currentOwnerId} to {newOwnerId}");
+                throw;
             }
         }
     }

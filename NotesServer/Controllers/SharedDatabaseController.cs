@@ -1,7 +1,9 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using NotesServer.Models;
+using NotesServer.Services;
 using NotesServer.Data;
+using AuthServer.Services;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -10,6 +12,7 @@ using Microsoft.AspNetCore.Authorization;
 using System.Security.Claims;
 using System.IO;
 using SQLite;
+using System.Text.Json;
 
 namespace NotesServer.Controllers
 {
@@ -21,170 +24,259 @@ namespace NotesServer.Controllers
         private readonly ApplicationDbContext _context;
         private readonly IWebHostEnvironment _environment;
         private readonly ILogger<SharedDatabaseController> _logger;
+        private readonly DatabaseInitializationService _databaseInitService;
+        private readonly IUserService _userService;
+        private readonly IFileService _fileService;
 
-        public SharedDatabaseController(ApplicationDbContext context, IWebHostEnvironment environment, ILogger<SharedDatabaseController> logger)
+        public SharedDatabaseController(
+            ApplicationDbContext context, 
+            IWebHostEnvironment environment, 
+            ILogger<SharedDatabaseController> logger,
+            DatabaseInitializationService databaseInitService,
+            IUserService userService,
+            IFileService fileService)
         {
             _context = context;
             _environment = environment;
             _logger = logger;
+            _databaseInitService = databaseInitService;
+            _userService = userService;
+            _fileService = fileService;
         }
 
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<SharedDatabase>>> GetUserDatabases()
+        public async Task<ActionResult<IEnumerable<SharedDatabase>>> GetSharedDatabases()
         {
-            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            if (userId == null) return Unauthorized();
+            try
+            {
+                var userId = _userService.GetUserId(User);
+                if (string.IsNullOrEmpty(userId))
+                {
+                    _logger.LogWarning("Попытка доступа без авторизации");
+                    return Unauthorized("Требуется авторизация");
+                }
 
-            var databases = await _context.SharedDatabases
-                .Where(db => db.OwnerId == userId)
-                .ToListAsync();
+                _logger.LogInformation($"Получение списка баз данных для пользователя {userId}");
 
-            var sharedDatabases = await _context.SharedDatabases
-                .Where(db => db.OwnerId != userId)
-                .ToListAsync();
+                var databases = await _context.SharedDatabases
+                    .Where(db => db.OwnerId == userId || db.CollaboratorsJson.Contains($"\"{userId}\""))
+                    .ToListAsync();
 
-            databases.AddRange(sharedDatabases.Where(db => db.Collaborators.Contains(userId)));
+                _logger.LogInformation($"Найдено {databases.Count} баз данных");
+                return Ok(databases);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Ошибка при получении списка баз данных");
+                return StatusCode(500, "Внутренняя ошибка сервера при получении списка баз данных");
+            }
+        }
 
-            return Ok(databases);
+        [HttpGet("{id}")]
+        public async Task<ActionResult<SharedDatabase>> GetSharedDatabase(string id)
+        {
+            var userId = _userService.GetUserId(User);
+            var database = await _context.SharedDatabases.FindAsync(id);
+
+            if (database == null)
+            {
+                return NotFound();
+            }
+
+            if (database.OwnerId != userId && !database.CollaboratorsJson.Contains($"\"{userId}\""))
+            {
+                return Forbid();
+            }
+
+            return database;
         }
 
         [HttpPost]
-        public async Task<ActionResult<SharedDatabase>> CreateDatabase([FromBody] CreateDatabaseRequest request)
+        public async Task<ActionResult<SharedDatabase>> CreateSharedDatabase([FromBody] CreateSharedDatabaseRequest request)
         {
-            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            if (userId == null)
-            {
-                Console.WriteLine("Unauthorized: User ID not found in token");
-                return Unauthorized();
-            }
-
-            Console.WriteLine($"Creating database for user {userId} with name {request.Name}");
-
-            // Создаем физический файл базы данных
-            var databaseId = Guid.NewGuid().ToString();
-            var databaseFileName = $"{databaseId}.db";
-            var databasePath = Path.Combine(_environment.ContentRootPath, "Databases", databaseFileName);
+            var userId = _userService.GetUserId(User);
             
-            // Создаем директорию для баз данных, если она не существует
-            System.IO.Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
-            
-            // Создаем новую базу данных SQLite
-            using (var db = new SQLiteConnection(databasePath))
-            {
-                // Инициализация таблиц
-                db.CreateTable<Note>();
-                db.CreateTable<Folder>();
-                db.CreateTable<ScheduleEntry>();
-                db.CreateTable<PinboardNote>();
-                db.CreateTable<Connection>();
-                db.CreateTable<NoteImage>();
-            }
-
             var database = new SharedDatabase
             {
-                Id = databaseId,
+                Id = Guid.NewGuid().ToString(),
                 Name = request.Name,
                 OwnerId = userId,
                 CreatedAt = DateTime.UtcNow,
                 Collaborators = new List<string> { userId },
-                DatabasePath = databasePath
+                DatabasePath = await _fileService.SaveDatabaseFileAsync(Guid.NewGuid().ToString())
             };
 
             _context.SharedDatabases.Add(database);
             await _context.SaveChangesAsync();
 
-            Console.WriteLine($"Database created successfully with ID {database.Id}");
-            return CreatedAtAction(nameof(GetDatabase), new { id = database.Id }, database);
+            return CreatedAtAction(nameof(GetSharedDatabase), new { id = database.Id }, database);
         }
 
-        [HttpGet("{id}")]
-        public async Task<ActionResult<SharedDatabase>> GetDatabase(string id)
+        [HttpPut("{id}")]
+        public async Task<IActionResult> UpdateSharedDatabase(string id, SharedDatabase database)
         {
-            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            if (userId == null) return Unauthorized();
+            if (id != database.Id)
+            {
+                return BadRequest();
+            }
 
-            var database = await _context.SharedDatabases
-                .FirstOrDefaultAsync(db => db.Id == id && 
-                    (db.OwnerId == userId || db.Collaborators.Contains(userId)));
+            var userId = _userService.GetUserId(User);
+            var existingDatabase = await _context.SharedDatabases.FindAsync(id);
 
-            if (database == null) return NotFound();
+            if (existingDatabase == null)
+            {
+                return NotFound();
+            }
 
-            return Ok(database);
-        }
+            if (existingDatabase.OwnerId != userId)
+            {
+                return Forbid();
+            }
 
-        [HttpPost("{id}/import")]
-        public async Task<ActionResult> ImportDatabase(string id)
-        {
-            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            if (userId == null) return Unauthorized();
-
-            var database = await _context.SharedDatabases
-                .FirstOrDefaultAsync(db => db.Id == id);
-
-            if (database == null) return NotFound();
+            existingDatabase.Name = database.Name;
+            existingDatabase.Collaborators = database.Collaborators ?? new List<string>();
 
             try
             {
-                if (database.Collaborators.Contains(userId))
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                if (!SharedDatabaseExists(id))
                 {
-                    return Ok(database);
+                    return NotFound();
                 }
-
-                // Проверяем существование физического файла базы
-                if (!System.IO.File.Exists(database.DatabasePath))
+                else
                 {
-                    return NotFound("Физический файл базы данных не найден");
+                    throw;
                 }
+            }
 
-                // Добавляем пользователя в список коллабораторов
-                database.Collaborators.Add(userId);
+            return NoContent();
+        }
+
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteSharedDatabase(string id)
+        {
+            var userId = _userService.GetUserId(User);
+            var database = await _context.SharedDatabases.FindAsync(id);
+            
+            if (database == null)
+            {
+                return NotFound();
+            }
+
+            if (database.OwnerId != userId)
+            {
+                return Forbid();
+            }
+
+            _context.SharedDatabases.Remove(database);
+            await _context.SaveChangesAsync();
+
+            await _fileService.DeleteDatabaseFileAsync(database.DatabasePath);
+
+            return NoContent();
+        }
+
+        private bool SharedDatabaseExists(string id)
+        {
+            return _context.SharedDatabases.Any(e => e.Id == id);
+        }
+
+        [HttpPost("{id}/collaborators")]
+        public async Task<IActionResult> AddCollaborator(string id, [FromBody] string collaboratorId)
+        {
+            var userId = _userService.GetUserId(User);
+            var database = await _context.SharedDatabases.FindAsync(id);
+
+            if (database == null)
+            {
+                return NotFound();
+            }
+
+            if (database.OwnerId != userId)
+            {
+                return Forbid();
+            }
+
+            var collaborators = database.Collaborators;
+            if (!collaborators.Contains(collaboratorId))
+            {
+                collaborators.Add(collaboratorId);
+                database.Collaborators = collaborators;
+                await _context.SaveChangesAsync();
+            }
+
+            return NoContent();
+        }
+
+        [HttpDelete("{id}/collaborators/{collaboratorId}")]
+        public async Task<IActionResult> RemoveCollaborator(string id, string collaboratorId)
+        {
+            var userId = _userService.GetUserId(User);
+            var database = await _context.SharedDatabases.FindAsync(id);
+
+            if (database == null)
+            {
+                return NotFound();
+            }
+
+            if (database.OwnerId != userId)
+            {
+                return Forbid();
+            }
+
+            var collaborators = database.Collaborators;
+            if (collaborators.Contains(collaboratorId))
+            {
+                collaborators.Remove(collaboratorId);
+                database.Collaborators = collaborators;
+                await _context.SaveChangesAsync();
+            }
+
+            return NoContent();
+        }
+
+        [HttpPost("{id}/import")]
+        public async Task<IActionResult> ImportDatabase(string id)
+        {
+            var userId = _userService.GetUserId(User);
+            var database = await _context.SharedDatabases.FindAsync(id);
+
+            if (database == null)
+            {
+                return NotFound();
+            }
+
+            if (database.OwnerId == userId)
+            {
+                return BadRequest("Вы уже являетесь владельцем этой базы данных");
+            }
+
+            if (database.CollaboratorsJson.Contains($"\"{userId}\""))
+            {
+                return BadRequest("Вы уже имеете доступ к этой базе данных");
+            }
+
+            try
+            {
+                var collaborators = database.Collaborators;
+                collaborators.Add(userId);
+                database.Collaborators = collaborators;
                 await _context.SaveChangesAsync();
 
                 return Ok(database);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Ошибка при импорте базы данных {id} для пользователя {userId}");
-                return StatusCode(500, $"Ошибка при импорте базы данных: {ex.Message}");
+                _logger.LogError(ex, $"Ошибка при импорте базы данных {id}");
+                return StatusCode(500, "Ошибка при импорте базы данных");
             }
-        }
-
-        [HttpDelete("{id}")]
-        public async Task<ActionResult> DeleteDatabase(string id)
-        {
-            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            if (userId == null) return Unauthorized();
-
-            var database = await _context.SharedDatabases
-                .FirstOrDefaultAsync(db => db.Id == id && db.OwnerId == userId);
-
-            if (database == null) return NotFound();
-
-            _context.SharedDatabases.Remove(database);
-            await _context.SaveChangesAsync();
-
-            return NoContent();
-        }
-
-        [HttpPost("{id}/leave")]
-        public async Task<ActionResult> LeaveDatabase(string id)
-        {
-            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            if (userId == null) return Unauthorized();
-
-            var database = await _context.SharedDatabases
-                .FirstOrDefaultAsync(db => db.Id == id && db.Collaborators.Contains(userId));
-
-            if (database == null) return NotFound();
-
-            database.Collaborators.Remove(userId);
-            await _context.SaveChangesAsync();
-
-            return NoContent();
         }
     }
 
-    public class CreateDatabaseRequest
+    public class CreateSharedDatabaseRequest
     {
         public required string Name { get; set; }
     }

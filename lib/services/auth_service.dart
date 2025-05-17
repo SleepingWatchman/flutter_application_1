@@ -20,11 +20,64 @@ class AuthService {
     loadSavedData();
   }
 
+  String? getCurrentUserId() {
+    if (_currentUser != null) {
+      return _currentUser!.id;
+    }
+    
+    if (_token != null) {
+      try {
+        // Декодируем JWT токен
+        final parts = _token!.split('.');
+        if (parts.length != 3) return null;
+        
+        // Декодируем payload часть токена
+        final payload = json.decode(
+          utf8.decode(base64Url.decode(base64Url.normalize(parts[1])))
+        );
+        
+        // Получаем ID пользователя из claims
+        return payload['nameid'] as String?;
+      } catch (e) {
+        print('Ошибка при получении ID пользователя из токена: $e');
+        return null;
+      }
+    }
+    
+    return null;
+  }
+
+  bool isTokenExpired() {
+    if (_token == null) return true;
+    try {
+      final parts = _token!.split('.');
+      if (parts.length != 3) return true;
+      final payload = json.decode(
+        utf8.decode(base64Url.decode(base64Url.normalize(parts[1]))),
+      );
+      if (payload['exp'] == null) return true;
+      final exp = payload['exp'] is int
+          ? payload['exp']
+          : int.tryParse(payload['exp'].toString());
+      if (exp == null) return true;
+      final expiry = DateTime.fromMillisecondsSinceEpoch(exp * 1000);
+      return DateTime.now().isAfter(expiry);
+    } catch (e) {
+      print('Ошибка при проверке срока действия токена: $e');
+      return true;
+    }
+  }
+
   Future<void> loadSavedData() async {
     try {
       final prefs = await _prefs;
       _token = prefs.getString('auth_token');
       final userJson = prefs.getString('user_data');
+      if (_token != null && isTokenExpired()) {
+        print('Токен истёк, выполняется автоматический выход');
+        await signOut();
+        return;
+      }
       if (userJson != null) {
         _currentUser = UserModel.fromJson(json.decode(userJson));
       }
@@ -36,21 +89,29 @@ class AuthService {
   Future<void> _saveData() async {
     try {
       final prefs = await _prefs;
+      print('Сохранение данных авторизации');
+      print('Токен: $_token');
+      
       if (_token != null) {
         await prefs.setString('auth_token', _token!);
+        print('Токен успешно сохранен');
       } else {
         await prefs.remove('auth_token');
+        print('Токен удален');
       }
       
       if (_currentUser != null) {
         await prefs.setString('user_data', json.encode(_currentUser!.toJson()));
+        print('Данные пользователя сохранены');
       } else {
         await prefs.remove('user_data');
+        print('Данные пользователя удалены');
       }
       
       _userController.add(_currentUser);
     } catch (e) {
-      print('Error saving data: $e');
+      print('Ошибка сохранения данных: $e');
+      throw Exception('Ошибка сохранения данных авторизации: $e');
     }
   }
 
@@ -161,6 +222,17 @@ class AuthService {
     } catch (e) {
       throw Exception('Connection error: $e');
     }
+  }
+
+  Future<String?> getToken() async {
+    if (_token == null) {
+      await loadSavedData();
+    }
+    if (_token != null && isTokenExpired()) {
+      await signOut();
+      return null;
+    }
+    return _token;
   }
 
   void dispose() {

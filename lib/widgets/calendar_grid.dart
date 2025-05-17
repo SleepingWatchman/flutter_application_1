@@ -7,6 +7,8 @@ class CalendarGrid extends StatelessWidget {
   final Function(DateTime) onDateSelected;
   final DateTime? highlightedDate;
   final Function(DateTime)? onDateHighlighted;
+  /// Функция для изменения текущего месяца без выбора конкретного дня
+  final Function(DateTime)? onMonthChanged;
 
   const CalendarGrid({
     Key? key,
@@ -14,6 +16,7 @@ class CalendarGrid extends StatelessWidget {
     required this.onDateSelected,
     this.highlightedDate,
     this.onDateHighlighted,
+    this.onMonthChanged,
   }) : super(key: key);
 
   @override
@@ -36,21 +39,48 @@ class CalendarGrid extends StatelessWidget {
                 icon: const Icon(Icons.chevron_left, color: Colors.cyan),
                 onPressed: () {
                   final newDate = DateTime(selectedDate.year, selectedDate.month - 1, 1);
-                  onDateSelected(newDate);
+                  // Используем onMonthChanged вместо onDateSelected, если она доступна
+                  if (onMonthChanged != null) {
+                    onMonthChanged!(newDate);
+                  } else {
+                    onDateSelected(newDate);
+                  }
                 },
               ),
-              Text(
-                DateFormat('MMMM yyyy', 'ru').format(selectedDate),
-                style: const TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
+              GestureDetector(
+                onTap: () => _showMonthYearPicker(context),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.cyan.withOpacity(0.3)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        DateFormat('MMMM yyyy', 'ru').format(selectedDate),
+                        style: const TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      const Icon(Icons.arrow_drop_down, color: Colors.cyan),
+                    ],
+                  ),
                 ),
               ),
               IconButton(
                 icon: const Icon(Icons.chevron_right, color: Colors.cyan),
                 onPressed: () {
                   final newDate = DateTime(selectedDate.year, selectedDate.month + 1, 1);
-                  onDateSelected(newDate);
+                  // Используем onMonthChanged вместо onDateSelected, если она доступна
+                  if (onMonthChanged != null) {
+                    onMonthChanged!(newDate);
+                  } else {
+                    onDateSelected(newDate);
+                  }
                 },
               ),
             ],
@@ -158,6 +188,101 @@ class CalendarGrid extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+
+  /// Открывает всплывающее окно для выбора месяца и года
+  void _showMonthYearPicker(BuildContext context) {
+    final currentYear = selectedDate.year;
+    final currentMonth = selectedDate.month;
+    
+    int selectedYear = currentYear;
+    int selectedMonth = currentMonth;
+    
+    // Список месяцев на русском языке
+    final months = [
+      'Январь', 'Февраль', 'Март', 'Апрель', 
+      'Май', 'Июнь', 'Июль', 'Август', 
+      'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'
+    ];
+    
+    // Диапазон годов для выбора (от -5 до +5 от текущего)
+    final years = List<int>.generate(11, (i) => DateTime.now().year - 5 + i);
+    
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: const Text('Выберите месяц и год'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Выпадающий список месяцев
+                  DropdownButton<int>(
+                    isExpanded: true,
+                    value: selectedMonth,
+                    items: List.generate(12, (index) {
+                      return DropdownMenuItem<int>(
+                        value: index + 1,
+                        child: Text(months[index]),
+                      );
+                    }),
+                    onChanged: (value) {
+                      if (value != null) {
+                        setState(() {
+                          selectedMonth = value;
+                        });
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  // Выпадающий список годов
+                  DropdownButton<int>(
+                    isExpanded: true,
+                    value: years.contains(selectedYear) ? selectedYear : years[5],
+                    items: years.map((year) {
+                      return DropdownMenuItem<int>(
+                        value: year,
+                        child: Text(year.toString()),
+                      );
+                    }).toList(),
+                    onChanged: (value) {
+                      if (value != null) {
+                        setState(() {
+                          selectedYear = value;
+                        });
+                      }
+                    },
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                  },
+                  child: const Text('Отмена'),
+                ),
+                ElevatedButton(
+                  onPressed: () {
+                    final newDate = DateTime(selectedYear, selectedMonth, 1);
+                    // Используем onMonthChanged вместо onDateSelected, если она доступна
+                    if (onMonthChanged != null) {
+                      onMonthChanged!(newDate);
+                    } else {
+                      onDateSelected(newDate);
+                    }
+                    Navigator.of(context).pop();
+                  },
+                  child: const Text('Открыть'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 } 

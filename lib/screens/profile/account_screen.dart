@@ -6,7 +6,6 @@ import '../../providers/auth_provider.dart';
 import '../../providers/backup_provider.dart';
 import 'edit_profile_screen.dart';
 import '../auth/login_screen.dart';
-import '../collaboration/shared_databases_screen.dart';
 
 class AccountScreen extends StatelessWidget {
   const AccountScreen({Key? key}) : super(key: key);
@@ -38,14 +37,17 @@ class AccountScreen extends StatelessWidget {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                CircleAvatar(
-                  radius: 50,
-                  backgroundImage: user?.photoURL != null
-                      ? NetworkImage(user!.photoURL!)
-                      : null,
-                  child: user?.photoURL == null
-                      ? const Icon(Icons.person, size: 50)
-                      : null,
+                Hero(
+                  tag: 'profile_button',
+                  child: CircleAvatar(
+                    radius: 50,
+                    backgroundImage: user?.photoURL != null
+                        ? NetworkImage(user!.photoURL!)
+                        : null,
+                    child: user?.photoURL == null
+                        ? const Icon(Icons.person, size: 50)
+                        : null,
+                  ),
                 ),
                 const SizedBox(height: 16),
                 Text(
@@ -65,17 +67,6 @@ class AccountScreen extends StatelessWidget {
                       );
                     },
                     child: const Text('Редактировать профиль'),
-                  ),
-                  const SizedBox(height: 8),
-                  ElevatedButton(
-                    onPressed: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const SharedDatabasesScreen(),
-                        ),
-                      );
-                    },
-                    child: const Text('Совместное редактирование'),
                   ),
                   const SizedBox(height: 8),
                   ElevatedButton(

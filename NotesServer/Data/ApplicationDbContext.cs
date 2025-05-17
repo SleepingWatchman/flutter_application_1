@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using NotesServer.Models;
+using System.Text.Json;
 
 namespace NotesServer.Data
 {
@@ -11,14 +13,16 @@ namespace NotesServer.Data
         {
         }
 
-        public DbSet<Note> Notes { get; set; }
-        public DbSet<Folder> Folders { get; set; }
-        public DbSet<ScheduleEntry> ScheduleEntries { get; set; }
-        public DbSet<PinboardNote> PinboardNotes { get; set; }
-        public DbSet<Connection> Connections { get; set; }
-        public DbSet<NoteImage> NoteImages { get; set; }
-        public DbSet<CollaborationDatabase> CollaborationDatabases { get; set; }
-        public DbSet<SharedDatabase> SharedDatabases { get; set; }
+        public DbSet<Note> Notes { get; set; } = null!;
+        public DbSet<Folder> Folders { get; set; } = null!;
+        public DbSet<ScheduleEntry> ScheduleEntries { get; set; } = null!;
+        public DbSet<PinboardNote> PinboardNotes { get; set; } = null!;
+        public DbSet<Connection> Connections { get; set; } = null!;
+        public DbSet<NoteImage> NoteImages { get; set; } = null!;
+        public DbSet<CollaborationDatabase> CollaborationDatabases { get; set; } = null!;
+        public DbSet<SharedDatabase> SharedDatabases { get; set; } = null!;
+        public DbSet<CollaborativeDatabase> CollaborativeDatabases { get; set; }
+        public DbSet<DatabaseCollaborator> DatabaseCollaborators { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -50,8 +54,8 @@ namespace NotesServer.Data
             modelBuilder.Entity<SharedDatabase>()
                 .Property(db => db.Collaborators)
                 .HasConversion(
-                    v => string.Join(',', v),
-                    v => v.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList()
+                    v => JsonSerializer.Serialize(v, new JsonSerializerOptions()),
+                    v => JsonSerializer.Deserialize<List<string>>(v, new JsonSerializerOptions()) ?? new List<string>()
                 )
                 .Metadata.SetValueComparer(
                     new ValueComparer<List<string>>(
@@ -60,6 +64,35 @@ namespace NotesServer.Data
                         c => c == null ? new List<string>() : c.ToList()
                     )
                 );
+
+            modelBuilder.Entity<Note>(entity =>
+            {
+                entity.Property(e => e.MetadataJson)
+                    .HasConversion(
+                        v => v == null ? "{}" : JsonSerializer.Serialize(v, new JsonSerializerOptions()),
+                        v => string.IsNullOrEmpty(v) ? "{}" : v
+                    );
+
+                entity.Property(e => e.ImagesJson)
+                    .HasConversion(
+                        v => v == null ? "[]" : JsonSerializer.Serialize(v, new JsonSerializerOptions()),
+                        v => string.IsNullOrEmpty(v) ? "[]" : v
+                    );
+
+                entity.Ignore(e => e.Metadata);
+            });
+
+            modelBuilder.Entity<CollaborativeDatabase>()
+                .HasMany(d => d.Collaborators)
+                .WithOne(c => c.Database)
+                .HasForeignKey(c => c.DatabaseId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<DatabaseCollaborator>()
+                .HasOne(c => c.Database)
+                .WithMany(d => d.Collaborators)
+                .HasForeignKey(c => c.DatabaseId)
+                .OnDelete(DeleteBehavior.Cascade);
         }
     }
 } 

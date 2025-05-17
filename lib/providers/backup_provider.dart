@@ -41,8 +41,10 @@ class BackupProvider extends ChangeNotifier {
 
   @override
   void dispose() {
-    _disposed = true;
-    super.dispose();
+    if (!_disposed) {
+      _disposed = true;
+      super.dispose();
+    }
   }
 
   void _notifyIfNotDisposed() {
@@ -118,18 +120,57 @@ class BackupProvider extends ChangeNotifier {
     _notifyIfNotDisposed();
   }
 
-  Future<BackupData> createBackup() async {
-    final backup = await _dbHelper.createBackup();
+  Future<BackupData> createBackup([String? databaseId]) async {
+    final backup = await _dbHelper.createBackup(databaseId);
     return backup;
   }
 
-  Future<void> restoreFromBackup() async {
-    await _dbHelper.restoreFromBackup();
+  Future<void> restoreFromBackup(BackupData backupData, [String? databaseId]) async {
+    await _dbHelper.restoreFromBackup(backupData, databaseId);
     _databaseProvider?.setNeedsUpdate(true);
   }
 
-  Future<void> restoreFromBackupData(BackupData backupData) async {
-    await _dbHelper.replaceDatabase(backupData);
+  Future<void> restoreFromBackupData(BackupData backupData, [String? databaseId]) async {
+    await _dbHelper.restoreFromBackup(backupData, databaseId);
     _databaseProvider?.setNeedsUpdate(true);
+  }
+
+  Future<void> uploadCollaborationBackup(String databaseId) async {
+    try {
+      _isLoading = true;
+      _error = null;
+      _notifyIfNotDisposed();
+
+      await createAndUploadCollaborationBackup(databaseId);
+
+      _isLoading = false;
+      _notifyIfNotDisposed();
+    } catch (e) {
+      _error = e.toString();
+      _isLoading = false;
+      _notifyIfNotDisposed();
+      rethrow;
+    }
+  }
+
+  Future<void> downloadCollaborationBackup(String databaseId) async {
+    try {
+      _isLoading = true;
+      _error = null;
+      _notifyIfNotDisposed();
+
+      await restoreFromLatestCollaborationBackup(databaseId);
+      
+      // После успешного восстановления уведомляем о необходимости обновления данных
+      _needsReload = true;
+      _databaseProvider?.setNeedsUpdate(true);
+      _isLoading = false;
+      _notifyIfNotDisposed();
+    } catch (e) {
+      _error = e.toString();
+      _isLoading = false;
+      _notifyIfNotDisposed();
+      rethrow;
+    }
   }
 } 

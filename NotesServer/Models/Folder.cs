@@ -16,7 +16,7 @@ namespace NotesServer.Models
         public int? ParentId { get; set; }
         public DateTime CreatedAt { get; set; }
         [JsonPropertyName("color")]
-        public int Color { get; set; }
+        public int Color { get; set; } = unchecked((int)0xFF2196F3); // Material Blue
         [JsonPropertyName("isExpanded")]
         public bool IsExpanded { get; set; } = true;
     }

@@ -1,4 +1,12 @@
 import 'package:flutter/material.dart';
+import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+import 'package:flutter/rendering.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:file_picker/file_picker.dart';
 import '../db/database_helper.dart';
 import '../models/pinboard_note.dart';
 import '../models/connection.dart';
@@ -8,6 +16,7 @@ import '../widgets/color_picker.dart';
 import '../widgets/connection_painter.dart';
 import '../providers/database_provider.dart';
 import 'package:provider/provider.dart';
+import '../providers/collaborative_database_provider.dart';
 
 /// Экран доски с использованием БД для заметок и соединений
 class PinboardScreen extends StatefulWidget {
@@ -23,25 +32,85 @@ class _PinboardScreenState extends State<PinboardScreen> with WidgetsBindingObse
   int? _selectedForConnection;
   List<String> _availableIcons = ['person', 'check', 'tree', 'home', 'car', 'close'];
   bool _isActive = true;
+  // Ключ для создания скриншотов
+  final GlobalKey _boardKey = GlobalKey();
+  // Состояние экспорта
+  bool _isExporting = false;
+  // Сохраняем ссылки на провайдеры
+  DatabaseProvider? _databaseProvider;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _loadPinboardData();
+    
+    // Инициализация списка доступных иконок
+    _availableIcons = [
+      'person',
+      'check',
+      'tree',
+      'home',
+      'car',
+      'close',
+    ];
+    
+    // Добавляем слушатель изменений для обновления интерфейса при переключении базы данных
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      try {
+        // Подписываемся на изменения в DatabaseProvider
+        final dbProvider = Provider.of<DatabaseProvider>(context, listen: false);
+        dbProvider.addListener(_handleDatabaseChanges);
+        
+        // Подписываемся на изменения в CollaborativeDatabaseProvider
+        final collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
+        collabProvider.addListener(_handleCollaborativeDatabaseChanges);
+      } catch (e) {
+        print('Ошибка при добавлении слушателей: $e');
+      }
+      
+      // Загружаем данные доски при запуске
+      _loadPinboardData();
+    });
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (Provider.of<DatabaseProvider>(context, listen: false).needsUpdate) {
+    
+    // Сохраняем провайдер для безопасного доступа
+    _databaseProvider = Provider.of<DatabaseProvider>(context, listen: false);
+    
+    if (_databaseProvider != null && _databaseProvider!.needsUpdate) {
       _loadPinboardData();
-      Provider.of<DatabaseProvider>(context, listen: false).resetUpdateFlag();
+      _databaseProvider!.resetUpdateFlag();
+    }
+    
+    // Проверяем состояние совместной базы данных
+    try {
+      final collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
+      if (collabProvider.isUsingSharedDatabase) {
+        // Обновляем данные доски для текущей совместной базы
+        _loadPinboardData();
+      }
+    } catch (e) {
+      print('Ошибка при проверке состояния совместной базы: $e');
     }
   }
 
   @override
   void dispose() {
+    // Удаляем слушатели при удалении виджета
+    try {
+      final dbProvider = Provider.of<DatabaseProvider>(context, listen: false);
+      dbProvider.removeListener(_handleDatabaseChanges);
+      
+      final collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
+      collabProvider.removeListener(_handleCollaborativeDatabaseChanges);
+    } catch (e) {
+      print('Ошибка при удалении слушателей: $e');
+    }
+    
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -60,16 +129,70 @@ class _PinboardScreenState extends State<PinboardScreen> with WidgetsBindingObse
     }
   }
 
+  // Обработчик изменений базы данных
+  void _handleDatabaseChanges() {
+    if (mounted) {
+      print('Обновление экрана доски из-за изменений в базе данных');
+      _loadPinboardData();
+    }
+  }
+  
+  // Обработчик изменений совместной базы данных
+  void _handleCollaborativeDatabaseChanges() {
+    if (mounted) {
+      print('Обновление экрана доски из-за изменений в совместной базе данных');
+      _loadPinboardData();
+    }
+  }
+
   Future<void> _loadPinboardData() async {
-    List<PinboardNoteDB> notes = await DatabaseHelper().getPinboardNotes();
-    List<ConnectionDB> connections = await DatabaseHelper().getConnectionsDB();
-    setState(() {
-      _pinboardNotes = notes;
-      _connections = connections;
-    });
+    try {
+      // Проверяем, используется ли совместная база данных
+      String? databaseId;
+      try {
+        final collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
+        if (collabProvider.isUsingSharedDatabase) {
+          databaseId = collabProvider.currentDatabaseId;
+        }
+      } catch (e) {
+        print('Ошибка при получении информации о совместной базе: $e');
+      }
+      
+      List<PinboardNoteDB> notes = await DatabaseHelper().getPinboardNotes(databaseId);
+      List<ConnectionDB> connections = await DatabaseHelper().getConnectionsDB(databaseId);
+      
+      if (!mounted) return;
+      
+      setState(() {
+        _pinboardNotes = notes;
+        _connections = connections;
+      });
+    } catch (e) {
+      print('Ошибка при загрузке данных доски: $e');
+      
+      // Повторная попытка загрузки данных после небольшой задержки
+      if (mounted) {
+        Future.delayed(Duration(milliseconds: 500), () {
+          if (mounted) {
+            _loadPinboardData();
+          }
+        });
+      }
+    }
   }
 
   void _addNote() {
+    // Получаем идентификатор текущей базы данных для правильного сохранения
+    String? databaseId;
+    try {
+      final collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
+      if (collabProvider.isUsingSharedDatabase) {
+        databaseId = collabProvider.currentDatabaseId;
+      }
+    } catch (e) {
+      print('Ошибка при получении информации о совместной базе: $e');
+    }
+    
     final newNote = PinboardNoteDB(
       title: '',
       content: '',
@@ -77,9 +200,12 @@ class _PinboardScreenState extends State<PinboardScreen> with WidgetsBindingObse
       posY: 100,
       backgroundColor: 0xFF424242,
       icon: 'person',
+      database_id: databaseId, // Добавляем ID базы данных
     );
 
+    print('Создание заметки на доске в базе: ${databaseId ?? "локальная"}');
     DatabaseHelper().insertPinboardNote(newNote.toMap()).then((_) {
+      if (!mounted) return;
       _loadPinboardData();
       showCustomToastWithIcon(
         "Заметка успешно создана",
@@ -92,6 +218,7 @@ class _PinboardScreenState extends State<PinboardScreen> with WidgetsBindingObse
 
   void _deletePinboardNote(int id) {
     DatabaseHelper().deletePinboardNote(id).then((_) {
+      if (!mounted) return;
       setState(() {
         _pinboardNotes.removeWhere((note) => note.id == id);
         _connections
@@ -109,6 +236,166 @@ class _PinboardScreenState extends State<PinboardScreen> with WidgetsBindingObse
     });
   }
 
+  // Функция для экспорта экрана в виде изображения
+  Future<void> _exportBoardAsImage() async {
+    try {
+      setState(() {
+        _isExporting = true;
+      });
+
+      // Проверяем разрешения на мобильных платформах
+      if (Platform.isAndroid || Platform.isIOS) {
+        final status = await Permission.storage.request();
+        if (!status.isGranted) {
+          if (!mounted) return;
+          showCustomToastWithIcon(
+            "Нет разрешения на сохранение файлов",
+            accentColor: Colors.red,
+            fontSize: 14.0,
+            icon: const Icon(Icons.error, size: 20, color: Colors.red),
+          );
+          setState(() {
+            _isExporting = false;
+          });
+          return;
+        }
+      }
+
+      // Получаем границы виджета
+      if (!mounted || _boardKey.currentContext == null) {
+        showCustomToastWithIcon(
+          "Не удалось получить доступ к доске",
+          accentColor: Colors.red,
+          fontSize: 14.0,
+          icon: const Icon(Icons.error, size: 20, color: Colors.red),
+        );
+        setState(() {
+          _isExporting = false;
+        });
+        return;
+      }
+      
+      final RenderRepaintBoundary boundary = 
+          _boardKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
+      
+      // Создаем изображение
+      final ui.Image image = await boundary.toImage(pixelRatio: 3.0);
+      final ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      
+      if (byteData == null) {
+        if (!mounted) return;
+        showCustomToastWithIcon(
+          "Не удалось создать изображение",
+          accentColor: Colors.red,
+          fontSize: 14.0,
+          icon: const Icon(Icons.error, size: 20, color: Colors.red),
+        );
+        setState(() {
+          _isExporting = false;
+        });
+        return;
+      }
+      
+      final Uint8List imageBytes = byteData.buffer.asUint8List();
+      
+      // Обработка в зависимости от платформы
+      if (Platform.isWindows) {
+        try {
+          // Для Windows используем FilePicker для выбора места сохранения
+          String? outputPath = await FilePicker.platform.saveFile(
+            dialogTitle: 'Сохранить изображение доски',
+            fileName: 'pinboard_${DateTime.now().millisecondsSinceEpoch}.png',
+            type: FileType.custom,
+            allowedExtensions: ['png'],
+          );
+
+          if (outputPath != null) {
+            // Добавляем расширение .png, если его нет
+            if (!outputPath.toLowerCase().endsWith('.png')) {
+              outputPath = '$outputPath.png';
+            }
+            
+            // Сохраняем файл
+            final File file = File(outputPath);
+            await file.writeAsBytes(imageBytes);
+            
+            if (!mounted) return;
+            showCustomToastWithIcon(
+              "Изображение успешно сохранено: $outputPath",
+              accentColor: Colors.green,
+              fontSize: 14.0,
+              icon: const Icon(Icons.check, size: 20, color: Colors.green),
+            );
+          } else {
+            // Пользователь отменил сохранение
+            if (!mounted) return;
+            showCustomToastWithIcon(
+              "Сохранение отменено",
+              accentColor: Colors.orange,
+              fontSize: 14.0,
+              icon: const Icon(Icons.info, size: 20, color: Colors.orange),
+            );
+          }
+        } catch (e) {
+          if (!mounted) return;
+          showCustomToastWithIcon(
+            "Ошибка при сохранении: $e",
+            accentColor: Colors.red,
+            fontSize: 14.0,
+            icon: const Icon(Icons.error, size: 20, color: Colors.red),
+          );
+        }
+      } else {
+        try {
+          // Для других платформ используем стандартный механизм Share
+          // Временный файл для сохранения
+          final tempDir = await getTemporaryDirectory();
+          final timestamp = DateTime.now().millisecondsSinceEpoch;
+          final fileName = 'pinboard_$timestamp.png';
+          final File file = File('${tempDir.path}/$fileName');
+          await file.writeAsBytes(imageBytes);
+          
+          // Делимся файлом
+          await Share.shareXFiles(
+            [XFile(file.path)],
+            subject: 'Доска заметок',
+            text: 'Экспорт доски заметок',
+          );
+          
+          if (!mounted) return;
+          showCustomToastWithIcon(
+            "Изображение готово к сохранению",
+            accentColor: Colors.green,
+            fontSize: 14.0,
+            icon: const Icon(Icons.check, size: 20, color: Colors.green),
+          );
+        } catch (e) {
+          if (!mounted) return;
+          showCustomToastWithIcon(
+            "Ошибка при экспорте: $e",
+            accentColor: Colors.red,
+            fontSize: 14.0,
+            icon: const Icon(Icons.error, size: 20, color: Colors.red),
+          );
+        }
+      }
+    } catch (e) {
+      if (!mounted) return;
+      showCustomToastWithIcon(
+        "Произошла ошибка: $e",
+        accentColor: Colors.red,
+        fontSize: 14.0,
+        icon: const Icon(Icons.error, size: 20, color: Colors.red),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isExporting = false;
+        });
+      }
+    }
+  }
+
   void _selectForConnection(int id) {
     setState(() {
       if (_selectedForConnection == id) {
@@ -119,8 +406,24 @@ class _PinboardScreenState extends State<PinboardScreen> with WidgetsBindingObse
             !_connections.any((conn) =>
                 (conn.fromId == _selectedForConnection! && conn.toId == id) ||
                 (conn.fromId == id && conn.toId == _selectedForConnection!))) {
-          ConnectionDB newConn =
-              ConnectionDB(fromId: _selectedForConnection!, toId: id);
+          // Получаем идентификатор текущей базы данных для правильного сохранения
+          String? databaseId;
+          try {
+            final collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
+            if (collabProvider.isUsingSharedDatabase) {
+              databaseId = collabProvider.currentDatabaseId;
+            }
+          } catch (e) {
+            print('Ошибка при получении информации о совместной базе: $e');
+          }
+          
+          ConnectionDB newConn = ConnectionDB(
+            fromId: _selectedForConnection!, 
+            toId: id,
+            database_id: databaseId, // Добавляем ID базы данных
+          );
+          
+          print('Создание связи между заметками в базе: ${databaseId ?? "локальная"}');
           DatabaseHelper().insertConnection(newConn.toMap()).then((_) {
             _loadPinboardData();
           });
@@ -284,6 +587,7 @@ class _PinboardScreenState extends State<PinboardScreen> with WidgetsBindingObse
             ),
             TextButton(
               onPressed: () {
+                if (!mounted) return;
                 setState(() {
                   note.title = titleController.text;
                   note.content = contentController.text;
@@ -353,42 +657,68 @@ class _PinboardScreenState extends State<PinboardScreen> with WidgetsBindingObse
 
         return Scaffold(
           backgroundColor: Colors.grey[850],
-          body: Stack(
-            children: [
-              CustomPaint(
-                size: MediaQuery.of(context).size,
-                painter: ConnectionPainter(
-                    notes: _pinboardNotes, connections: _connections),
+          appBar: AppBar(
+            title: const Text("Доска заметок"),
+            actions: [
+              // Кнопка экспорта доски в виде изображения
+              IconButton(
+                onPressed: _isExporting ? null : _exportBoardAsImage,
+                icon: _isExporting 
+                  ? const SizedBox(
+                      width: 20, 
+                      height: 20, 
+                      child: CircularProgressIndicator(
+                        color: Colors.white,
+                        strokeWidth: 2,
+                      )
+                    )
+                  : const Icon(Icons.save_alt),
+                tooltip: "Экспортировать как изображение",
               ),
-              // Заметки на доске
-              ..._pinboardNotes.map((note) {
-                return Positioned(
-                  key: ValueKey(note.id),
-                  left: note.posX,
-                  top: note.posY,
-                  child: GestureDetector(
-                    onPanUpdate: (details) {
-                      setState(() {
-                        note.posX += details.delta.dx;
-                        note.posY += details.delta.dy;
-                      });
-                      DatabaseHelper().updatePinboardNote(note);
-                    },
-                    onTap: () => _selectForConnection(note.id!),
-                    onSecondaryTapDown: (details) =>
-                        _showNoteContextMenu(context, note, details.globalPosition),
-                    child: _buildNoteWidget(note,
-                        isSelected: _selectedForConnection == note.id),
-                  ),
-                );
-              }).toList(),
-              // Оверлеи для редактирования связей
-              ..._buildConnectionOverlays(),
             ],
           ),
+          body: RepaintBoundary(
+            key: _boardKey,
+            child: Container(
+              color: Colors.grey[850],
+              child: Stack(
+                children: [
+                  CustomPaint(
+                    size: MediaQuery.of(context).size,
+                    painter: ConnectionPainter(
+                        notes: _pinboardNotes, connections: _connections),
+                  ),
+                  // Заметки на доске
+                  ..._pinboardNotes.map((note) {
+                    return Positioned(
+                      key: ValueKey(note.id),
+                      left: note.posX,
+                      top: note.posY,
+                      child: GestureDetector(
+                        onPanUpdate: (details) {
+                          setState(() {
+                            note.posX += details.delta.dx;
+                            note.posY += details.delta.dy;
+                          });
+                          DatabaseHelper().updatePinboardNote(note);
+                        },
+                        onTap: () => _selectForConnection(note.id!),
+                        onSecondaryTapDown: (details) =>
+                            _showNoteContextMenu(context, note, details.globalPosition),
+                        child: _buildNoteWidget(note,
+                            isSelected: _selectedForConnection == note.id),
+                      ),
+                    );
+                  }).toList(),
+                  // Оверлеи для редактирования связей
+                  ..._buildConnectionOverlays(),
+                ],
+              ),
+            ),
+          ),
           floatingActionButton: FloatingActionButton(
+            heroTag: 'add_pinboard_note_fab',
             onPressed: _addNote,
-            tooltip: 'Добавить заметку на доску',
             child: const Icon(Icons.add),
           ),
         );
@@ -546,6 +876,7 @@ class _PinboardScreenState extends State<PinboardScreen> with WidgetsBindingObse
 
   void _deleteConnection(int id) {
     DatabaseHelper().deleteConnection(id).then((_) {
+      if (!mounted) return;
       _loadPinboardData();
       showCustomToastWithIcon(
         "Связь успешно удалена",
@@ -594,11 +925,29 @@ class _PinboardScreenState extends State<PinboardScreen> with WidgetsBindingObse
             ),
             TextButton(
               onPressed: () {
+                if (!mounted) return;
                 setState(() {
                   connection.name = nameController.text;
                   connection.connectionColor = selectedColor.value;
                 });
+                
+                // Сохраняем существующий database_id или устанавливаем новый если нужно
+                if (connection.database_id == null) {
+                  try {
+                    final collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
+                    if (collabProvider.isUsingSharedDatabase) {
+                      connection.database_id = collabProvider.currentDatabaseId;
+                      print('Обновление связи с установкой базы: ${connection.database_id}');
+                    }
+                  } catch (e) {
+                    print('Ошибка при получении информации о совместной базе: $e');
+                  }
+                } else {
+                  print('Обновление связи в базе: ${connection.database_id}');
+                }
+                
                 DatabaseHelper().updateConnection(connection.toMap()).then((_) {
+                  if (!mounted) return;
                   _loadPinboardData();
                   Navigator.pop(context);
                   showCustomToastWithIcon(
@@ -618,7 +967,23 @@ class _PinboardScreenState extends State<PinboardScreen> with WidgetsBindingObse
   }
 
   void _updateNote(PinboardNoteDB note) {
+    // Сохраняем существующий database_id или устанавливаем новый если нужно
+    if (note.database_id == null) {
+      try {
+        final collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
+        if (collabProvider.isUsingSharedDatabase) {
+          note.database_id = collabProvider.currentDatabaseId;
+          print('Обновление заметки на доске с установкой базы: ${note.database_id}');
+        }
+      } catch (e) {
+        print('Ошибка при получении информации о совместной базе: $e');
+      }
+    } else {
+      print('Обновление заметки на доске в базе: ${note.database_id}');
+    }
+    
     DatabaseHelper().updatePinboardNote(note).then((_) {
+      if (!mounted) return;
       _loadPinboardData();
       showCustomToastWithIcon(
         "Заметка успешно обновлена",

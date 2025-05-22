@@ -13,12 +13,16 @@ class CollaborativeDatabaseService {
   final AuthService _authService;
   final DatabaseHelper _dbHelper;
   final String _baseUrl;
+  final String _syncBaseUrl;
+  final String _dataBaseUrl;
   final String _serverBaseUrl;
   final Dio _dio;
 
   CollaborativeDatabaseService(this._authService, this._dbHelper)
-      : _baseUrl = 'http://localhost:5294/api/CollaborativeDatabase',
-        _serverBaseUrl = 'http://localhost:5294/api',
+      : _baseUrl = 'http://localhost:8080/api/collaboration/databases',
+        _syncBaseUrl = 'http://localhost:8080/api/collaboration/sync',
+        _dataBaseUrl = 'http://localhost:8080/api/collaboration/data',
+        _serverBaseUrl = 'http://localhost:8080/api',
         _dio = Dio() {
     _dio.interceptors.add(InterceptorsWrapper(
       onRequest: (options, handler) async {
@@ -53,7 +57,7 @@ class CollaborativeDatabaseService {
 
   Future<List<CollaborativeDatabase>> getDatabases() async {
     try {
-      final response = await _dio.get('$_baseUrl/databases');
+      final response = await _dio.get(_baseUrl);
       
       if (response.statusCode == 200) {
         final List<dynamic> data = response.data;
@@ -70,7 +74,7 @@ class CollaborativeDatabaseService {
   Future<CollaborativeDatabase> createDatabase(String name) async {
     try {
       final response = await _dio.post(
-        '$_baseUrl/databases',
+        _baseUrl,
         data: {'name': name},
       );
 
@@ -87,9 +91,9 @@ class CollaborativeDatabaseService {
 
   Future<void> deleteDatabase(String databaseId) async {
     try {
-      final response = await _dio.delete('$_baseUrl/databases/$databaseId');
+      final response = await _dio.delete('$_baseUrl/$databaseId');
 
-      if (response.statusCode != 204) {
+      if (response.statusCode != 200 && response.statusCode != 204) {
         throw Exception('Ошибка при удалении базы данных: ${response.statusCode}');
       }
     } catch (e) {
@@ -100,9 +104,9 @@ class CollaborativeDatabaseService {
 
   Future<void> leaveDatabase(String databaseId) async {
     try {
-      final response = await _dio.post('$_baseUrl/databases/$databaseId/leave');
+      final response = await _dio.post('$_baseUrl/$databaseId/leave');
 
-      if (response.statusCode != 204) {
+      if (response.statusCode != 200 && response.statusCode != 204) {
         throw Exception('Ошибка при выходе из базы данных: ${response.statusCode}');
       }
     } catch (e) {
@@ -114,11 +118,11 @@ class CollaborativeDatabaseService {
   Future<void> addCollaborator(String databaseId, String userId) async {
     try {
       final response = await _dio.post(
-        '$_baseUrl/databases/$databaseId/collaborators',
-        data: {'userId': userId},
+        '$_baseUrl/$databaseId/users',
+        data: {'user_id': userId, 'role': 'editor'},
       );
 
-      if (response.statusCode != 200) {
+      if (response.statusCode != 201) {
         throw Exception('Ошибка при добавлении соавтора: ${response.statusCode}');
       }
     } catch (e) {
@@ -130,10 +134,10 @@ class CollaborativeDatabaseService {
   Future<void> removeCollaborator(String databaseId, String userId) async {
     try {
       final response = await _dio.delete(
-        '$_baseUrl/databases/$databaseId/collaborators/$userId',
+        '$_baseUrl/$databaseId/users/$userId',
       );
 
-      if (response.statusCode != 204) {
+      if (response.statusCode != 200 && response.statusCode != 204) {
         throw Exception('Ошибка при удалении соавтора: ${response.statusCode}');
       }
     } catch (e) {
@@ -231,7 +235,7 @@ class CollaborativeDatabaseService {
         // Попытка загрузить данные с сервера с таймаутом
         try {
           final getResponse = await _dio.get(
-            '$_serverBaseUrl/Database/$databaseId',
+            '$_dataBaseUrl/$databaseId',
             options: Options(
               validateStatus: (status) => status != null && status < 500,
               receiveTimeout: const Duration(seconds: 10),
@@ -344,7 +348,7 @@ class CollaborativeDatabaseService {
       // Отправляем изменения на сервер с таймаутом
       try {
         final response = await _dio.post(
-          '$_serverBaseUrl/CollaborativeDatabase/databases/$databaseId/sync',
+          '$_syncBaseUrl/$databaseId',
           data: preparedData,
           options: Options(
             headers: {
@@ -494,7 +498,7 @@ class CollaborativeDatabaseService {
   Future<void> _getAndRestoreServerData(String databaseId) async {
     try {
       final getResponse = await _dio.get(
-        '$_serverBaseUrl/Database/$databaseId',
+        '$_dataBaseUrl/$databaseId',
         options: Options(
           validateStatus: (status) => status != null && status < 500,
           receiveTimeout: const Duration(seconds: 10),
@@ -549,7 +553,7 @@ class CollaborativeDatabaseService {
       // Сначала проверяем, существует ли база данных на сервере
       try {
         final checkResponse = await _dio.get(
-          '$_serverBaseUrl/CollaborativeDatabase/databases/$databaseId',
+          '$_baseUrl/$databaseId',
           options: Options(
             validateStatus: (status) => status != null && status < 500,
             receiveTimeout: const Duration(seconds: 10),
@@ -564,10 +568,12 @@ class CollaborativeDatabaseService {
         }
       } catch (checkError) {
         print('Ошибка при проверке существования базы данных: $checkError');
+        // Если проверка не удалась, все равно пытаемся импортировать, 
+        // т.к. серверная логика импорта может создать БД, если ее нет.
       }
 
       final response = await _dio.post(
-        '$_serverBaseUrl/CollaborativeDatabase/databases/import',
+        '$_baseUrl/import',
         data: {'databaseId': databaseId},
         options: Options(
           validateStatus: (status) => status != null && status < 500,
@@ -643,7 +649,7 @@ class CollaborativeDatabaseService {
   Future<void> exportDatabase(String databaseId) async {
     try {
       final response = await _dio.get(
-        '$_serverBaseUrl/CollaborativeDatabase/databases/$databaseId/export',
+        '$_baseUrl/$databaseId/export',
         options: Options(
           validateStatus: (status) => status != null && status < 500,
         ),
@@ -694,7 +700,7 @@ class CollaborativeDatabaseService {
       
       // Отправляем данные на сервер
       final response = await _dio.post(
-        '$_serverBaseUrl/Database/$databaseId/backup',
+        '$_dataBaseUrl/$databaseId/backup',
         data: preparedData,
         options: Options(
           headers: {
@@ -720,70 +726,21 @@ class CollaborativeDatabaseService {
 
   /// Проверяет, доступен ли сервер
   Future<bool> isServerAvailable() async {
-    // Выполняем до 3 попыток проверки с интервалом 1 секунда
-    for (int attempt = 1; attempt <= 3; attempt++) {
-      try {
-        // При повторных попытках ждем немного перед запросом
-        if (attempt > 1) {
-          await Future.delayed(Duration(seconds: 1));
-        }
-        
-        final response = await _dio.get(
-          '$_serverBaseUrl/Service/status',
-          options: Options(
-            validateStatus: (status) => true,
-            receiveTimeout: const Duration(seconds: 3),
-            sendTimeout: const Duration(seconds: 2),
-          ),
-        ).timeout(Duration(seconds: 3), onTimeout: () {
-          throw TimeoutException('Таймаут при проверке доступности сервера');
-        });
-        
-        if (response.statusCode == 200) {
-          // Проверяем, есть ли ответ и содержит ли он ожидаемые данные
-          final data = response.data;
-          if (data != null && 
-             (data is Map && data.containsKey('status') || 
-              data is String && data.contains('available'))) {
-            print('Сервер доступен (попытка $attempt)');
-            return true;
-          } 
-          
-          print('Сервер вернул неожиданный формат данных (попытка $attempt)');
-          
-          // Если полученный ответ не соответствует ожидаемому формату, 
-          // но статус код правильный, считаем сервер доступным
-          if (attempt == 3) {
-            print('Считаем сервер доступным, несмотря на неожиданный формат данных');
-            return true;
-          }
-        } else {
-          print('Сервер вернул неверный статус ${response.statusCode} (попытка $attempt)');
-        }
-        
-        // Если получен недопустимый статус, пробуем еще попытку
-        if (attempt < 3) continue;
-        
-        return false;
-      } catch (e) {
-        print('Ошибка при проверке доступности сервера (попытка $attempt): $e');
-        
-        // На последней попытке возвращаем false
-        if (attempt == 3) {
-          return false;
-        }
-        
-        // При ошибках соединения или таймаутах пробуем еще раз
-        if (e is DioException) {
-          // Увеличиваем таймаут для следующей попытки
-          _dio.options.receiveTimeout = Duration(seconds: 4 + attempt);
-          _dio.options.connectTimeout = Duration(seconds: 3 + attempt);
-        }
-      }
+    try {
+      // Используем Dio для проверки доступности с таймаутом
+      final response = await _dio.get(
+        'http://localhost:8080/health',
+        options: Options(
+          validateStatus: (status) => status != null && status < 500,
+          receiveTimeout: const Duration(seconds: 3),
+        ),
+      ).timeout(const Duration(seconds: 4));
+
+      return response.statusCode == 200;
+    } catch (e) {
+      print('Сервер недоступен: $e');
+      return false;
     }
-    
-    // Если все попытки не удались, считаем сервер недоступным
-    return false;
   }
 
   /// Метод для периодической проверки состояния сервера

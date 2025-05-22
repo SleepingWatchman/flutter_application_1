@@ -105,22 +105,29 @@ class ScheduleEntry {
     Recurrence? recurrence;
     if (map['recurrence_json'] != null) {
       try {
-        final recurrenceMap = jsonDecode(map['recurrence_json']);
-        recurrence = Recurrence.fromMap(recurrenceMap);
+        if (map['recurrence_json'] is String) {
+          final recurrenceMap = jsonDecode(map['recurrence_json'] as String);
+          recurrence = Recurrence.fromMap(recurrenceMap);
+        } else {
+          print('Поле recurrence_json не является строкой: ${map['recurrence_json']}');
+          recurrence = Recurrence();
+        }
       } catch (e) {
         print('Ошибка при разборе recurrence_json: $e');
         recurrence = Recurrence();
       }
+    } else {
+      recurrence = Recurrence();
     }
     
     return ScheduleEntry(
-      id: map['id'],
-      time: map['time'],
-      date: map['date'],
-      note: map['note'],
-      dynamicFieldsJson: map['dynamic_fields_json'],
+      id: map['id'] as int?,
+      time: map['time'] as String? ?? '00:00',
+      date: map['date'] as String? ?? DateTime.now().toIso8601String().split('T')[0],
+      note: map['note'] as String?,
+      dynamicFieldsJson: map['dynamic_fields_json'] as String?,
       recurrence: recurrence,
-      databaseId: map['database_id'],
+      databaseId: map['database_id'] as String?,
     );
   }
 } 

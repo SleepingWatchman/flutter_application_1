@@ -27,7 +27,7 @@ class DatabaseHelper {
 
   static Database? _database;
   static const String _dbName = 'notes.db';
-  static const int _dbVersion = 3;
+  static const int _dbVersion = 15; // Увеличено до 15
   static final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
   
   // Флаг для отслеживания состояния переключения между базами
@@ -248,7 +248,80 @@ class DatabaseHelper {
         await db.execute('ALTER TABLE schedule_entries ADD COLUMN recurrence_json TEXT');
         print('Успешно добавлена колонка recurrence_json в таблицу schedule_entries');
       } catch (e) {
-        print('Ошибка при добавлении колонки recurrence_json: $e');
+        // Игнорируем ошибку, если колонка уже существует
+        if (!e.toString().contains('duplicate column name')) {
+          print('Ошибка при добавлении колонки recurrence_json: $e');
+          // rethrow; // Не бросаем ошибку, чтобы не прерывать обновление
+        } else {
+          print('Колонка recurrence_json уже существует.');
+        }
+      }
+      // Добавляем колонку folder_id в таблицу notes, если она отсутствует
+      try {
+        await db.execute('ALTER TABLE notes ADD COLUMN folder_id INTEGER REFERENCES folders (id) ON DELETE SET NULL');
+        print('Успешно добавлена колонка folder_id в таблицу notes (через onUpgrade)');
+      } catch (e) {
+        if (e.toString().contains('duplicate column name') || e.toString().contains('уже существует')) {
+          print('Колонка folder_id уже существует в notes (проверено в onUpgrade).');
+        } else {
+          print('Ошибка при добавлении колонки folder_id в notes (через onUpgrade): $e');
+          // rethrow; // Раскомментируйте, если хотите, чтобы приложение падало при ошибке миграции
+        }
+      }
+      // Добавляем колонку database_id в таблицу notes, если она отсутствует
+      try {
+        await db.execute('ALTER TABLE notes ADD COLUMN database_id TEXT');
+        print('Успешно добавлена колонка database_id в таблицу notes (через onUpgrade)');
+      } catch (e) {
+        if (e.toString().contains('duplicate column name') || e.toString().contains('уже существует')) {
+          print('Колонка database_id уже существует в notes (проверено в onUpgrade).');
+        } else {
+          print('Ошибка при добавлении колонки database_id в notes (через onUpgrade): $e');
+        }
+      }
+      // Добавляем колонку database_id в таблицу folders, если она отсутствует
+      try {
+        await db.execute('ALTER TABLE folders ADD COLUMN database_id TEXT');
+        print('Успешно добавлена колонка database_id в таблицу folders (через onUpgrade)');
+      } catch (e) {
+        if (e.toString().contains('duplicate column name') || e.toString().contains('уже существует')) {
+          print('Колонка database_id уже существует в folders (проверено в onUpgrade).');
+        } else {
+          print('Ошибка при добавлении колонки database_id в folders (через onUpgrade): $e');
+        }
+      }
+       // Добавляем колонку database_id в таблицу schedule_entries, если она отсутствует
+      try {
+        await db.execute('ALTER TABLE schedule_entries ADD COLUMN database_id TEXT');
+        print('Успешно добавлена колонка database_id в таблицу schedule_entries (через onUpgrade)');
+      } catch (e) {
+        if (e.toString().contains('duplicate column name') || e.toString().contains('уже существует')) {
+          print('Колонка database_id уже существует в schedule_entries (проверено в onUpgrade).');
+        } else {
+          print('Ошибка при добавлении колонки database_id в schedule_entries (через onUpgrade): $e');
+        }
+      }
+      // Добавляем колонку database_id в таблицу pinboard_notes, если она отсутствует
+      try {
+        await db.execute('ALTER TABLE pinboard_notes ADD COLUMN database_id TEXT');
+        print('Успешно добавлена колонка database_id в таблицу pinboard_notes (через onUpgrade)');
+      } catch (e) {
+        if (e.toString().contains('duplicate column name') || e.toString().contains('уже существует')) {
+          print('Колонка database_id уже существует в pinboard_notes (проверено в onUpgrade).');
+        } else {
+          print('Ошибка при добавлении колонки database_id в pinboard_notes (через onUpgrade): $e');
+        }
+      }
+      // Добавляем колонку database_id в таблицу connections, если она отсутствует
+      try {
+        await db.execute('ALTER TABLE connections ADD COLUMN database_id TEXT');
+        print('Успешно добавлена колонка database_id в таблицу connections (через onUpgrade)');
+      } catch (e) {
+        if (e.toString().contains('duplicate column name') || e.toString().contains('уже существует')) {
+          print('Колонка database_id уже существует в connections (проверено в onUpgrade).');
+        } else {
+          print('Ошибка при добавлении колонки database_id в connections (через onUpgrade): $e');
+        }
       }
     }
   }

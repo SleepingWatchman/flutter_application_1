@@ -3,7 +3,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 
 class FileService {
-  static const String baseUrl = 'http://127.0.0.1:5294/api/file';
+  static const String baseUrl = 'http://127.0.0.1:8080/api/file';
 
   Future<String> uploadFile(File file, String token) async {
     try {

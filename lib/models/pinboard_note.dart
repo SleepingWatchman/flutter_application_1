@@ -42,16 +42,34 @@ class PinboardNoteDB {
   }
 
   factory PinboardNoteDB.fromMap(Map<String, dynamic> map) {
+    // Вспомогательная функция для безопасного парсинга double
+    double _parseDouble(dynamic value, double defaultValue) {
+      if (value == null) return defaultValue;
+      if (value is double) return value;
+      if (value is int) return value.toDouble();
+      if (value is String) return double.tryParse(value) ?? defaultValue;
+      return defaultValue;
+    }
+
+    // Вспомогательная функция для безопасного парсинга int
+    int _parseInt(dynamic value, int defaultValue) {
+      if (value == null) return defaultValue;
+      if (value is int) return value;
+      if (value is double) return value.toInt();
+      if (value is String) return int.tryParse(value) ?? defaultValue;
+      return defaultValue;
+    }
+
     return PinboardNoteDB(
-      id: map['id'],
-      title: map['title'] ?? '',
-      content: map['content'] ?? '',
-      posX: map['position_x'] ?? 0.0,
-      posY: map['position_y'] ?? 0.0,
-      width: map['width'] ?? 200.0,
-      height: map['height'] ?? 150.0,
-      backgroundColor: map['background_color'] ?? 0xFF424242,
-      icon: _getIconKey(map['icon'] ?? Icons.person.codePoint), // Преобразуем codePoint в ключ
+      id: map['id'] as int?,
+      title: map['title'] as String? ?? '',
+      content: map['content'] as String? ?? '',
+      posX: _parseDouble(map['position_x'], 0.0),
+      posY: _parseDouble(map['position_y'], 0.0),
+      width: _parseDouble(map['width'], 200.0),
+      height: _parseDouble(map['height'], 150.0),
+      backgroundColor: _parseInt(map['background_color'], 0xFF424242),
+      icon: _getIconKey(_parseInt(map['icon'], Icons.person.codePoint)),
       database_id: map['database_id'] as String?,
     );
   }

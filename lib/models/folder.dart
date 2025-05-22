@@ -34,11 +34,11 @@ class Folder {
 
   factory Folder.fromMap(Map<String, dynamic> map) {
     return Folder(
-      id: map['id'],
-      name: map['name'],
+      id: map['id'] as int?,
+      name: map['name'] as String? ?? '', // Если name null, ставим пустую строку
       isExpanded: (map['is_expanded'] ?? 1) == 1,
       color: Color(map['color'] ?? Colors.blue.value),
-      database_id: map['database_id'],
+      database_id: map['database_id'] as String?,
     );
   }
 } 

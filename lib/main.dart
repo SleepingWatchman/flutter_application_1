@@ -235,8 +235,10 @@ class _MainScreenState extends State<MainScreen> {
       });
       
       // Обновляем DatabaseProvider для вызова обновления всех экранов
-      final dbProvider = Provider.of<DatabaseProvider>(context, listen: false);
-      dbProvider.setNeedsUpdate(true);
+      if (mounted) { 
+        final dbProvider = Provider.of<DatabaseProvider>(context, listen: false);
+        dbProvider.setNeedsUpdate(true);
+      }
       // Вызываем обновление вручную, чтобы гарантировать обновление всех экранов
       _handleDatabaseChanges();
     }

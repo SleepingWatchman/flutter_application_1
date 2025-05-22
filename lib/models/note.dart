@@ -51,15 +51,55 @@ class Note {
 
   // Создание из JSON
   factory Note.fromMap(Map<String, dynamic> map) {
+    List<String>? imagesList;
+    if (map['images'] != null) {
+      try {
+        // Попытка декодировать, если это строка JSON
+        if (map['images'] is String) {
+          final decodedImages = jsonDecode(map['images'] as String);
+          if (decodedImages is List) {
+            imagesList = List<String>.from(decodedImages.map((item) => item.toString()));
+          }
+        } else if (map['images'] is List) {
+          // Если это уже список (например, после jsonDecode ранее или из другого источника)
+          imagesList = List<String>.from(map['images'].map((item) => item.toString()));
+        }
+      } catch (e) {
+        print("Error decoding images from map: $e, images data: ${map['images']}");
+        imagesList = null; // или [] в зависимости от логики
+      }
+    }
+
+    Map<String, dynamic>? metadataMap;
+    if (map['metadata'] != null) {
+      if (map['metadata'] is String) {
+        try {
+          metadataMap = jsonDecode(map['metadata'] as String);
+        } catch (e) {
+          print("Error decoding metadata string from map: $e, metadata data: ${map['metadata']}");
+          metadataMap = null;
+        }
+      } else if (map['metadata'] is Map) {
+        // Если это уже Map, пробуем привести его к Map<String, dynamic>
+        try {
+          metadataMap = Map<String, dynamic>.from(map['metadata']);
+        } catch (e) {
+           print("Error casting metadata map: $e, metadata data: ${map['metadata']}");
+           metadataMap = null;
+        }
+      }
+    }
+    
     return Note(
       id: map['id'] as int?,
-      title: map['title'] as String,
+      title: map['title'] as String? ?? '', // Если title null, ставим пустую строку
       content: map['content'] as String?,
       folderId: map['folder_id'] as int?,
-      createdAt: DateTime.parse(map['created_at'] as String),
-      updatedAt: DateTime.parse(map['updated_at'] as String),
-      images: map['images'] != null ? List<String>.from(jsonDecode(map['images'])) : null,
-      metadata: map['metadata'],
+      // Добавляем проверку на null и используем DateTime.now() как запасной вариант
+      createdAt: map['created_at'] != null ? DateTime.parse(map['created_at'] as String) : DateTime.now(),
+      updatedAt: map['updated_at'] != null ? DateTime.parse(map['updated_at'] as String) : DateTime.now(),
+      images: imagesList,
+      metadata: metadataMap,
       content_json: map['content_json'] as String?,
       database_id: map['database_id'] as String?,
     );

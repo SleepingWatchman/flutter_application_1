@@ -5,7 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/user_model.dart';
 
 class AuthService {
-  static const String baseUrl = 'http://127.0.0.1:5294/api/auth';
+  static const String baseUrl = 'http://127.0.0.1:8080/api/auth';
   String? _token;
   UserModel? _currentUser;
   late Future<SharedPreferences> _prefs;
@@ -79,7 +79,7 @@ class AuthService {
         return;
       }
       if (userJson != null) {
-        _currentUser = UserModel.fromJson(json.decode(userJson));
+        _currentUser = _processUser(UserModel.fromJson(json.decode(userJson)));
       }
     } catch (e) {
       print('Error loading saved data: $e');
@@ -140,10 +140,10 @@ class AuthService {
       print('Response status: ${response.statusCode}');
       print('Response body: ${response.body}');
 
-      if (response.statusCode == 200) {
+      if (response.statusCode == 201) {
         final data = json.decode(response.body);
         _token = data['token'];
-        _currentUser = UserModel.fromJson(data['user']);
+        _currentUser = _processUser(UserModel.fromJson(data['user']));
         await _saveData();
         return _currentUser!;
       } else {
@@ -175,7 +175,7 @@ class AuthService {
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         _token = data['token'];
-        _currentUser = UserModel.fromJson(data['user']);
+        _currentUser = _processUser(UserModel.fromJson(data['user']));
         await _saveData();
         return _currentUser!;
       } else {
@@ -212,7 +212,7 @@ class AuthService {
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        _currentUser = UserModel.fromJson(data);
+        _currentUser = _processUser(UserModel.fromJson(data));
         await _saveData();
         return _currentUser!;
       } else {
@@ -237,5 +237,14 @@ class AuthService {
 
   void dispose() {
     _userController.close();
+  }
+
+  UserModel? _processUser(UserModel? user) {
+    if (user?.photoURL != null) {
+      user = user!.copyWith(
+        photoURL: user.photoURL!.replaceFirst(':5294/', ':8080/'),
+      );
+    }
+    return user;
   }
 } 

@@ -17,8 +17,8 @@ class CollaborativeDatabaseService {
   final Dio _dio;
 
   CollaborativeDatabaseService(this._authService, this._dbHelper)
-      : _baseUrl = 'http://localhost:5294/api/CollaborativeDatabase',
-        _serverBaseUrl = 'http://localhost:5294/api',
+      : _baseUrl = 'http://localhost:8080/api/collaboration',
+        _serverBaseUrl = 'http://localhost:8080/api',
         _dio = Dio() {
     _dio.interceptors.add(InterceptorsWrapper(
       onRequest: (options, handler) async {
@@ -28,13 +28,13 @@ class CollaborativeDatabaseService {
         }
         return handler.next(options);
       },
-      onError: (DioError error, handler) {
-        print('Ошибка запроса к серверу: ${error.message}');
-        // При ошибках связи или таймаутах не останавливаем приложение
-        if (error.type == DioErrorType.connectionTimeout ||
-            error.type == DioErrorType.receiveTimeout ||
-            error.type == DioErrorType.sendTimeout ||
-            error.type == DioErrorType.connectionError) {
+      onError: (DioException error, handler) {
+        print('Ошибка запроса к серверу совместной работы: ${error.message}');
+        
+        if (error.type == DioExceptionType.connectionTimeout ||
+            error.type == DioExceptionType.receiveTimeout ||
+            error.type == DioExceptionType.sendTimeout ||
+            error.type == DioExceptionType.connectionError) {
           print('Проблема с подключением к серверу: ${error.message}');
         }
         return handler.next(error);
@@ -114,7 +114,7 @@ class CollaborativeDatabaseService {
   Future<void> addCollaborator(String databaseId, String userId) async {
     try {
       final response = await _dio.post(
-        '$_baseUrl/databases/$databaseId/collaborators',
+        '$_baseUrl/databases/$databaseId/users',
         data: {'userId': userId},
       );
 
@@ -130,7 +130,7 @@ class CollaborativeDatabaseService {
   Future<void> removeCollaborator(String databaseId, String userId) async {
     try {
       final response = await _dio.delete(
-        '$_baseUrl/databases/$databaseId/collaborators/$userId',
+        '$_baseUrl/databases/$databaseId/users/$userId',
       );
 
       if (response.statusCode != 204) {
@@ -231,7 +231,7 @@ class CollaborativeDatabaseService {
         // Попытка загрузить данные с сервера с таймаутом
         try {
           final getResponse = await _dio.get(
-            '$_serverBaseUrl/Database/$databaseId',
+            '$_serverBaseUrl/collaboration/data/$databaseId',
             options: Options(
               validateStatus: (status) => status != null && status < 500,
               receiveTimeout: const Duration(seconds: 10),
@@ -344,7 +344,7 @@ class CollaborativeDatabaseService {
       // Отправляем изменения на сервер с таймаутом
       try {
         final response = await _dio.post(
-          '$_serverBaseUrl/CollaborativeDatabase/databases/$databaseId/sync',
+          '$_serverBaseUrl/collaboration/sync/$databaseId',
           data: preparedData,
           options: Options(
             headers: {
@@ -494,7 +494,7 @@ class CollaborativeDatabaseService {
   Future<void> _getAndRestoreServerData(String databaseId) async {
     try {
       final getResponse = await _dio.get(
-        '$_serverBaseUrl/Database/$databaseId',
+        '$_serverBaseUrl/collaboration/data/$databaseId',
         options: Options(
           validateStatus: (status) => status != null && status < 500,
           receiveTimeout: const Duration(seconds: 10),
@@ -549,7 +549,7 @@ class CollaborativeDatabaseService {
       // Сначала проверяем, существует ли база данных на сервере
       try {
         final checkResponse = await _dio.get(
-          '$_serverBaseUrl/CollaborativeDatabase/databases/$databaseId',
+          '$_baseUrl/databases/$databaseId',
           options: Options(
             validateStatus: (status) => status != null && status < 500,
             receiveTimeout: const Duration(seconds: 10),
@@ -567,7 +567,7 @@ class CollaborativeDatabaseService {
       }
 
       final response = await _dio.post(
-        '$_serverBaseUrl/CollaborativeDatabase/databases/import',
+        '$_serverBaseUrl/collaboration/data/import',
         data: {'databaseId': databaseId},
         options: Options(
           validateStatus: (status) => status != null && status < 500,
@@ -643,7 +643,7 @@ class CollaborativeDatabaseService {
   Future<void> exportDatabase(String databaseId) async {
     try {
       final response = await _dio.get(
-        '$_serverBaseUrl/CollaborativeDatabase/databases/$databaseId/export',
+        '$_baseUrl/databases/$databaseId/export',
         options: Options(
           validateStatus: (status) => status != null && status < 500,
         ),
@@ -694,7 +694,7 @@ class CollaborativeDatabaseService {
       
       // Отправляем данные на сервер
       final response = await _dio.post(
-        '$_serverBaseUrl/Database/$databaseId/backup',
+        '$_serverBaseUrl/collaboration/data/$databaseId/backup',
         data: preparedData,
         options: Options(
           headers: {

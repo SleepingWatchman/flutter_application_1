@@ -42,7 +42,7 @@ class AccountScreen extends StatelessWidget {
                   child: CircleAvatar(
                     radius: 50,
                     backgroundImage: user?.photoURL != null
-                        ? NetworkImage(user!.photoURL!)
+                        ? NetworkImage('${user!.photoURL!}?t=${DateTime.now().millisecondsSinceEpoch}')
                         : null,
                     child: user?.photoURL == null
                         ? const Icon(Icons.person, size: 50)

@@ -10,12 +10,15 @@ import 'screens/profile/account_screen.dart';
 import 'screens/collaboration/shared_databases_screen.dart';
 import 'providers/auth_provider.dart';
 import 'providers/backup_provider.dart';
-import 'providers/collaborative_database_provider.dart';
+import 'providers/enhanced_collaborative_provider.dart';
 import 'providers/database_provider.dart';
 import 'db/database_helper.dart';
 import 'screens/auth/login_screen.dart';
 import 'services/collaborative_database_service.dart';
+import 'services/collaborative_role_service.dart';
+import 'services/enhanced_sync_service.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:dio/dio.dart';
 
 /// Функция main: инициализация БД и запуск приложения
 void main() async {
@@ -66,31 +69,39 @@ class NotesApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => DatabaseProvider()),
-        ChangeNotifierProxyProvider2<AuthProvider, DatabaseProvider, CollaborativeDatabaseProvider>(
+        // Добавляем улучшенный провайдер совместной работы
+        ChangeNotifierProxyProvider2<AuthProvider, DatabaseProvider, EnhancedCollaborativeProvider>(
           create: (context) {
             final authProvider = context.read<AuthProvider>();
             final databaseProvider = context.read<DatabaseProvider>();
-            final service = CollaborativeDatabaseService(
+            final roleService = CollaborativeRoleService(authProvider.authService);
+            final syncService = EnhancedSyncService(authProvider.authService, databaseProvider.dbHelper);
+            final dio = Dio();
+            final provider = EnhancedCollaborativeProvider(
+              roleService,
+              syncService,
               authProvider.authService,
               databaseProvider.dbHelper,
+              dio,
             );
-            final provider = CollaborativeDatabaseProvider(service, databaseProvider.dbHelper);
-            // Устанавливаем связь с DatabaseProvider
             provider.setDatabaseProvider(databaseProvider);
             return provider;
           },
           update: (context, auth, database, previous) {
             if (previous == null) {
-              final service = CollaborativeDatabaseService(
+              final roleService = CollaborativeRoleService(auth.authService);
+              final syncService = EnhancedSyncService(auth.authService, database.dbHelper);
+              final dio = Dio();
+              final provider = EnhancedCollaborativeProvider(
+                roleService,
+                syncService,
                 auth.authService,
                 database.dbHelper,
+                dio,
               );
-              final provider = CollaborativeDatabaseProvider(service, database.dbHelper);
-              // Устанавливаем связь с DatabaseProvider
               provider.setDatabaseProvider(database);
               return provider;
             }
-            // Обновляем связь с DatabaseProvider
             previous.setDatabaseProvider(database);
             return previous;
           },
@@ -175,14 +186,14 @@ class _MainScreenState extends State<MainScreen> {
       final dbProvider = Provider.of<DatabaseProvider>(context, listen: false);
       dbProvider.addListener(_handleDatabaseChanges);
       
-      final collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
-      collabProvider.addListener(_handleCollaborativeDatabaseChanges);
+      final enhancedCollabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
+      enhancedCollabProvider.addListener(_handleCollaborativeDatabaseChanges);
     });
   }
   
   // Переменные для хранения провайдеров
   DatabaseProvider? _dbProvider;
-  CollaborativeDatabaseProvider? _collabProvider;
+  EnhancedCollaborativeProvider? _enhancedCollabProvider;
   
   @override
   void didChangeDependencies() {
@@ -190,7 +201,7 @@ class _MainScreenState extends State<MainScreen> {
     
     // Сохраняем ссылки на провайдеры для безопасного удаления слушателей в dispose
     _dbProvider = Provider.of<DatabaseProvider>(context, listen: false);
-    _collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
+    _enhancedCollabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
     
     final auth = Provider.of<AuthProvider>(context, listen: false);
     if (auth.wasTokenExpired) {
@@ -205,40 +216,34 @@ class _MainScreenState extends State<MainScreen> {
   @override
   void dispose() {
     // Удаляем слушатели при удалении виджета
-    if (_dbProvider != null) {
-      _dbProvider!.removeListener(_handleDatabaseChanges);
-    }
-    
-    if (_collabProvider != null) {
-      _collabProvider!.removeListener(_handleCollaborativeDatabaseChanges);
+    try {
+      if (_dbProvider != null) {
+        _dbProvider!.removeListener(_handleDatabaseChanges);
+      }
+      
+      if (_enhancedCollabProvider != null) {
+        _enhancedCollabProvider!.removeListener(_handleCollaborativeDatabaseChanges);
+      }
+    } catch (e) {
+      print('Ошибка при удалении слушателей: $e');
     }
     
     super.dispose();
   }
   
   void _handleDatabaseChanges() {
-    // Обновляем интерфейс при изменении базы данных
+    // ОПТИМИЗИРОВАНО: Убираем избыточные обновления и логирование
     if (mounted) {
-      setState(() {
-        // Принудительное обновление IndexedStack
-        print('Обновление интерфейса после изменения базы данных');
-      });
+      // Consumer виджеты обновятся автоматически через Provider
+      // Дополнительные действия не требуются
     }
   }
   
   void _handleCollaborativeDatabaseChanges() {
-    // Обновляем интерфейс при изменении совместной базы данных
+    // ОПТИМИЗИРОВАНО: Убираем избыточные обновления и логирование
     if (mounted) {
-      setState(() {
-        // Принудительное обновление интерфейса
-        print('Обновление интерфейса после изменения совместной базы данных');
-      });
-      
-      // Обновляем DatabaseProvider для вызова обновления всех экранов
-      final dbProvider = Provider.of<DatabaseProvider>(context, listen: false);
-      dbProvider.setNeedsUpdate(true);
-      // Вызываем обновление вручную, чтобы гарантировать обновление всех экранов
-      _handleDatabaseChanges();
+      // Consumer виджеты обновятся автоматически через Provider
+      // Дополнительные действия не требуются
     }
   }
 
@@ -296,17 +301,15 @@ class _MainScreenState extends State<MainScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Consumer<CollaborativeDatabaseProvider>(
-          builder: (context, collabProvider, child) {
-            if (collabProvider.isUsingSharedDatabase) {
+        title: Consumer<EnhancedCollaborativeProvider>(
+          builder: (context, enhancedProvider, child) {
+            if (enhancedProvider.isUsingSharedDatabase) {
               // Если используется совместная база, показываем её имя
-              final matchingDbs = collabProvider.databases
-                  .where((db) => db.id == collabProvider.currentDatabaseId)
-                  .toList();
-              
-              final dbName = matchingDbs.isNotEmpty
-                  ? matchingDbs.first.name
-                  : 'Совместная база';
+              final currentDbId = enhancedProvider.currentDatabaseId;
+              final currentDb = enhancedProvider.databases
+                  .where((db) => db.id == currentDbId)
+                  .firstOrNull;
+              final dbName = currentDb?.name ?? 'Совместная база';
               
               return Row(
                 children: [
@@ -315,12 +318,12 @@ class _MainScreenState extends State<MainScreen> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                     decoration: BoxDecoration(
-                      color: collabProvider.isServerAvailable 
+                      color: enhancedProvider.isServerAvailable 
                           ? Colors.green.withOpacity(0.2)
                           : Colors.orange.withOpacity(0.2),
                       borderRadius: BorderRadius.circular(10),
                       border: Border.all(
-                        color: collabProvider.isServerAvailable 
+                        color: enhancedProvider.isServerAvailable 
                             ? Colors.green.withOpacity(0.5)
                             : Colors.orange.withOpacity(0.5),
                       ),
@@ -329,11 +332,11 @@ class _MainScreenState extends State<MainScreen> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(
-                          collabProvider.isServerAvailable 
+                          enhancedProvider.isServerAvailable 
                               ? Icons.people 
                               : Icons.sync_problem,
                           size: 14,
-                          color: collabProvider.isServerAvailable 
+                          color: enhancedProvider.isServerAvailable 
                               ? Colors.green
                               : Colors.orange,
                         ),
@@ -342,7 +345,7 @@ class _MainScreenState extends State<MainScreen> {
                           dbName,
                           style: TextStyle(
                             fontSize: 12,
-                            color: collabProvider.isServerAvailable 
+                            color: enhancedProvider.isServerAvailable 
                                 ? Colors.green
                                 : Colors.orange,
                           ),
@@ -364,18 +367,18 @@ class _MainScreenState extends State<MainScreen> {
         ),
         actions: [
           // Кнопка для синхронизации совместной базы
-          Consumer<CollaborativeDatabaseProvider>(
-            builder: (context, collabProvider, child) {
-              if (collabProvider.isUsingSharedDatabase) {
+          Consumer<EnhancedCollaborativeProvider>(
+            builder: (context, enhancedProvider, child) {
+              if (enhancedProvider.isUsingSharedDatabase) {
                 return IconButton(
                   icon: const Icon(Icons.sync),
-                  tooltip: collabProvider.isServerAvailable 
+                  tooltip: enhancedProvider.isServerAvailable 
                       ? 'Синхронизировать базу данных'
                       : 'Сервер недоступен',
-                  onPressed: collabProvider.isServerAvailable
+                  onPressed: enhancedProvider.isServerAvailable
                       ? () {
                           // Запускаем синхронизацию
-                          collabProvider.syncDatabase();
+                          enhancedProvider.syncDatabase();
                         }
                       : null, // Кнопка неактивна, если сервер недоступен
                 );
@@ -385,15 +388,15 @@ class _MainScreenState extends State<MainScreen> {
             },
           ),
           // Кнопка для переключения на личную базу
-          Consumer<CollaborativeDatabaseProvider>(
-            builder: (context, collabProvider, child) {
-              if (collabProvider.isUsingSharedDatabase) {
+          Consumer<EnhancedCollaborativeProvider>(
+            builder: (context, enhancedProvider, child) {
+              if (enhancedProvider.isUsingSharedDatabase) {
                 return IconButton(
                   icon: const Icon(Icons.person),
                   tooltip: 'Переключиться на личную базу',
                   onPressed: () {
                     // Переключаемся на личную базу
-                    collabProvider.switchToPersonalDatabase();
+                    enhancedProvider.switchToPersonalDatabase();
                   },
                 );
               } else {
@@ -459,7 +462,7 @@ class _MainScreenState extends State<MainScreen> {
                                       CircleAvatar(
                                         radius: 20,
                                         backgroundImage: user?.photoURL != null
-                                            ? NetworkImage(user!.photoURL!)
+                                            ? NetworkImage('${user!.photoURL!}?t=${DateTime.now().millisecondsSinceEpoch}')
                                             : null,
                                         child: user?.photoURL == null
                                             ? const Icon(Icons.person)
@@ -482,7 +485,7 @@ class _MainScreenState extends State<MainScreen> {
                               : CircleAvatar(
                                   radius: 20,
                                   backgroundImage: user?.photoURL != null
-                                      ? NetworkImage(user!.photoURL!)
+                                      ? NetworkImage('${user!.photoURL!}?t=${DateTime.now().millisecondsSinceEpoch}')
                                       : null,
                                   child: user?.photoURL == null
                                       ? const Icon(Icons.person)
@@ -499,7 +502,7 @@ class _MainScreenState extends State<MainScreen> {
           Expanded(
             child: Consumer<DatabaseProvider>(
               builder: (context, databaseProvider, child) {
-                return Consumer<CollaborativeDatabaseProvider>(
+                return Consumer<EnhancedCollaborativeProvider>(
                   builder: (context, collabProvider, child) {
                     // Используем ключ для принудительного обновления IndexedStack
                     // при изменении базы данных

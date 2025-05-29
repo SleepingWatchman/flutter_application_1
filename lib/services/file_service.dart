@@ -1,9 +1,11 @@
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:path/path.dart' as path;
 
 class FileService {
-  static const String baseUrl = 'http://127.0.0.1:5294/api/file';
+  static const String baseUrl = 'http://127.0.0.1:8080/api/file';
+  static const String serverBaseUrl = 'http://127.0.0.1:8080';
 
   Future<String> uploadFile(File file, String token) async {
     try {
@@ -43,8 +45,13 @@ class FileService {
         try {
           var data = json.decode(responseData);
           if (data['url'] != null) {
-            print('Successfully uploaded file. URL: ${data['url']}');
-            return data['url'];
+            String relativeUrl = data['url'];
+            // Формируем полный URL для изображения
+            String fullUrl = relativeUrl.startsWith('http') 
+                ? relativeUrl 
+                : '$serverBaseUrl$relativeUrl';
+            print('Successfully uploaded file. URL: $fullUrl');
+            return fullUrl;
           } else {
             throw Exception('Response missing URL');
           }

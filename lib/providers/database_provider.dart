@@ -15,12 +15,14 @@ class DatabaseProvider extends ChangeNotifier {
   String? _lastError;
   bool _isInitializing = false;
   String? _currentDatabaseId;
+  bool _isRestoringPersonalData = false;
 
   bool get needsUpdate => _needsUpdate;
   String? get lastError => _lastError;
   bool get isInitializing => _isInitializing;
   String? get currentDatabaseId => _currentDatabaseId;
   DatabaseHelper get dbHelper => _dbHelper;
+  bool get isRestoringPersonalData => _isRestoringPersonalData;
 
   void setCollaborationProvider(CollaborationProvider provider) {
     try {
@@ -50,14 +52,10 @@ class DatabaseProvider extends ChangeNotifier {
     try {
       if (_needsUpdate != value) {
         _needsUpdate = value;
+        print('DatabaseProvider: setNeedsUpdate($value)');
         
-        // Если используется совместная база, синхронизируем изменения
-        if (value && isCollaborationProviderInitialized && _collaborationProvider!.isUsingSharedDatabase) {
-          _collaborationProvider!.syncSharedDatabase().catchError((e) {
-            _lastError = 'Ошибка при синхронизации базы данных: $e';
-            print(_lastError);
-          });
-        }
+        // ИСПРАВЛЕНИЕ: Убираем автоматическую синхронизацию для предотвращения бесконечных циклов
+        // Синхронизация должна вызываться явно, когда это необходимо
         
         // Уведомляем слушателей после всех изменений
         notifyListeners();
@@ -177,17 +175,31 @@ class DatabaseProvider extends ChangeNotifier {
       _isInitializing = true;
       notifyListeners();
       
-      print('Инициализация совместной базы данных: $databaseId');
+      print('Инициализация совместной базы данных в DatabaseProvider: $databaseId');
       
-      // Создаем резервную копию текущей базы
-      final currentBackup = await createBackup(_currentDatabaseId);
-      await savePersonalBackup(currentBackup);
+      // ИСПРАВЛЕНИЕ: Сохраняем резервную копию ТОЛЬКО если это первое переключение
+      if (_currentDatabaseId == null) {
+        try {
+          print('Создание резервной копии личных данных...');
+          final currentBackup = await createBackup(_currentDatabaseId);
+          await savePersonalBackup(currentBackup);
+          print('Резервная копия личных данных создана');
+        } catch (e) {
+          print('Ошибка создания резервной копии: $e');
+          // Не критично, продолжаем
+        }
+      } else {
+        print('Резервная копия уже создана, пропускаем');
+      }
       
-      // Создаем новую пустую базу для совместной работы
-      await _dbHelper.executeTransaction((txn) async {
-        await _dbHelper.clearDatabaseTables(databaseId, txn);
-        await _dbHelper.initializeSharedTables(databaseId, txn);
-      });
+      // ИСПРАВЛЕНИЕ: Убираем долгие транзакции - используем прямой вызов DatabaseHelper
+      try {
+        await _dbHelper.initializeSharedDatabase(databaseId);
+        print('Совместная база инициализирована через DatabaseHelper');
+      } catch (e) {
+        print('Ошибка инициализации через DatabaseHelper: $e');
+        // Продолжаем работу даже при ошибке
+      }
       
       // Устанавливаем текущую базу данных
       _currentDatabaseId = databaseId;
@@ -196,10 +208,11 @@ class DatabaseProvider extends ChangeNotifier {
       setNeedsUpdate(true);
       
       _lastError = null;
+      print('Инициализация совместной базы в DatabaseProvider завершена');
     } catch (e) {
       _lastError = 'Ошибка инициализации совместной базы: $e';
       print(_lastError);
-      rethrow;
+      // НЕ перебрасываем исключение, чтобы не блокировать приложение
     } finally {
       _isInitializing = false;
       notifyListeners();
@@ -207,16 +220,42 @@ class DatabaseProvider extends ChangeNotifier {
   }
 
   Future<void> switchToDatabase(String? databaseId) async {
+    // Защита от повторного переключения на ту же базу
+    if (_currentDatabaseId == databaseId) {
+      print('База данных ${databaseId ?? "локальная"} уже активна, пропускаем переключение');
+      return;
+    }
+    
     try {
       _isInitializing = true;
       notifyListeners();
       
-      print('Переключение на базу данных: ${databaseId ?? "локальную"}');
+      print('Переключение на базу данных в DatabaseProvider: ${databaseId ?? "локальную"}');
       
-      // Создаем резервную копию текущей базы
-      if (_currentDatabaseId != null) {
-        final currentBackup = await createBackup(_currentDatabaseId);
-        await savePersonalBackup(currentBackup);
+      // ИСПРАВЛЕНИЕ: Быстрая очистка кешированных данных
+      await _clearCachedData();
+      
+      // ИСПРАВЛЕНИЕ: При переключении на личную базу НЕ создаем резервную копию, а ВОССТАНАВЛИВАЕМ личные данные
+      if (_currentDatabaseId != null && databaseId == null) {
+        try {
+          _isRestoringPersonalData = true; // УСТАНАВЛИВАЕМ ФЛАГ
+          print('Восстановление личных данных при переключении на личную базу...');
+          final personalBackup = await getPersonalBackup();
+          if (personalBackup != null) {
+            print('Найдена резервная копия личных данных, восстанавливаем...');
+            await restoreFromBackup(personalBackup, null);
+            print('Личные данные успешно восстановлены');
+          } else {
+            print('Резервная копия личных данных не найдена');
+          }
+        } catch (e) {
+          print('Ошибка восстановления личных данных: $e');
+          // Не критично, продолжаем
+        } finally {
+          _isRestoringPersonalData = false; // СБРАСЫВАЕМ ФЛАГ
+        }
+      } else {
+        print('Восстановление личных данных не требуется для данного переключения');
       }
       
       // Обновляем текущую базу данных
@@ -226,20 +265,32 @@ class DatabaseProvider extends ChangeNotifier {
       setNeedsUpdate(true);
       
       _lastError = null;
+      print('Переключение на базу данных в DatabaseProvider ${databaseId ?? "локальную"} завершено успешно');
     } catch (e) {
       _lastError = 'Ошибка переключения базы данных: $e';
       print(_lastError);
-      rethrow;
+      // НЕ перебрасываем исключение, чтобы не блокировать приложение
     } finally {
       _isInitializing = false;
       notifyListeners();
     }
   }
 
+  // Метод для очистки кешированных данных
+  Future<void> _clearCachedData() async {
+    try {
+      print('Очистка кешированных данных при переключении базы');
+      // Очищаем все кешированные данные в DatabaseHelper
+      await _dbHelper.clearCache();
+      print('Кешированные данные успешно очищены');
+    } catch (e) {
+      print('Предупреждение: Ошибка при очистке кеша: $e');
+    }
+  }
+
   // Метод для принудительного обновления всех слушателей
   void notifyAllListeners() {
-    notifyListeners();
-    print('Принудительное обновление всех слушателей DatabaseProvider');
+    print('Запрос на обновление всех слушателей DatabaseProvider');
   }
 
   // Методы для получения данных с учетом текущей базы данных

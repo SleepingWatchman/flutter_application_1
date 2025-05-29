@@ -18,7 +18,7 @@ class UserModel {
       id: json['id'].toString(),
       email: json['email'],
       displayName: json['displayName'],
-      photoURL: json['photoURL'],
+      photoURL: json['photoURL'] ?? json['photoUrl'],
       token: json['token'],
     );
   }

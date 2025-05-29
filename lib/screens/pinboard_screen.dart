@@ -3,7 +3,6 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/rendering.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:file_picker/file_picker.dart';
@@ -16,7 +15,7 @@ import '../widgets/color_picker.dart';
 import '../widgets/connection_painter.dart';
 import '../providers/database_provider.dart';
 import 'package:provider/provider.dart';
-import '../providers/collaborative_database_provider.dart';
+import '../providers/enhanced_collaborative_provider.dart';
 
 /// Экран доски с использованием БД для заметок и соединений
 class PinboardScreen extends StatefulWidget {
@@ -36,8 +35,12 @@ class _PinboardScreenState extends State<PinboardScreen> with WidgetsBindingObse
   final GlobalKey _boardKey = GlobalKey();
   // Состояние экспорта
   bool _isExporting = false;
-  // Сохраняем ссылки на провайдеры
+  // ИСПРАВЛЕНИЕ: Сохраняем ссылки на провайдеры для безопасного dispose
   DatabaseProvider? _databaseProvider;
+  EnhancedCollaborativeProvider? _enhancedCollaborativeProvider;
+  bool _isLoading = false;
+  bool _isDataLoaded = false;
+  String? _lastLoadedDatabaseId;
 
   @override
   void initState() {
@@ -62,15 +65,15 @@ class _PinboardScreenState extends State<PinboardScreen> with WidgetsBindingObse
         final dbProvider = Provider.of<DatabaseProvider>(context, listen: false);
         dbProvider.addListener(_handleDatabaseChanges);
         
-        // Подписываемся на изменения в CollaborativeDatabaseProvider
-        final collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
-        collabProvider.addListener(_handleCollaborativeDatabaseChanges);
+        // Подписываемся на изменения в EnhancedCollaborativeProvider
+        final enhancedCollabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
+        enhancedCollabProvider.addListener(_handleCollaborativeDatabaseChanges);
       } catch (e) {
         print('Ошибка при добавлении слушателей: $e');
       }
       
       // Загружаем данные доски при запуске
-      _loadPinboardData();
+      _loadPinboardNotes();
     });
   }
 
@@ -78,35 +81,37 @@ class _PinboardScreenState extends State<PinboardScreen> with WidgetsBindingObse
   void didChangeDependencies() {
     super.didChangeDependencies();
     
-    // Сохраняем провайдер для безопасного доступа
+    // ИСПРАВЛЕНИЕ: Сохраняем ссылки на провайдеры для безопасного dispose
     _databaseProvider = Provider.of<DatabaseProvider>(context, listen: false);
+    _enhancedCollaborativeProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
     
+    // Загружаем данные только если есть флаг обновления
     if (_databaseProvider != null && _databaseProvider!.needsUpdate) {
-      _loadPinboardData();
+      _forceReloadPinboardNotes();
       _databaseProvider!.resetUpdateFlag();
     }
     
-    // Проверяем состояние совместной базы данных
-    try {
-      final collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
-      if (collabProvider.isUsingSharedDatabase) {
-        // Обновляем данные доски для текущей совместной базы
-        _loadPinboardData();
-      }
-    } catch (e) {
-      print('Ошибка при проверке состояния совместной базы: $e');
+    // ИСПРАВЛЕНИЕ: Загружаем данные только если база изменилась или данные не загружены
+    final currentDatabaseId = _enhancedCollaborativeProvider!.isUsingSharedDatabase 
+        ? _enhancedCollaborativeProvider!.currentDatabaseId 
+        : null;
+        
+    if (!_isDataLoaded || _lastLoadedDatabaseId != currentDatabaseId) {
+      _loadPinboardNotes();
     }
   }
 
   @override
   void dispose() {
-    // Удаляем слушатели при удалении виджета
+    // ИСПРАВЛЕНИЕ: Безопасное удаление слушателей
     try {
-      final dbProvider = Provider.of<DatabaseProvider>(context, listen: false);
-      dbProvider.removeListener(_handleDatabaseChanges);
+      if (_databaseProvider != null) {
+        _databaseProvider!.removeListener(_handleDatabaseChanges);
+      }
       
-      final collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
-      collabProvider.removeListener(_handleCollaborativeDatabaseChanges);
+      if (_enhancedCollaborativeProvider != null) {
+        _enhancedCollaborativeProvider!.removeListener(_handleCollaborativeDatabaseChanges);
+      }
     } catch (e) {
       print('Ошибка при удалении слушателей: $e');
     }
@@ -121,7 +126,7 @@ class _PinboardScreenState extends State<PinboardScreen> with WidgetsBindingObse
       setState(() {
         _isActive = true;
       });
-      _loadPinboardData();
+      _loadPinboardNotes();
     } else if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
       setState(() {
         _isActive = false;
@@ -132,51 +137,84 @@ class _PinboardScreenState extends State<PinboardScreen> with WidgetsBindingObse
   // Обработчик изменений базы данных
   void _handleDatabaseChanges() {
     if (mounted) {
-      print('Обновление экрана доски из-за изменений в базе данных');
-      _loadPinboardData();
+      // ОПТИМИЗИРОВАНО: Убираем избыточное логирование
+      // print('Обновление экрана доски из-за изменений в базе данных');
+      
+      // ИСПРАВЛЕНИЕ: Загружаем данные только если база изменилась
+      final enhancedCollabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
+      final currentDatabaseId = enhancedCollabProvider.isUsingSharedDatabase 
+          ? enhancedCollabProvider.currentDatabaseId 
+          : null;
+      
+      // Проверяем, изменилась ли база данных
+      if (_lastLoadedDatabaseId != currentDatabaseId) {
+        _forceReloadPinboardNotes();
+      }
     }
   }
   
   // Обработчик изменений совместной базы данных
   void _handleCollaborativeDatabaseChanges() {
     if (mounted) {
-      print('Обновление экрана доски из-за изменений в совместной базе данных');
-      _loadPinboardData();
+      // ОПТИМИЗИРОВАНО: Убираем избыточное логирование
+      // print('Обновление экрана доски из-за изменений в совместной базе данных');
+      
+      // ИСПРАВЛЕНИЕ: Загружаем данные только при переключении базы
+      final enhancedCollabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
+      final currentDatabaseId = enhancedCollabProvider.isUsingSharedDatabase 
+          ? enhancedCollabProvider.currentDatabaseId 
+          : null;
+      
+      // Проверяем, изменилась ли база данных
+      if (_lastLoadedDatabaseId != currentDatabaseId) {
+        _forceReloadPinboardNotes();
+      }
     }
   }
 
-  Future<void> _loadPinboardData() async {
+  // ИСПРАВЛЕНИЕ: Метод для принудительной перезагрузки
+  void _forceReloadPinboardNotes() {
+    _isDataLoaded = false;
+    _lastLoadedDatabaseId = null;
+    _loadPinboardNotes();
+  }
+
+  Future<void> _loadPinboardNotes() async {
+    // ИСПРАВЛЕНИЕ: Защита от повторных загрузок
+    if (_isLoading) {
+      print('Загрузка доски уже выполняется, пропускаем');
+      return;
+    }
+    
+    setState(() => _isLoading = true);
     try {
-      // Проверяем, используется ли совместная база данных
-      String? databaseId;
-      try {
-        final collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
-        if (collabProvider.isUsingSharedDatabase) {
-          databaseId = collabProvider.currentDatabaseId;
-        }
-      } catch (e) {
-        print('Ошибка при получении информации о совместной базе: $e');
-      }
+      // ИСПРАВЛЕНИЕ: Используем только EnhancedCollaborativeProvider
+      final enhancedCollabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
+      final currentDatabaseId = enhancedCollabProvider.isUsingSharedDatabase 
+          ? enhancedCollabProvider.currentDatabaseId 
+          : null;
       
-      List<PinboardNoteDB> notes = await DatabaseHelper().getPinboardNotes(databaseId);
-      List<ConnectionDB> connections = await DatabaseHelper().getConnectionsDB(databaseId);
+      print('Загрузка доски для базы: ${currentDatabaseId ?? "локальной"}');
       
-      if (!mounted) return;
+      // Загружаем и заметки, и соединения
+      final results = await Future.wait([
+        DatabaseHelper().getPinboardNotes(currentDatabaseId),
+        DatabaseHelper().getConnectionsDB(currentDatabaseId),
+      ]);
       
-      setState(() {
-        _pinboardNotes = notes;
-        _connections = connections;
-      });
-    } catch (e) {
-      print('Ошибка при загрузке данных доски: $e');
-      
-      // Повторная попытка загрузки данных после небольшой задержки
       if (mounted) {
-        Future.delayed(Duration(milliseconds: 500), () {
-          if (mounted) {
-            _loadPinboardData();
-          }
+        setState(() {
+          _pinboardNotes = results[0] as List<PinboardNoteDB>;
+          _connections = results[1] as List<ConnectionDB>;
+          _isDataLoaded = true;
+          _lastLoadedDatabaseId = currentDatabaseId;
         });
+      }
+    } catch (e) {
+      print('Ошибка загрузки доски: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
       }
     }
   }
@@ -185,9 +223,9 @@ class _PinboardScreenState extends State<PinboardScreen> with WidgetsBindingObse
     // Получаем идентификатор текущей базы данных для правильного сохранения
     String? databaseId;
     try {
-      final collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
-      if (collabProvider.isUsingSharedDatabase) {
-        databaseId = collabProvider.currentDatabaseId;
+      final enhancedCollabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
+      if (enhancedCollabProvider.isUsingSharedDatabase) {
+        databaseId = enhancedCollabProvider.currentDatabaseId;
       }
     } catch (e) {
       print('Ошибка при получении информации о совместной базе: $e');
@@ -206,7 +244,7 @@ class _PinboardScreenState extends State<PinboardScreen> with WidgetsBindingObse
     print('Создание заметки на доске в базе: ${databaseId ?? "локальная"}');
     DatabaseHelper().insertPinboardNote(newNote.toMap()).then((_) {
       if (!mounted) return;
-      _loadPinboardData();
+      _loadPinboardNotes();
       showCustomToastWithIcon(
         "Заметка успешно создана",
         accentColor: Colors.green,
@@ -242,24 +280,6 @@ class _PinboardScreenState extends State<PinboardScreen> with WidgetsBindingObse
       setState(() {
         _isExporting = true;
       });
-
-      // Проверяем разрешения на мобильных платформах
-      if (Platform.isAndroid || Platform.isIOS) {
-        final status = await Permission.storage.request();
-        if (!status.isGranted) {
-          if (!mounted) return;
-          showCustomToastWithIcon(
-            "Нет разрешения на сохранение файлов",
-            accentColor: Colors.red,
-            fontSize: 14.0,
-            icon: const Icon(Icons.error, size: 20, color: Colors.red),
-          );
-          setState(() {
-            _isExporting = false;
-          });
-          return;
-        }
-      }
 
       // Получаем границы виджета
       if (!mounted || _boardKey.currentContext == null) {
@@ -409,9 +429,9 @@ class _PinboardScreenState extends State<PinboardScreen> with WidgetsBindingObse
           // Получаем идентификатор текущей базы данных для правильного сохранения
           String? databaseId;
           try {
-            final collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
-            if (collabProvider.isUsingSharedDatabase) {
-              databaseId = collabProvider.currentDatabaseId;
+            final enhancedCollabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
+            if (enhancedCollabProvider.isUsingSharedDatabase) {
+              databaseId = enhancedCollabProvider.currentDatabaseId;
             }
           } catch (e) {
             print('Ошибка при получении информации о совместной базе: $e');
@@ -425,7 +445,7 @@ class _PinboardScreenState extends State<PinboardScreen> with WidgetsBindingObse
           
           print('Создание связи между заметками в базе: ${databaseId ?? "локальная"}');
           DatabaseHelper().insertConnection(newConn.toMap()).then((_) {
-            _loadPinboardData();
+            _loadPinboardNotes();
           });
           _selectedForConnection = null;
         } else {
@@ -651,7 +671,11 @@ class _PinboardScreenState extends State<PinboardScreen> with WidgetsBindingObse
     return Consumer<DatabaseProvider>(
       builder: (context, databaseProvider, child) {
         if (databaseProvider.needsUpdate) {
-          _loadPinboardData();
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              _loadPinboardNotes();
+            }
+          });
           databaseProvider.resetUpdateFlag();
         }
 
@@ -877,7 +901,7 @@ class _PinboardScreenState extends State<PinboardScreen> with WidgetsBindingObse
   void _deleteConnection(int id) {
     DatabaseHelper().deleteConnection(id).then((_) {
       if (!mounted) return;
-      _loadPinboardData();
+      _loadPinboardNotes();
       showCustomToastWithIcon(
         "Связь успешно удалена",
         accentColor: Colors.red,
@@ -934,9 +958,9 @@ class _PinboardScreenState extends State<PinboardScreen> with WidgetsBindingObse
                 // Сохраняем существующий database_id или устанавливаем новый если нужно
                 if (connection.database_id == null) {
                   try {
-                    final collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
-                    if (collabProvider.isUsingSharedDatabase) {
-                      connection.database_id = collabProvider.currentDatabaseId;
+                    final enhancedCollabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
+                    if (enhancedCollabProvider.isUsingSharedDatabase) {
+                      connection.database_id = enhancedCollabProvider.currentDatabaseId;
                       print('Обновление связи с установкой базы: ${connection.database_id}');
                     }
                   } catch (e) {
@@ -948,7 +972,7 @@ class _PinboardScreenState extends State<PinboardScreen> with WidgetsBindingObse
                 
                 DatabaseHelper().updateConnection(connection.toMap()).then((_) {
                   if (!mounted) return;
-                  _loadPinboardData();
+                  _loadPinboardNotes();
                   Navigator.pop(context);
                   showCustomToastWithIcon(
                     "Связь успешно обновлена",
@@ -970,9 +994,9 @@ class _PinboardScreenState extends State<PinboardScreen> with WidgetsBindingObse
     // Сохраняем существующий database_id или устанавливаем новый если нужно
     if (note.database_id == null) {
       try {
-        final collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
-        if (collabProvider.isUsingSharedDatabase) {
-          note.database_id = collabProvider.currentDatabaseId;
+        final enhancedCollabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
+        if (enhancedCollabProvider.isUsingSharedDatabase) {
+          note.database_id = enhancedCollabProvider.currentDatabaseId;
           print('Обновление заметки на доске с установкой базы: ${note.database_id}');
         }
       } catch (e) {
@@ -984,7 +1008,7 @@ class _PinboardScreenState extends State<PinboardScreen> with WidgetsBindingObse
     
     DatabaseHelper().updatePinboardNote(note).then((_) {
       if (!mounted) return;
-      _loadPinboardData();
+      _loadPinboardNotes();
       showCustomToastWithIcon(
         "Заметка успешно обновлена",
         accentColor: Colors.yellow,

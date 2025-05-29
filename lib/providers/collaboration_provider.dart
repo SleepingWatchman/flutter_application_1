@@ -24,7 +24,7 @@ class CollaborationProvider with ChangeNotifier {
   bool _isUsingSharedDatabase = false;
   bool _isLoading = false;
   List<SharedDatabase> _databases = [];
-  final String _baseUrl = 'http://localhost:5294/api/collaboration';
+  final String _baseUrl = 'http://localhost:8080/api/collaboration';
   String? _error;
   List<CollaborationDatabase>? _collaborationDatabases;
 

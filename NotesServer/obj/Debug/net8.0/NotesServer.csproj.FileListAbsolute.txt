@@ -151,3 +151,5 @@ C:\Users\maxim\Desktop\Flutter Projects\flutter_application_1\NotesServer\bin\De
 C:\Users\maxim\Desktop\Flutter Projects\flutter_application_1\NotesServer\bin\Debug\net8.0\user_backups\1\backup_20250515_220851.json
 C:\Users\maxim\Desktop\Flutter Projects\flutter_application_1\NotesServer\bin\Debug\net8.0\user_backups\1\backup_20250516_205204.json
 C:\Users\maxim\Desktop\Flutter Projects\flutter_application_1\NotesServer\bin\Debug\net8.0\user_backups\1\backup_20250517_184105.json
+C:\Users\maxim\Desktop\Flutter Projects\flutter_application_1\NotesServer\bin\Debug\net8.0\user_backups\1\backup_20250522_143124.json
+C:\Users\maxim\Desktop\Flutter Projects\flutter_application_1\NotesServer\bin\Debug\net8.0\user_backups\1\backup_20250522_143242.json

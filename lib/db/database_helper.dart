@@ -19,6 +19,31 @@ import '../providers/database_provider.dart';
 import '../models/shared_database.dart';
 import 'dart:async';
 
+// Класс Lock для синхронизации операций
+class Lock {
+  Completer<void>? _completer;
+  
+  Future<T> synchronized<T>(Future<T> Function() action) async {
+    if (_completer != null) {
+      await _completer!.future;
+    }
+    
+    final completer = Completer<void>();
+    _completer = completer;
+    
+    try {
+      final result = await action();
+      completer.complete();
+      _completer = null;
+      return result;
+    } catch (e) {
+      completer.complete();
+      _completer = null;
+      rethrow;
+    }
+  }
+}
+
 /// Класс для работы с базой данных, реализующий CRUD-операции для всех сущностей.
 class DatabaseHelper {
   static final DatabaseHelper _instance = DatabaseHelper._internal();
@@ -27,7 +52,7 @@ class DatabaseHelper {
 
   static Database? _database;
   static const String _dbName = 'notes.db';
-  static const int _dbVersion = 3;
+  static const int _dbVersion = 5;
   static final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
   
   // Флаг для отслеживания состояния переключения между базами
@@ -159,7 +184,7 @@ class DatabaseHelper {
       )
     ''');
 
-    // Таблица расписания
+    // Таблица расписания с колонками created_at и updated_at
     await db.execute('''
       CREATE TABLE schedule_entries(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -168,7 +193,9 @@ class DatabaseHelper {
         note TEXT,
         dynamic_fields_json TEXT,
         recurrence_json TEXT,
-        database_id TEXT
+        database_id TEXT,
+        created_at TEXT,
+        updated_at TEXT
       )
     ''');
 
@@ -251,6 +278,107 @@ class DatabaseHelper {
         print('Ошибка при добавлении колонки recurrence_json: $e');
       }
     }
+    
+    // Добавляем отсутствующие колонки для версии 4
+    if (oldVersion < 4) {
+      // Добавляем created_at и updated_at в schedule_entries
+      try {
+        await db.execute('ALTER TABLE schedule_entries ADD COLUMN created_at TEXT');
+        print('Успешно добавлена колонка created_at в таблицу schedule_entries');
+      } catch (e) {
+        print('Колонка created_at уже существует или ошибка: $e');
+      }
+      
+      try {
+        await db.execute('ALTER TABLE schedule_entries ADD COLUMN updated_at TEXT');
+        print('Успешно добавлена колонка updated_at в таблицу schedule_entries');
+      } catch (e) {
+        print('Колонка updated_at уже существует или ошибка: $e');
+      }
+      
+      // Добавляем database_id в note_images
+      try {
+        await db.execute('ALTER TABLE note_images ADD COLUMN database_id TEXT');
+        print('Успешно добавлена колонка database_id в таблицу note_images');
+      } catch (e) {
+        print('Колонка database_id уже существует или ошибка: $e');
+      }
+    }
+    
+    // Новая миграция для версии 5 - добавление уникального ограничения
+    if (oldVersion < 5) {
+      // Миграция для добавления уникального ограничения к таблице note_images
+      print('Применение миграции базы данных: очистка дублирующихся изображений');
+      
+      // Сначала очищаем дублирующиеся изображения
+      await _cleanupDuplicateImages(db);
+      
+      // Создаем новую таблицу с уникальным ограничением
+      await db.execute('''
+        CREATE TABLE note_images_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          note_id INTEGER NOT NULL,
+          file_name TEXT NOT NULL,
+          image_data BLOB NOT NULL,
+          database_id TEXT,
+          FOREIGN KEY (note_id) REFERENCES notes (id) ON DELETE CASCADE,
+          UNIQUE(note_id, file_name)
+        )
+      ''');
+      
+      // Копируем уникальные данные в новую таблицу
+      await db.execute('''
+        INSERT INTO note_images_new (note_id, file_name, image_data, database_id)
+        SELECT note_id, file_name, image_data, database_id
+        FROM note_images
+        GROUP BY note_id, file_name
+        HAVING MIN(id)
+      ''');
+      
+      // Удаляем старую таблицу и переименовываем новую
+      await db.execute('DROP TABLE note_images');
+      await db.execute('ALTER TABLE note_images_new RENAME TO note_images');
+      
+      print('Миграция завершена: добавлено уникальное ограничение для изображений');
+    }
+  }
+
+  Future<void> _cleanupDuplicateImages(Database db) async {
+    try {
+      // Находим и удаляем дублирующиеся изображения, оставляя только самые новые
+      final duplicates = await db.rawQuery('''
+        SELECT note_id, file_name, COUNT(*) as count
+        FROM note_images
+        GROUP BY note_id, file_name
+        HAVING COUNT(*) > 1
+      ''');
+      
+      print('Найдено ${duplicates.length} групп дублирующихся изображений');
+      
+      for (final duplicate in duplicates) {
+        final noteId = duplicate['note_id'];
+        final fileName = duplicate['file_name'];
+        final count = duplicate['count'];
+        
+        print('Очистка дубликатов для заметки $noteId, файл $fileName (найдено $count копий)');
+        
+        // Удаляем все дубликаты, кроме самого нового (с максимальным id)
+        await db.rawDelete('''
+          DELETE FROM note_images
+          WHERE note_id = ? AND file_name = ? AND id NOT IN (
+            SELECT MAX(id) FROM note_images
+            WHERE note_id = ? AND file_name = ?
+          )
+        ''', [noteId, fileName, noteId, fileName]);
+      }
+      
+      // Проверяем результат
+      final totalImages = await db.rawQuery('SELECT COUNT(*) as count FROM note_images');
+      print('После очистки осталось ${totalImages.first['count']} изображений');
+      
+    } catch (e) {
+      print('Ошибка при очистке дублирующихся изображений: $e');
+    }
   }
 
   Future<void> _createImagesTable(Database db) async {
@@ -260,7 +388,9 @@ class DatabaseHelper {
         note_id INTEGER NOT NULL,
         file_name TEXT NOT NULL,
         image_data BLOB NOT NULL,
-        FOREIGN KEY (note_id) REFERENCES notes (id) ON DELETE CASCADE
+        database_id TEXT,
+        FOREIGN KEY (note_id) REFERENCES notes (id) ON DELETE CASCADE,
+        UNIQUE(note_id, file_name)
       )
     ''');
   }
@@ -732,11 +862,23 @@ class DatabaseHelper {
       'image_data': imageData,
     };
     
-    if (txn != null) {
-      await txn.insert('note_images', data);
-    } else {
-      final db = await database;
-      await db.insert('note_images', data);
+    try {
+      if (txn != null) {
+        // Используем INSERT OR REPLACE для автоматической замены дубликатов
+        await txn.rawInsert('''
+          INSERT OR REPLACE INTO note_images (note_id, file_name, image_data)
+          VALUES (?, ?, ?)
+        ''', [noteId, fileName, imageData]);
+      } else {
+        final db = await database;
+        await db.rawInsert('''
+          INSERT OR REPLACE INTO note_images (note_id, file_name, image_data)
+          VALUES (?, ?, ?)
+        ''', [noteId, fileName, imageData]);
+      }
+    } catch (e) {
+      print('Ошибка при вставке изображения $fileName для заметки $noteId: $e');
+      rethrow;
     }
   }
 
@@ -756,46 +898,50 @@ class DatabaseHelper {
   }
 
   Future<void> clearDatabaseTables(String databaseId, [Transaction? transaction]) async {
-    try {
-      final db = await database;
+    return await _safeDbOperation(() async {
+      print('Начало очистки таблиц для базы данных: $databaseId');
       
-      // Проверяем, есть ли данные для этой базы данных перед очисткой
-      final hasDataFutures = await Future.wait([
-        db.rawQuery('SELECT COUNT(*) FROM notes WHERE database_id = ? LIMIT 1', [databaseId]),
-        db.rawQuery('SELECT COUNT(*) FROM folders WHERE database_id = ? LIMIT 1', [databaseId]),
-        db.rawQuery('SELECT COUNT(*) FROM schedule_entries WHERE database_id = ? LIMIT 1', [databaseId]),
-        db.rawQuery('SELECT COUNT(*) FROM pinboard_notes WHERE database_id = ? LIMIT 1', [databaseId]),
-        db.rawQuery('SELECT COUNT(*) FROM connections WHERE database_id = ? LIMIT 1', [databaseId]),
-      ]);
-      
-      final notesCount = Sqflite.firstIntValue(hasDataFutures[0]) ?? 0;
-      final foldersCount = Sqflite.firstIntValue(hasDataFutures[1]) ?? 0;
-      final scheduleCount = Sqflite.firstIntValue(hasDataFutures[2]) ?? 0;
-      final pinboardCount = Sqflite.firstIntValue(hasDataFutures[3]) ?? 0;
-      final connectionsCount = Sqflite.firstIntValue(hasDataFutures[4]) ?? 0;
-      
-      final hasData = notesCount > 0 || foldersCount > 0 || scheduleCount > 0 || 
-                      pinboardCount > 0 || connectionsCount > 0;
-      
-      if (!hasData) {
-        print('Таблицы для базы $databaseId уже пусты, пропускаем очистку');
-        return;
+      try {
+        final db = await database;
+        
+        // Быстрая проверка наличия данных
+        final hasDataCheck = await db.query(
+          'notes',
+          where: 'database_id = ?',
+          whereArgs: [databaseId],
+          limit: 1,
+        );
+        
+        if (hasDataCheck.isEmpty) {
+          // Проверяем другие таблицы
+          final folderCheck = await db.query(
+            'folders',
+            where: 'database_id = ?',
+            whereArgs: [databaseId],
+            limit: 1,
+          );
+          
+          if (folderCheck.isEmpty) {
+            print('Таблицы для базы $databaseId уже пусты, пропускаем очистку');
+            return;
+          }
+        }
+        
+        // Если передана транзакция, используем её, иначе создаем новую
+        if (transaction != null) {
+          await _performTableClear(transaction, databaseId);
+        } else {
+          await db.transaction((txn) async {
+            await _performTableClear(txn, databaseId);
+          });
+        }
+        
+        print('Очищены таблицы для базы $databaseId');
+      } catch (e) {
+        print('Ошибка при очистке таблиц для базы $databaseId: $e');
+        // Не выбрасываем исключение, чтобы не прерывать работу приложения
       }
-      
-      // Если передана транзакция, используем её, иначе создаем новую
-      if (transaction != null) {
-        await _performTableClear(transaction, databaseId);
-      } else {
-        await db.transaction((txn) async {
-          await _performTableClear(txn, databaseId);
-        });
-      }
-      
-      print('Очищены таблицы для базы $databaseId');
-    } catch (e) {
-      print('Ошибка при очистке таблиц для базы $databaseId: $e');
-      // Не выбрасываем исключение, чтобы не прерывать работу приложения
-    }
+    });
   }
   
   /// Вспомогательный метод для выполнения очистки таблиц в транзакции
@@ -954,7 +1100,7 @@ class DatabaseHelper {
       );
       
       if (result.isNotEmpty) {
-        return result.first['image_data'] as Uint8List;
+        return result.first['image_data'] as Uint8List?;
       }
       
       // Если изображение не найдено, попробуем найти его во всех базах
@@ -1031,53 +1177,157 @@ class DatabaseHelper {
   }
 
   Future<void> insertFolderForBackup(Map<String, dynamic> folder, [Transaction? txn]) async {
-    if (txn != null) {
-      await txn.insert('folders', folder);
-    } else {
-      final db = await database;
-      await db.insert('folders', folder);
+    try {
+      if (txn != null) {
+        await txn.insert('folders', folder);
+      } else {
+        final db = await database;
+        await db.insert('folders', folder);
+      }
+    } catch (e) {
+      // Обрабатываем ошибки уникальных ограничений
+      if (e.toString().contains('UNIQUE constraint failed') || 
+          e.toString().contains('UNIQUE') ||
+          e.toString().contains('PRIMARY KEY')) {
+        print('Конфликт уникальности при вставке папки: ${folder['name']}, пытаемся обновить');
+        
+        try {
+          // Пытаемся обновить существующую запись
+          if (folder['id'] != null) {
+            if (txn != null) {
+              await txn.update(
+                'folders',
+                folder,
+                where: 'id = ?',
+                whereArgs: [folder['id']],
+              );
+            } else {
+              final db = await database;
+              await db.update(
+                'folders',
+                folder,
+                where: 'id = ?',
+                whereArgs: [folder['id']],
+              );
+            }
+            print('Папка успешно обновлена: ${folder['name']}');
+          } else {
+            print('Пропускаем папку без ID: ${folder['name']}');
+          }
+        } catch (updateError) {
+          print('Ошибка при обновлении папки: $updateError');
+        }
+      } else {
+        print('Ошибка при вставке папки: $e');
+        rethrow;
+      }
     }
   }
 
   Future<void> insertNoteForBackup(Map<String, dynamic> note, [Transaction? txn]) async {
     final preparedNote = BackupData.prepareForSqlite(note);
-    if (txn != null) {
-      await txn.insert('notes', preparedNote);
-    } else {
-      final db = await database;
-      await db.insert('notes', preparedNote);
+    
+    try {
+      if (txn != null) {
+        await txn.insert('notes', preparedNote);
+      } else {
+        final db = await database;
+        await db.insert('notes', preparedNote);
+      }
+    } catch (e) {
+      // Обрабатываем ошибки уникальных ограничений
+      if (e.toString().contains('UNIQUE constraint failed') || 
+          e.toString().contains('UNIQUE') ||
+          e.toString().contains('PRIMARY KEY')) {
+        print('Конфликт уникальности при вставке заметки: ${preparedNote['title']}, пытаемся обновить');
+        
+        try {
+          // Пытаемся обновить существующую запись
+          if (preparedNote['id'] != null) {
+            if (txn != null) {
+              await txn.update(
+                'notes',
+                preparedNote,
+                where: 'id = ?',
+                whereArgs: [preparedNote['id']],
+              );
+            } else {
+              final db = await database;
+              await db.update(
+                'notes',
+                preparedNote,
+                where: 'id = ?',
+                whereArgs: [preparedNote['id']],
+              );
+            }
+            print('Заметка успешно обновлена: ${preparedNote['title']}');
+          } else {
+            print('Пропускаем заметку без ID: ${preparedNote['title']}');
+          }
+        } catch (updateError) {
+          print('Ошибка при обновлении заметки: $updateError');
+        }
+      } else {
+        print('Ошибка при вставке заметки: $e');
+        rethrow;
+      }
     }
   }
 
   Future<void> insertScheduleEntryForBackup(Map<String, dynamic> entry, [Transaction? txn]) async {
     final preparedEntry = BackupData.prepareForSqlite(entry);
     
-    // Убедимся, что database_id установлен корректно
-    if (preparedEntry['database_id'] == null || preparedEntry['database_id'] == '') {
-      print('Предупреждение: database_id не установлен для записи расписания при восстановлении');
-      return; // Пропускаем запись без database_id
+    // Для персональных резервных копий database_id может быть null - это нормально
+    // Пропускаем только если это явно пустая строка (что указывает на ошибку)
+    if (preparedEntry['database_id'] == '') {
+      print('Предупреждение: database_id установлен как пустая строка для записи расписания при восстановлении');
+      return; // Пропускаем запись с пустым database_id
     }
     
     try {
       if (txn != null) {
-        await txn.insert('schedule_entries', preparedEntry);
+        // Используем INSERT OR REPLACE для автоматической замены дубликатов
+        await txn.rawInsert('''
+          INSERT OR REPLACE INTO schedule_entries 
+          (id, time, date, note, dynamic_fields_json, recurrence_json, database_id, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', [
+          preparedEntry['id'],
+          preparedEntry['time'],
+          preparedEntry['date'],
+          preparedEntry['note'],
+          preparedEntry['dynamic_fields_json'],
+          preparedEntry['recurrence_json'],
+          preparedEntry['database_id'],
+          preparedEntry['created_at'],
+          preparedEntry['updated_at'],
+        ]);
       } else {
         final db = await database;
-        await db.insert('schedule_entries', preparedEntry);
+        await db.rawInsert('''
+          INSERT OR REPLACE INTO schedule_entries 
+          (id, time, date, note, dynamic_fields_json, recurrence_json, database_id, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', [
+          preparedEntry['id'],
+          preparedEntry['time'],
+          preparedEntry['date'],
+          preparedEntry['note'],
+          preparedEntry['dynamic_fields_json'],
+          preparedEntry['recurrence_json'],
+          preparedEntry['database_id'],
+          preparedEntry['created_at'],
+          preparedEntry['updated_at'],
+        ]);
       }
     } catch (e) {
       print('Ошибка при вставке записи расписания: $e');
       print('Данные записи: ${preparedEntry.toString()}');
       
-      // Пробуем более безопасный способ вставки
+      // Пробуем более безопасный способ вставки без ID (автоинкремент)
       try {
-        // Создаем копию с минимально необходимыми полями
-        final safeEntry = {
-          'date': preparedEntry['date'] ?? '',
-          'time': preparedEntry['time'] ?? '',
-          'note': preparedEntry['note'] ?? '',
-          'database_id': preparedEntry['database_id'],
-        };
+        final safeEntry = Map<String, dynamic>.from(preparedEntry);
+        safeEntry.remove('id'); // Убираем ID для автоинкремента
         
         if (txn != null) {
           await txn.insert('schedule_entries', safeEntry);
@@ -1085,45 +1335,131 @@ class DatabaseHelper {
           final db = await database;
           await db.insert('schedule_entries', safeEntry);
         }
-        print('Запись расписания успешно вставлена упрощенным способом');
+        print('Запись расписания успешно вставлена без конкретного ID');
       } catch (fallbackError) {
-        print('Не удалось вставить запись расписания даже упрощенным способом: $fallbackError');
+        print('Не удалось вставить запись расписания даже без ID: $fallbackError');
       }
     }
   }
 
   Future<void> insertPinboardNoteForBackup(Map<String, dynamic> note, [Transaction? txn]) async {
     final preparedNote = BackupData.prepareForSqlite(note);
-    if (txn != null) {
-      await txn.insert('pinboard_notes', preparedNote);
-    } else {
-      final db = await database;
-      await db.insert('pinboard_notes', preparedNote);
+    
+    try {
+      if (txn != null) {
+        await txn.insert('pinboard_notes', preparedNote);
+      } else {
+        final db = await database;
+        await db.insert('pinboard_notes', preparedNote);
+      }
+    } catch (e) {
+      // Обрабатываем ошибки уникальных ограничений
+      if (e.toString().contains('UNIQUE constraint failed') || 
+          e.toString().contains('UNIQUE') ||
+          e.toString().contains('PRIMARY KEY')) {
+        print('Конфликт уникальности при вставке заметки на доске: ${preparedNote['title']}, пытаемся обновить');
+        
+        try {
+          // Пытаемся обновить существующую запись
+          if (preparedNote['id'] != null) {
+            if (txn != null) {
+              await txn.update(
+                'pinboard_notes',
+                preparedNote,
+                where: 'id = ?',
+                whereArgs: [preparedNote['id']],
+              );
+            } else {
+              final db = await database;
+              await db.update(
+                'pinboard_notes',
+                preparedNote,
+                where: 'id = ?',
+                whereArgs: [preparedNote['id']],
+              );
+            }
+            print('Заметка на доске успешно обновлена: ${preparedNote['title']}');
+          } else {
+            print('Пропускаем заметку на доске без ID: ${preparedNote['title']}');
+          }
+        } catch (updateError) {
+          print('Ошибка при обновлении заметки на доске: $updateError');
+        }
+      } else {
+        print('Ошибка при вставке заметки на доске: $e');
+        rethrow;
+      }
     }
   }
 
   Future<void> insertConnectionForBackup(Map<String, dynamic> connection, [Transaction? txn]) async {
     final preparedConnection = BackupData.prepareForSqlite(connection);
-    if (txn != null) {
-      await txn.insert('connections', preparedConnection);
-    } else {
-      final db = await database;
-      await db.insert('connections', preparedConnection);
+    
+    try {
+      if (txn != null) {
+        await txn.insert('connections', preparedConnection);
+      } else {
+        final db = await database;
+        await db.insert('connections', preparedConnection);
+      }
+    } catch (e) {
+      // Обрабатываем ошибки уникальных ограничений
+      if (e.toString().contains('UNIQUE constraint failed') || 
+          e.toString().contains('UNIQUE') ||
+          e.toString().contains('PRIMARY KEY')) {
+        print('Конфликт уникальности при вставке соединения: ${preparedConnection['name']}, пытаемся обновить');
+        
+        try {
+          // Пытаемся обновить существующую запись
+          if (preparedConnection['id'] != null) {
+            if (txn != null) {
+              await txn.update(
+                'connections',
+                preparedConnection,
+                where: 'id = ?',
+                whereArgs: [preparedConnection['id']],
+              );
+            } else {
+              final db = await database;
+              await db.update(
+                'connections',
+                preparedConnection,
+                where: 'id = ?',
+                whereArgs: [preparedConnection['id']],
+              );
+            }
+            print('Соединение успешно обновлено: ${preparedConnection['name']}');
+          } else {
+            print('Пропускаем соединение без ID: ${preparedConnection['name']}');
+          }
+        } catch (updateError) {
+          print('Ошибка при обновлении соединения: $updateError');
+        }
+      } else {
+        print('Ошибка при вставке соединения: $e');
+        rethrow;
+      }
     }
   }
 
   Future<void> insertImageForBackup(int noteId, String fileName, Uint8List imageData, [Transaction? txn]) async {
-    final data = {
-      'note_id': noteId,
-      'file_name': fileName,
-      'image_data': imageData,
-    };
-    
-    if (txn != null) {
-      await txn.insert('note_images', data);
-    } else {
-      final db = await database;
-      await db.insert('note_images', data);
+    try {
+      if (txn != null) {
+        // Используем INSERT OR REPLACE для автоматической замены дубликатов
+        await txn.rawInsert('''
+          INSERT OR REPLACE INTO note_images (note_id, file_name, image_data)
+          VALUES (?, ?, ?)
+        ''', [noteId, fileName, imageData]);
+      } else {
+        final db = await database;
+        await db.rawInsert('''
+          INSERT OR REPLACE INTO note_images (note_id, file_name, image_data)
+          VALUES (?, ?, ?)
+        ''', [noteId, fileName, imageData]);
+      }
+    } catch (e) {
+      print('Ошибка при вставке изображения $fileName для заметки $noteId при восстановлении: $e');
+      rethrow;
     }
   }
 
@@ -1257,55 +1593,18 @@ class DatabaseHelper {
   }
 
   Future<void> restoreFromBackup(BackupData backup, [String? databaseId]) async {
-    try {
-      // Закрываем и вновь открываем базу данных для избежания блокировок
-      bool needsReopen = true;
-      try {
-        await closeDatabase();
-        print('База данных закрыта перед восстановлением из резервной копии');
-      } catch (e) {
-        print('Ошибка при закрытии базы данных: $e');
-        needsReopen = false;
-      }
-      
-      if (needsReopen) {
-        try {
-          await reopenDatabase();
-        } catch (e) {
-          print('Ошибка при повторном открытии базы данных: $e');
-        }
-      }
+    return await _safeDbOperation(() async {
+      print('Начало восстановления из резервной копии для базы ${databaseId ?? "локальной"}');
       
       print('Данные для восстановления: папок - ${backup.folders.length}, ' +
             'заметок - ${backup.notes.length}, ' +
-            'записей расписания - ${backup.scheduleEntries.length}');
-      
-      // Проверяем изображения в резервной копии
-      if (backup.noteImages.isNotEmpty) {
-        print('Изображений в резервной копии: ${backup.noteImages.length}');
-        print('Проверка структуры данных изображений:');
-        for (int i = 0; i < math.min(3, backup.noteImages.length); i++) {
-          var image = backup.noteImages[i];
-          String fileNameInfo = image['file_name'] ?? 'unknown';
-          int noteId = image['note_id'] ?? 0;
-          
-          String dataTypeInfo = 'null';
-          int dataSize = 0;
-          
-          if (image['image_data'] != null) {
-            dataTypeInfo = image['image_data'].runtimeType.toString();
-            if (image['image_data'] is Uint8List) {
-              dataSize = (image['image_data'] as Uint8List).length;
-            }
-          }
-          
-          print('  Изображение $i: note_id=$noteId, file_name=$fileNameInfo, тип данных=$dataTypeInfo, размер=$dataSize');
-        }
-      }
+            'записей расписания - ${backup.scheduleEntries.length}, ' +
+            'изображений - ${backup.noteImages.length}');
       
       final db = await database;
-      await db.transaction((txn) async {
-        try {
+      
+      try {
+        await db.transaction((txn) async {
           // Начинаем очистку таблиц
           print('Начало очистки таблиц для базы $databaseId');
           
@@ -1337,87 +1636,118 @@ class DatabaseHelper {
           }
           print('Очищены таблицы для базы $databaseId');
           
-          // Восстанавливаем данные
+          // Счетчики для отслеживания успешно восстановленных элементов
+          int restoredFolders = 0;
+          int restoredNotes = 0;
+          int restoredSchedule = 0;
+          int restoredPinboard = 0;
+          int restoredConnections = 0;
+          int restoredImages = 0;
+          
+          // Восстанавливаем папки с обработкой ошибок
           print('Восстановление папок...');
           for (var folder in backup.folders) {
-            if (databaseId != null) {
-              folder['database_id'] = databaseId;
-            } else {
-              folder.remove('database_id');
+            try {
+              if (databaseId != null) {
+                folder['database_id'] = databaseId;
+              } else {
+                folder.remove('database_id');
+              }
+              await insertFolderForBackup(folder, txn);
+              restoredFolders++;
+            } catch (e) {
+              print('Ошибка при восстановлении папки ${folder['name']}: $e');
             }
-            await insertFolderForBackup(folder, txn);
           }
           
+          // Восстанавливаем заметки с обработкой ошибок
           print('Восстановление заметок...');
           for (var note in backup.notes) {
-            if (databaseId != null) {
-              note['database_id'] = databaseId;
-            } else {
-              note.remove('database_id');
+            try {
+              if (databaseId != null) {
+                note['database_id'] = databaseId;
+              } else {
+                note.remove('database_id');
+              }
+              await insertNoteForBackup(note, txn);
+              restoredNotes++;
+            } catch (e) {
+              print('Ошибка при восстановлении заметки ${note['title']}: $e');
             }
-            await insertNoteForBackup(note, txn);
           }
           
-          // Сохраняем количество записей расписания перед восстановлением
-          int scheduleEntryCount = backup.scheduleEntries.length;
-          
+          // Восстанавливаем записи расписания с обработкой ошибок
           print('Восстановление записей расписания...');
           for (var entry in backup.scheduleEntries) {
-            if (databaseId != null) {
-              entry['database_id'] = databaseId;
-            } else {
-              entry.remove('database_id');
+            try {
+              if (databaseId != null) {
+                entry['database_id'] = databaseId;
+              } else {
+                entry.remove('database_id');
+              }
+              await insertScheduleEntryForBackup(entry, txn);
+              restoredSchedule++;
+            } catch (e) {
+              print('Ошибка при восстановлении записи расписания: $e');
             }
-            await insertScheduleEntryForBackup(entry, txn);
           }
           
+          // Восстанавливаем заметки на доске с обработкой ошибок
           print('Восстановление заметок на доске...');
           for (var note in backup.pinboardNotes) {
-            if (databaseId != null) {
-              note['database_id'] = databaseId;
-            } else {
-              note.remove('database_id');
+            try {
+              if (databaseId != null) {
+                note['database_id'] = databaseId;
+              } else {
+                note.remove('database_id');
+              }
+              await insertPinboardNoteForBackup(note, txn);
+              restoredPinboard++;
+            } catch (e) {
+              print('Ошибка при восстановлении заметки на доске: $e');
             }
-            await insertPinboardNoteForBackup(note, txn);
           }
           
+          // Восстанавливаем соединения с обработкой ошибок
           print('Восстановление соединений...');
           for (var connection in backup.connections) {
-            if (databaseId != null) {
-              connection['database_id'] = databaseId;
-            } else {
-              connection.remove('database_id');
+            try {
+              if (databaseId != null) {
+                connection['database_id'] = databaseId;
+              } else {
+                connection.remove('database_id');
+              }
+              await insertConnectionForBackup(connection, txn);
+              restoredConnections++;
+            } catch (e) {
+              print('Ошибка при восстановлении соединения: $e');
             }
-            await insertConnectionForBackup(connection, txn);
           }
           
-          // Восстановление изображений
+          // Восстановление изображений с обработкой ошибок
           if (backup.noteImages.isNotEmpty) {
             print('Восстановление изображений (всего: ${backup.noteImages.length})...');
-            int restoredImages = 0;
-            int skippedImages = 0;
             
             for (var image in backup.noteImages) {
-              if (image['image_data'] == null || 
-                 (image['image_data'] is Uint8List && (image['image_data'] as Uint8List).isEmpty)) {
-                skippedImages++;
-                continue;
-              }
-              
               try {
+                if (image['image_data'] == null || 
+                   (image['image_data'] is Uint8List && (image['image_data'] as Uint8List).isEmpty)) {
+                  continue;
+                }
+                
                 Uint8List imageData;
                 if (image['image_data'] is Uint8List) {
                   imageData = image['image_data'] as Uint8List;
                 } else if (image['image_data'] is List) {
                   imageData = Uint8List.fromList(List<int>.from(image['image_data']));
+                } else if (image['image_data'] is String) {
+                  imageData = base64Decode(image['image_data']);
                 } else {
                   print('  Неизвестный тип данных изображения: ${image['image_data'].runtimeType}');
-                  skippedImages++;
                   continue;
                 }
                 
                 if (imageData.isNotEmpty) {
-                  print('  Преобразовано изображение из списка, размер: ${imageData.length} байт');
                   await insertImageForBackup(
                     image['note_id'], 
                     image['file_name'], 
@@ -1425,76 +1755,37 @@ class DatabaseHelper {
                     txn
                   );
                   restoredImages++;
-                } else {
-                  print('  Пустые данные изображения');
-                  skippedImages++;
                 }
               } catch (e) {
-                print('  Ошибка при восстановлении изображения: $e');
-                skippedImages++;
+                print('  Ошибка при восстановлении изображения ${image['file_name']}: $e');
               }
             }
-            
-            print('Итоги восстановления изображений: восстановлено $restoredImages, пропущено $skippedImages');
           }
           
-          // Проверяем количество восстановленных записей расписания
-          final scheduleEntries = await txn.query(
-            'schedule_entries',
-            where: databaseId != null ? 'database_id = ?' : 'database_id IS NULL',
-            whereArgs: databaseId != null ? [databaseId] : null,
-          );
-          
-          if (scheduleEntries.length < scheduleEntryCount) {
-            print('ВНИМАНИЕ: Восстановлено ${scheduleEntries.length} записей расписания из $scheduleEntryCount ожидаемых');
-            
-            // Повторная попытка восстановления записей расписания с более безопасным подходом
-            if (backup.scheduleEntries.isNotEmpty) {
-              print('Повторное восстановление записей расписания...');
-              
-              for (var entry in backup.scheduleEntries) {
-                try {
-                  if (databaseId != null) {
-                    entry['database_id'] = databaseId;
-                  } else {
-                    entry.remove('database_id');
-                  }
-                  
-                  // Создаем минимальную версию записи
-                  final safeEntry = {
-                    'date': entry['date'] ?? '',
-                    'time': entry['time'] ?? '',
-                    'note': entry['note'] ?? '',
-                    'database_id': databaseId,
-                  };
-                  
-                  await txn.insert('schedule_entries', safeEntry);
-                } catch (e) {
-                  print('Ошибка при повторной вставке записи расписания: $e');
-                }
-              }
-              
-              // Проверяем окончательное количество
-              final finalScheduleEntries = await txn.query(
-                'schedule_entries',
-                where: databaseId != null ? 'database_id = ?' : 'database_id IS NULL',
-                whereArgs: databaseId != null ? [databaseId] : null,
-              );
-              
-              print('После повторной вставки восстановлено ${finalScheduleEntries.length} записей расписания');
-            }
-          }
+          print('Итоги восстановления:');
+          print('  Папок: $restoredFolders из ${backup.folders.length}');
+          print('  Заметок: $restoredNotes из ${backup.notes.length}');
+          print('  Записей расписания: $restoredSchedule из ${backup.scheduleEntries.length}');
+          print('  Заметок на доске: $restoredPinboard из ${backup.pinboardNotes.length}');
+          print('  Соединений: $restoredConnections из ${backup.connections.length}');
+          print('  Изображений: $restoredImages из ${backup.noteImages.length}');
+        });
+        
+        print('Восстановление из резервной копии успешно завершено');
+        
+        // ИСПРАВЛЕНИЕ: Синхронное уведомление об изменении базы данных для гарантированного обновления UI
+        try {
+          _notifyDatabaseChanged();
+          print('Уведомление об изменении базы данных отправлено');
         } catch (e) {
-          print('Ошибка при восстановлении данных: $e');
-          throw e; // Пробрасываем ошибку для отката транзакции
+          print('Ошибка при уведомлении об изменении базы данных: $e');
         }
-      });
-      
-      print('Восстановление из резервной копии успешно завершено');
-    } catch (e) {
-      print('Критическая ошибка при восстановлении из резервной копии: $e');
-      throw e;
-    }
+        
+      } catch (e) {
+        print('Критическая ошибка при восстановлении из резервной копии: $e');
+        throw e;
+      }
+    });
   }
 
   Future<void> addSharedDatabase(SharedDatabase database) async {
@@ -1528,100 +1819,163 @@ class DatabaseHelper {
   }
 
   Future<void> importDatabase(String databaseId, Map<String, dynamic> data) async {
-    final db = await database;
-    
-    // Добавляем логирование для диагностики
-    print('Импорт данных для базы данных $databaseId');
-    
-    try {
-      await db.transaction((txn) async {
-        // Очищаем существующие данные для этой базы
-        await clearDatabaseTables(databaseId, txn);
-  
-        int foldersCount = 0;
-        int notesCount = 0;
-        int scheduleCount = 0;
-        int pinboardCount = 0;
-        int connectionsCount = 0;
-        
-        // Импортируем папки
-        if (data['folders'] != null && data['folders'] is List) {
-          for (var folder in (data['folders'] as List)) {
-            folder['database_id'] = databaseId;
-            await insertFolderForBackup(folder, txn);
-            foldersCount++;
-          }
-        }
-  
-        // Импортируем заметки
-        if (data['notes'] != null && data['notes'] is List) {
-          for (var note in (data['notes'] as List)) {
-            note['database_id'] = databaseId;
-            await insertNoteForBackup(note, txn);
-            notesCount++;
-          }
-        }
-  
-        // Импортируем записи расписания
-        if (data['schedule_entries'] != null && data['schedule_entries'] is List) {
-          for (var entry in (data['schedule_entries'] as List)) {
-            entry['database_id'] = databaseId;
-            await insertScheduleEntryForBackup(entry, txn);
-            scheduleCount++;
-          }
-        }
-  
-        // Импортируем заметки на доске
-        if (data['pinboard_notes'] != null && data['pinboard_notes'] is List) {
-          for (var note in (data['pinboard_notes'] as List)) {
-            note['database_id'] = databaseId;
-            await insertPinboardNoteForBackup(note, txn);
-            pinboardCount++;
-          }
-        }
-  
-        // Импортируем соединения
-        if (data['connections'] != null && data['connections'] is List) {
-          for (var connection in (data['connections'] as List)) {
-            connection['database_id'] = databaseId;
-            await insertConnectionForBackup(connection, txn);
-            connectionsCount++;
-          }
-        }
-        
-        print('Импортировано: папок - $foldersCount, заметок - $notesCount, записей расписания - $scheduleCount, ' +
-              'заметок на доске - $pinboardCount, соединений - $connectionsCount');
-        
-        // Если данных нет, создаем базовую структуру
-        if (foldersCount == 0 && notesCount == 0) {
-          print('Создание базовой структуры для пустой базы $databaseId');
-          
-          // Вставляем общую папку
-          final folderId = await txn.insert('folders', {
-            'name': 'Общие заметки',
-            'color': 0xFF4CAF50,
-            'is_expanded': 1,
-            'database_id': databaseId,
-          });
-          
-          // Создаем демо-заметку
-          await txn.insert('notes', {
-            'title': 'Совместная работа',
-            'content': 'Это заметка для совместной работы. Она будет синхронизироваться с другими участниками.',
-            'folder_id': folderId,
-            'created_at': DateTime.now().toIso8601String(),
-            'updated_at': DateTime.now().toIso8601String(),
-            'database_id': databaseId,
-          });
-        }
-      });
+    return await _safeDbOperation(() async {
+      print('Импорт данных для базы данных $databaseId');
       
-      // Уведомляем об изменении базы данных
-      _notifyDatabaseChanged();
-    } catch (e) {
-      print('Ошибка при импорте данных: $e');
-      throw e;
-    }
+      final db = await database;
+      
+      try {
+        await db.transaction((txn) async {
+          // Очищаем существующие данные для этой базы
+          await clearDatabaseTables(databaseId, txn);
+    
+          int foldersCount = 0;
+          int notesCount = 0;
+          int scheduleCount = 0;
+          int pinboardCount = 0;
+          int connectionsCount = 0;
+          int imagesCount = 0;
+          
+          // Импортируем папки с обработкой ошибок
+          if (data['folders'] != null && data['folders'] is List) {
+            print('Импорт папок: ${data['folders'].length}');
+            for (var folder in (data['folders'] as List)) {
+              try {
+                folder['database_id'] = databaseId;
+                await insertFolderForBackup(folder, txn);
+                foldersCount++;
+              } catch (e) {
+                print('Ошибка при импорте папки: $e');
+              }
+            }
+          }
+    
+          // Импортируем заметки с обработкой ошибок
+          if (data['notes'] != null && data['notes'] is List) {
+            print('Импорт заметок: ${data['notes'].length}');
+            for (var note in (data['notes'] as List)) {
+              try {
+                note['database_id'] = databaseId;
+                await insertNoteForBackup(note, txn);
+                notesCount++;
+              } catch (e) {
+                print('Ошибка при импорте заметки: $e');
+              }
+            }
+          }
+    
+          // Импортируем записи расписания с обработкой ошибок
+          if (data['schedule_entries'] != null && data['schedule_entries'] is List) {
+            print('Импорт записей расписания: ${data['schedule_entries'].length}');
+            for (var entry in (data['schedule_entries'] as List)) {
+              try {
+                entry['database_id'] = databaseId;
+                await insertScheduleEntryForBackup(entry, txn);
+                scheduleCount++;
+              } catch (e) {
+                print('Ошибка при импорте записи расписания: $e');
+              }
+            }
+          }
+    
+          // Импортируем заметки на доске с обработкой ошибок
+          if (data['pinboard_notes'] != null && data['pinboard_notes'] is List) {
+            print('Импорт заметок на доске: ${data['pinboard_notes'].length}');
+            for (var note in (data['pinboard_notes'] as List)) {
+              try {
+                note['database_id'] = databaseId;
+                await insertPinboardNoteForBackup(note, txn);
+                pinboardCount++;
+              } catch (e) {
+                print('Ошибка при импорте заметки на доске: $e');
+              }
+            }
+          }
+    
+          // Импортируем соединения с обработкой ошибок
+          if (data['connections'] != null && data['connections'] is List) {
+            print('Импорт соединений: ${data['connections'].length}');
+            for (var connection in (data['connections'] as List)) {
+              try {
+                connection['database_id'] = databaseId;
+                await insertConnectionForBackup(connection, txn);
+                connectionsCount++;
+              } catch (e) {
+                print('Ошибка при импорте соединения: $e');
+              }
+            }
+          }
+          
+          // Импортируем изображения с обработкой ошибок
+          if (data['note_images'] != null && data['note_images'] is List) {
+            print('Импорт изображений: ${data['note_images'].length}');
+            for (var image in (data['note_images'] as List)) {
+              try {
+                await insertImageForBackup(
+                  image['note_id'],
+                  image['file_name'],
+                  image['image_data'] is Uint8List 
+                    ? image['image_data'] 
+                    : Uint8List.fromList(List<int>.from(image['image_data'])),
+                  txn
+                );
+                imagesCount++;
+              } catch (e) {
+                print('Ошибка при импорте изображения: $e');
+              }
+            }
+          }
+          
+          print('Импортировано: папок - $foldersCount, заметок - $notesCount, ' +
+                'записей расписания - $scheduleCount, заметок на доске - $pinboardCount, ' +
+                'соединений - $connectionsCount, изображений - $imagesCount');
+          
+          // Если данных нет, создаем базовую структуру
+          if (foldersCount == 0 && notesCount == 0) {
+            print('Создание базовой структуры для пустой базы $databaseId');
+            
+            try {
+              // Вставляем общую папку
+              final folderId = await txn.insert('folders', {
+                'name': 'Общие заметки',
+                'color': 0xFF4CAF50,
+                'is_expanded': 1,
+                'database_id': databaseId,
+              });
+              
+              // Создаем демо-заметку
+              await txn.insert('notes', {
+                'title': 'Совместная работа',
+                'content': 'Это заметка для совместной работы. Она будет синхронизироваться с другими участниками.',
+                'folder_id': folderId,
+                'created_at': DateTime.now().toIso8601String(),
+                'updated_at': DateTime.now().toIso8601String(),
+                'database_id': databaseId,
+              });
+              
+              print('Базовая структура создана успешно');
+            } catch (e) {
+              print('Ошибка при создании базовой структуры: $e');
+            }
+          }
+        });
+        
+        print('Импорт данных для базы $databaseId завершен успешно');
+        
+        // Уведомляем об изменении базы данных
+        Future.microtask(() {
+          try {
+            _notifyDatabaseChanged();
+          } catch (e) {
+            print('Ошибка при уведомлении об изменении базы данных: $e');
+          }
+        });
+        
+      } catch (e) {
+        print('Критическая ошибка при импорте данных: $e');
+        throw e;
+      }
+    });
   }
 
   Future<void> initializeSharedTables(String databaseId, Transaction txn) async {
@@ -1662,7 +2016,9 @@ class DatabaseHelper {
         note TEXT,
         dynamic_fields_json TEXT,
         recurrence_json TEXT,
-        database_id TEXT
+        database_id TEXT,
+        created_at TEXT,
+        updated_at TEXT
       )
     ''');
 
@@ -1704,7 +2060,9 @@ class DatabaseHelper {
         note_id INTEGER NOT NULL,
         file_name TEXT NOT NULL,
         image_data BLOB NOT NULL,
-        FOREIGN KEY (note_id) REFERENCES notes (id) ON DELETE CASCADE
+        database_id TEXT,
+        FOREIGN KEY (note_id) REFERENCES notes (id) ON DELETE CASCADE,
+        UNIQUE(note_id, file_name)
       )
     ''');
 
@@ -1759,111 +2117,123 @@ class DatabaseHelper {
   }
 
   Future<void> initializeSharedDatabase(String databaseId) async {
-    try {
-      final db = await database;
+    return await _safeDbOperation(() async {
       print('Инициализация совместной базы данных: $databaseId');
       
-      // Проверяем, существует ли уже запись для этой базы
-      final existingResult = await db.query(
-        'shared_databases',
-        where: 'server_id = ?',
-        whereArgs: [databaseId],
-      ).timeout(Duration(seconds: 5), onTimeout: () => []);
+      final db = await database;
       
-      final existing = existingResult;
+      // Проверяем существующие записи с обработкой ошибок
+      try {
+        final existing = await db.query(
+          'shared_databases',
+          where: 'server_id = ?',
+          whereArgs: [databaseId],
+          limit: 1,
+        );
 
-      if (existing.isEmpty) {
-        // Создаем новую запись в таблице shared_databases в отдельной транзакции
-        await db.transaction((txn) async {
-          await txn.insert('shared_databases', {
-            'server_id': databaseId,
-            'name': 'Shared Database $databaseId',
-            'owner_id': '', // Будет заполнено позже
-            'created_at': DateTime.now().toIso8601String(),
-            'collaborators': '{}',
-            'database_path': 'shared_$databaseId.db',
-            'is_owner': 0,
-            'last_sync': DateTime.now().toIso8601String(),
-          });
-        }).timeout(Duration(seconds: 5), onTimeout: () {
-          print('Превышено время ожидания при создании записи для базы $databaseId');
-          return;
-        });
-        
-        print('Создана запись в таблице shared_databases для базы $databaseId');
-      } else {
-        print('База $databaseId уже существует в таблице shared_databases');
-      }
-
-      // Проверяем, существуют ли данные для этой базы данных
-      final notesCountResult = await db.rawQuery(
-        'SELECT COUNT(*) FROM notes WHERE database_id = ? LIMIT 1', 
-        [databaseId]
-      ).timeout(Duration(seconds: 5), onTimeout: () => [{'COUNT(*)': 0}]);
-      
-      final notesCount = Sqflite.firstIntValue(notesCountResult) ?? 0;
-      
-      // Если данных нет, создаем минимальную структуру
-      if (notesCount == 0) {
-        print('Для базы $databaseId не найдено данных. Подготавливаем структуру...');
-        
-        // Проверяем, есть ли папки
-        final foldersCountResult = await db.rawQuery(
-          'SELECT COUNT(*) FROM folders WHERE database_id = ? LIMIT 1', 
-          [databaseId]
-        ).timeout(Duration(seconds: 5), onTimeout: () => [{'COUNT(*)': 0}]);
-        
-        final foldersCount = Sqflite.firstIntValue(foldersCountResult) ?? 0;
-        
-        // Если даже папок нет, создаем базовую структуру
-        if (foldersCount == 0) {
-          // Создаем папку в отдельной транзакции
-          await db.transaction((txn) async {
-            // Вставляем общую папку с явным ID
-            final folderId = await txn.insert('folders', {
-              'name': 'Общие заметки',
-              'color': 0xFF4CAF50,
-              'is_expanded': 1,
-              'database_id': databaseId,
-            });
-            
-            // Создаем демо-заметку для отображения примера совместной работы
-            await txn.insert('notes', {
-              'title': 'Совместная работа',
-              'content': 'Это заметка для совместной работы. Она будет синхронизироваться с другими участниками.',
-              'folder_id': folderId,
+        if (existing.isEmpty) {
+          // Создаем запись с обработкой уникальных ограничений
+          try {
+            await db.insert('shared_databases', {
+              'server_id': databaseId,
+              'name': 'Shared Database $databaseId',
+              'owner_id': '',
               'created_at': DateTime.now().toIso8601String(),
-              'updated_at': DateTime.now().toIso8601String(),
-              'database_id': databaseId,
+              'collaborators': '{}',
+              'database_path': 'shared_$databaseId.db',
+              'is_owner': 0,
+              'last_sync': DateTime.now().toIso8601String(),
             });
-          }).timeout(Duration(seconds: 5), onTimeout: () {
-            print('Превышено время ожидания при создании структуры для базы $databaseId');
-            return;
-          });
-          
-          print('Создана базовая структура для базы $databaseId');
+            print('Создана запись в таблице shared_databases для базы $databaseId');
+          } catch (insertError) {
+            if (insertError.toString().contains('UNIQUE constraint failed')) {
+              print('База $databaseId уже существует (конфликт уникальности)');
+            } else {
+              print('Ошибка создания записи для базы $databaseId: $insertError');
+            }
+          }
         } else {
-          print('База $databaseId содержит $foldersCount папок');
+          print('База $databaseId уже существует в таблице shared_databases');
         }
-      } else {
-        print('База $databaseId уже содержит $notesCount заметок');
+
+        // Проверяем наличие данных с ограничением количества запросов
+        final notesResult = await db.query(
+          'notes',
+          where: 'database_id = ?',
+          whereArgs: [databaseId],
+          limit: 1,
+        );
+        
+        // Создаем базовую структуру только если база полностью пустая
+        if (notesResult.isEmpty) {
+          final foldersResult = await db.query(
+            'folders',
+            where: 'database_id = ?',
+            whereArgs: [databaseId],
+            limit: 1,
+          );
+          
+          if (foldersResult.isEmpty) {
+            print('Создание минимальной структуры для пустой базы $databaseId');
+            
+            // Используем транзакцию для атомарности операций
+            await db.transaction((txn) async {
+              try {
+                final folderId = await txn.insert('folders', {
+                  'name': 'Общие заметки',
+                  'color': 0xFF4CAF50,
+                  'is_expanded': 1,
+                  'database_id': databaseId,
+                });
+                
+                await txn.insert('notes', {
+                  'title': 'Совместная работа',
+                  'content': 'Это заметка для совместной работы. Она будет синхронизироваться с другими участниками.',
+                  'folder_id': folderId,
+                  'created_at': DateTime.now().toIso8601String(),
+                  'updated_at': DateTime.now().toIso8601String(),
+                  'database_id': databaseId,
+                });
+                
+                print('Базовая структура создана для базы $databaseId');
+              } catch (e) {
+                print('Ошибка создания базовой структуры: $e');
+                // Не критично, продолжаем
+              }
+            });
+          }
+        } else {
+          print('База $databaseId уже содержит данные');
+        }
+        
+        // Обновляем время синхронизации с обработкой ошибок
+        try {
+          await db.update(
+            'shared_databases',
+            {'last_sync': DateTime.now().toIso8601String()},
+            where: 'server_id = ?',
+            whereArgs: [databaseId],
+          );
+        } catch (updateError) {
+          print('Ошибка обновления времени синхронизации: $updateError');
+        }
+        
+        print('Инициализация базы $databaseId завершена успешно');
+        
+      } catch (e) {
+        print('Ошибка при работе с базой данных во время инициализации: $e');
+        throw e;
       }
       
-      // Обновляем последнее время синхронизации
-      await db.update(
-        'shared_databases',
-        {'last_sync': DateTime.now().toIso8601String()},
-        where: 'server_id = ?',
-        whereArgs: [databaseId],
-      ).timeout(Duration(seconds: 5), onTimeout: () => 0);
-      
-      // Совершаем принудительное обновление данных в базе
-      _notifyDatabaseChanged();
-      
-    } catch (e) {
-      print('Ошибка при инициализации совместной базы данных: $e');
-      // Не перебрасываем исключение, чтобы приложение продолжало работать
-    }
+      // Асинхронное уведомление без блокировки
+      Future.microtask(() {
+        try {
+          _notifyDatabaseChanged();
+        } catch (e) {
+          print('Ошибка при уведомлении об изменении базы данных: $e');
+        }
+      });
+    });
   }
 
   Future<void> saveExportData(String databaseId, Map<String, dynamic> exportData) async {
@@ -2070,29 +2440,17 @@ class DatabaseHelper {
       return null;
     }
   }
-}
-
-// Класс Lock для синхронизации операций
-class Lock {
-  Completer<void>? _completer;
   
-  Future<T> synchronized<T>(Future<T> Function() action) async {
-    if (_completer != null) {
-      await _completer!.future;
-    }
-    
-    final completer = Completer<void>();
-    _completer = completer;
-    
+  // Метод для очистки кешированных данных (не влияет на базу данных)
+  Future<void> clearCache() async {
     try {
-      final result = await action();
-      completer.complete();
-      _completer = null;
-      return result;
+      print('Очистка кешированных данных DatabaseHelper');
+      // В текущей реализации кеширование данных минимально
+      // Этот метод может быть расширен, если добавится кеширование
+      print('Кеш успешно очищен');
     } catch (e) {
-      completer.complete();
-      _completer = null;
-      rethrow;
+      print('Ошибка при очистке кеша: $e');
+      // Не выбрасываем ошибку, так как это не критично
     }
   }
 } 

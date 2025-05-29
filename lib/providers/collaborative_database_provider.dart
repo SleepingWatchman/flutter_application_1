@@ -1246,23 +1246,23 @@ class CollaborativeDatabaseProvider extends ChangeNotifier {
           if (statusChanged) {
             print('Статус сервера изменен: ${status ? "доступен" : "недоступен"}');
             
-            // Если сервер стал доступен и мы используем совместную базу,
-            // запускаем синхронизацию
-            if (status && _isUsingSharedDatabase && _currentDatabaseId != null) {
-              // Запускаем синхронизацию с небольшой задержкой и защитой от ошибок
-              Future.delayed(Duration(seconds: 1), () {
-                try {
-                  syncDatabase().timeout(Duration(seconds: 20), onTimeout: () {
-                    print('Таймаут при автоматической синхронизации');
-                    return;
-                  }).catchError((e) {
-                    print('Ошибка автоматической синхронизации: $e');
-                  });
-                } catch (e) {
-                  print('Непредвиденная ошибка при автоматической синхронизации: $e');
-                }
-              });
-            }
+            // ОТКЛЮЧАЕМ автоматическую синхронизацию при восстановлении соединения
+            // Синхронизация будет запускаться только вручную пользователем
+            // if (status && _isUsingSharedDatabase && _currentDatabaseId != null) {
+            //   // Запускаем синхронизацию с небольшой задержкой и защитой от ошибок
+            //   Future.delayed(Duration(seconds: 1), () {
+            //     try {
+            //       syncDatabase().timeout(Duration(seconds: 20), onTimeout: () {
+            //         print('Таймаут при автоматической синхронизации');
+            //         return;
+            //       }).catchError((e) {
+            //         print('Ошибка автоматической синхронизации: $e');
+            //       });
+            //     } catch (e) {
+            //       print('Непредвиденная ошибка при автоматической синхронизации: $e');
+            //     }
+            //   });
+            // }
             
             notifyListeners();
           }

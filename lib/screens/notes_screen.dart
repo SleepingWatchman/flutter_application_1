@@ -6,20 +6,14 @@ import '../widgets/color_picker.dart';
 import '../utils/toast_utils.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:oktoast/oktoast.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'dart:io';
-import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
-import 'package:permission_handler/permission_handler.dart';
-import 'package:win32/win32.dart';
-import 'dart:ffi';
-import 'package:flutter_markdown/flutter_markdown.dart' show ElementBuilder;
 import 'dart:convert';
 import 'package:image_picker/image_picker.dart';
 import '../providers/database_provider.dart';
 import 'package:provider/provider.dart';
-import '../providers/collaborative_database_provider.dart';
+import '../providers/enhanced_collaborative_provider.dart';
 
 
 /// Экран заметок и папок с использованием БД для заметок
@@ -45,8 +39,14 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
   final FocusNode _noteContentFocusNode = FocusNode();
   final FocusNode _noteTitleFocusNode = FocusNode();
   bool _isLoading = false;
-  DateTime? _lastSave;
   bool _isActive = true;
+  bool _isDataLoaded = false; // ИСПРАВЛЕНИЕ: Флаг для предотвращения повторных загрузок
+  String? _lastLoadedDatabaseId; // ИСПРАВЛЕНИЕ: Отслеживание последней загруженной базы
+  DateTime? _lastSave; // ИСПРАВЛЕНИЕ: Переменная для отслеживания времени сохранения
+  
+  // ИСПРАВЛЕНИЕ: Сохраняем ссылки на провайдеры для безопасного dispose
+  DatabaseProvider? _databaseProvider;
+  EnhancedCollaborativeProvider? _enhancedCollaborativeProvider;
   
   // Кэш для отфильтрованных заметок
   Map<int?, List<Note>> _notesCache = {};
@@ -67,17 +67,37 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _loadData();
+    
+    // ИСПРАВЛЕНИЕ: Загружаем данные только один раз в initState
+    _loadDataIfNeeded();
+    
+    // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Подписываемся на изменения базы данных
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      
+      final dbProvider = Provider.of<DatabaseProvider>(context, listen: false);
+      dbProvider.addListener(_handleDatabaseChanges);
+      
+      final enhancedCollabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
+      enhancedCollabProvider.addListener(_handleCollaborativeDatabaseChanges);
+    });
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _loadData();
     
-    if (Provider.of<DatabaseProvider>(context, listen: false).needsUpdate) {
-      _loadData();
-      Provider.of<DatabaseProvider>(context, listen: false).resetUpdateFlag();
+    // ИСПРАВЛЕНИЕ: Сохраняем ссылки на провайдеры для безопасного dispose
+    _databaseProvider = Provider.of<DatabaseProvider>(context, listen: false);
+    _enhancedCollaborativeProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
+    
+    // ИСПРАВЛЕНИЕ: Загружаем данные только если есть флаг обновления
+    if (_databaseProvider!.needsUpdate) {
+      _forceReloadData();
+      _databaseProvider!.resetUpdateFlag();
+    } else {
+      // Загружаем данные только если они нужны
+      _loadDataIfNeeded();
     }
   }
 
@@ -88,6 +108,20 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
     _noteContentController.dispose();
     _noteContentFocusNode.dispose();
     _noteTitleFocusNode.dispose();
+    
+    // ИСПРАВЛЕНИЕ: Безопасное отписывание от изменений
+    try {
+      if (_databaseProvider != null) {
+        _databaseProvider!.removeListener(_handleDatabaseChanges);
+      }
+      
+      if (_enhancedCollaborativeProvider != null) {
+        _enhancedCollaborativeProvider!.removeListener(_handleCollaborativeDatabaseChanges);
+      }
+    } catch (e) {
+      print('Ошибка при отписке от изменений: $e');
+    }
+    
     super.dispose();
   }
 
@@ -106,19 +140,24 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
   }
 
   Future<void> _loadData() async {
+    // ИСПРАВЛЕНИЕ: Защита от повторных загрузок
+    if (_isLoading) {
+      print('Загрузка данных уже выполняется, пропускаем');
+      return;
+    }
     
     setState(() => _isLoading = true);
     try {
       // Получаем провайдеры для доступа к текущему database_id
       final databaseProvider = Provider.of<DatabaseProvider>(context, listen: false);
-      final collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
+      final enhancedCollabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
       
-      // Получаем текущий ID базы данных
-      final currentDatabaseId = collabProvider.isUsingSharedDatabase 
-          ? collabProvider.currentDatabaseId 
+      // ИСПРАВЛЕНИЕ: Используем ТОЛЬКО EnhancedCollaborativeProvider для определения текущей базы
+      final currentDatabaseId = enhancedCollabProvider.isUsingSharedDatabase 
+          ? enhancedCollabProvider.currentDatabaseId 
           : null;
       
-      print('Загрузка данных для базы: ${currentDatabaseId ?? "локальной"}');
+      print('Загрузка данных для базы: ${currentDatabaseId != null ? currentDatabaseId : "локальной"}');
       
       // Загружаем данные параллельно с учетом текущей базы
       final results = await Future.wait([
@@ -140,6 +179,9 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
         }
         
         _isLoading = false;
+        // ИСПРАВЛЕНИЕ: Устанавливаем флаги успешной загрузки
+        _isDataLoaded = true;
+        _lastLoadedDatabaseId = currentDatabaseId;
       });
     } catch (e) {
       print('Ошибка загрузки данных: $e');
@@ -188,9 +230,9 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
   Future<void> _createNote() async {
     try {
       // Получаем провайдер для доступа к текущему database_id
-      final collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
-      final currentDatabaseId = collabProvider.isUsingSharedDatabase 
-          ? collabProvider.currentDatabaseId 
+      final enhancedCollabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
+      final currentDatabaseId = enhancedCollabProvider.isUsingSharedDatabase 
+          ? enhancedCollabProvider.currentDatabaseId 
           : null;
       
       final now = DateTime.now();
@@ -348,9 +390,9 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
     if (result != null) {
       try {
         // Получаем провайдер для доступа к текущему database_id
-        final collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
-        final currentDatabaseId = collabProvider.isUsingSharedDatabase 
-            ? collabProvider.currentDatabaseId 
+        final enhancedCollabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
+        final currentDatabaseId = enhancedCollabProvider.isUsingSharedDatabase 
+            ? enhancedCollabProvider.currentDatabaseId 
             : null;
             
         final folder = Folder(
@@ -1506,5 +1548,64 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
       );
       await _dbHelper.updateNote(updatedNote);
     }
+  }
+
+  // Обработчик изменений базы данных
+  void _handleDatabaseChanges() {
+    if (mounted) {
+      // ОПТИМИЗИРОВАНО: Убираем избыточное логирование
+      // print('Обновление экрана заметок из-за изменений в базе данных');
+      
+      // ИСПРАВЛЕНИЕ: Загружаем данные только если база изменилась
+      final enhancedCollabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
+      final currentDatabaseId = enhancedCollabProvider.isUsingSharedDatabase 
+          ? enhancedCollabProvider.currentDatabaseId 
+          : null;
+      
+      // Проверяем, изменилась ли база данных
+      if (_lastLoadedDatabaseId != currentDatabaseId) {
+        _forceReloadData();
+      }
+    }
+  }
+  
+  // Обработчик изменений совместной базы данных
+  void _handleCollaborativeDatabaseChanges() {
+    if (mounted) {
+      // ОПТИМИЗИРОВАНО: Убираем избыточное логирование
+      // print('Обновление экрана заметок из-за изменений в совместной базе данных');
+      
+      // ИСПРАВЛЕНИЕ: Загружаем данные только при переключении базы
+      final enhancedCollabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
+      final currentDatabaseId = enhancedCollabProvider.isUsingSharedDatabase 
+          ? enhancedCollabProvider.currentDatabaseId 
+          : null;
+      
+      // Проверяем, изменилась ли база данных
+      if (_lastLoadedDatabaseId != currentDatabaseId) {
+        _forceReloadData();
+      }
+    }
+  }
+
+  // ИСПРАВЛЕНИЕ: Новый метод для условной загрузки данных
+  void _loadDataIfNeeded() {
+    final enhancedCollabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
+    final currentDatabaseId = enhancedCollabProvider.isUsingSharedDatabase 
+        ? enhancedCollabProvider.currentDatabaseId 
+        : null;
+    
+    // Загружаем данные только если база изменилась или данные еще не загружены
+    if (!_isDataLoaded || _lastLoadedDatabaseId != currentDatabaseId) {
+      _loadData();
+    }
+  }
+
+  // ИСПРАВЛЕНИЕ: Метод для принудительной перезагрузки
+  void _forceReloadData() {
+    _isDataLoaded = false;
+    _lastLoadedDatabaseId = null;
+    _notesCache.clear();
+    _loadData();
   }
 } 

@@ -5,7 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/user_model.dart';
 
 class AuthService {
-  static const String baseUrl = 'http://127.0.0.1:5294/api/auth';
+  static const String baseUrl = 'http://127.0.0.1:8080/api/auth';
   String? _token;
   UserModel? _currentUser;
   late Future<SharedPreferences> _prefs;

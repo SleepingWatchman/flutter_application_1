@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'dart:convert';
 import 'package:mask_text_input_formatter/mask_text_input_formatter.dart';
@@ -8,8 +9,9 @@ import '../models/schedule_entry.dart';
 import '../models/dynamic_field_entry.dart';
 import '../utils/toast_utils.dart';
 import '../providers/database_provider.dart';
-import 'package:provider/provider.dart';
-import '../providers/collaborative_database_provider.dart';
+import '../providers/enhanced_collaborative_provider.dart';
+import '../widgets/calendar_grid.dart';
+import 'package:flutter/services.dart';
 
 /// Экран расписания. Если день не выбран (_selectedDate == null), показывается календарная сетка.
 /// Если выбран день, отображается детальный режим с интервалами и предпросмотром заметки.
@@ -24,9 +26,16 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
   DateTime? _selectedDate; // Если null – показываем календарь
   DateTime? _highlightedDate; // Дата, выбранная первым кликом
   DateTime _currentMonth = DateTime.now(); // Текущий отображаемый месяц
-  List<ScheduleEntry> _schedule = [];
+  List<ScheduleEntry> _scheduleEntries = [];
   int? _selectedIndex;
   bool _isActive = true;
+  bool _isLoading = false; // ИСПРАВЛЕНИЕ: Флаг для предотвращения повторных загрузок
+  bool _isDataLoaded = false; // ИСПРАВЛЕНИЕ: Флаг для отслеживания загрузки данных
+  String? _lastLoadedDatabaseId; // ИСПРАВЛЕНИЕ: Отслеживание последней загруженной базы
+  
+  // ИСПРАВЛЕНИЕ: Сохраняем ссылки на провайдеры для безопасного dispose
+  DatabaseProvider? _databaseProvider;
+  EnhancedCollaborativeProvider? _enhancedCollaborativeProvider;
 
   @override
   void initState() {
@@ -41,8 +50,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
         final dbProvider = Provider.of<DatabaseProvider>(context, listen: false);
         dbProvider.addListener(_handleDatabaseChanges);
         
-        // Подписываемся на изменения в CollaborativeDatabaseProvider
-        final collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
+        // Подписываемся на изменения в EnhancedCollaborativeProvider
+        final collabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
         collabProvider.addListener(_handleCollaborativeDatabaseChanges);
       } catch (e) {
         print('Ошибка при добавлении слушателей: $e');
@@ -58,25 +67,20 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Обновление при изменении в обычной базе данных
-    if (Provider.of<DatabaseProvider>(context, listen: false).needsUpdate) {
-      if (_selectedDate != null) {
-        _loadSchedule();
-      }
-      Provider.of<DatabaseProvider>(context, listen: false).resetUpdateFlag();
+    
+    // ИСПРАВЛЕНИЕ: Сохраняем ссылки на провайдеры для безопасного dispose
+    _databaseProvider = Provider.of<DatabaseProvider>(context, listen: false);
+    _enhancedCollaborativeProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
+    
+    // Загружаем данные только если есть флаг обновления
+    if (_databaseProvider!.needsUpdate && _selectedDate != null) {
+      _forceReloadSchedule();
+      _databaseProvider!.resetUpdateFlag();
     }
     
-    // Проверяем, используется ли совместная база данных
-    try {
-      final collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
-      if (collabProvider.isUsingSharedDatabase) {
-        // Обновляем данные при необходимости
-        if (_selectedDate != null) {
-          _loadSchedule();
-        }
-      }
-    } catch (e) {
-      print('Ошибка при проверке совместной базы данных: $e');
+    // ИСПРАВЛЕНИЕ: Загружаем данные только если база изменилась
+    if (_selectedDate != null) {
+      _loadScheduleIfNeeded();
     }
   }
 
@@ -84,13 +88,15 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     
-    // Удаляем слушатели при удалении виджета
+    // ИСПРАВЛЕНИЕ: Безопасное удаление слушателей
     try {
-      final dbProvider = Provider.of<DatabaseProvider>(context, listen: false);
-      dbProvider.removeListener(_handleDatabaseChanges);
+      if (_databaseProvider != null) {
+        _databaseProvider!.removeListener(_handleDatabaseChanges);
+      }
       
-      final collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
-      collabProvider.removeListener(_handleCollaborativeDatabaseChanges);
+      if (_enhancedCollaborativeProvider != null) {
+        _enhancedCollaborativeProvider!.removeListener(_handleCollaborativeDatabaseChanges);
+      }
     } catch (e) {
       print('Ошибка при удалении слушателей: $e');
     }
@@ -135,7 +141,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
     setState(() {
       _selectedDate = null;
       _highlightedDate = null;
-      _schedule.clear();
+      _scheduleEntries.clear();
       _selectedIndex = null;
     });
   }
@@ -143,9 +149,18 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
   // Обработчик изменений базы данных
   void _handleDatabaseChanges() {
     if (mounted) {
-      print('Обновление экрана расписания из-за изменений в базе данных');
-      if (_selectedDate != null) {
-        _loadSchedule();
+      // ОПТИМИЗИРОВАНО: Убираем избыточное логирование
+      // print('Обновление экрана расписания из-за изменений в базе данных');
+      
+      // ИСПРАВЛЕНИЕ: Загружаем данные только если база изменилась
+      final enhancedCollabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
+      final currentDatabaseId = enhancedCollabProvider.isUsingSharedDatabase 
+          ? enhancedCollabProvider.currentDatabaseId 
+          : null;
+      
+      // Проверяем, изменилась ли база данных
+      if (_lastLoadedDatabaseId != currentDatabaseId && _selectedDate != null) {
+        _forceReloadSchedule();
       }
     }
   }
@@ -153,123 +168,167 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
   // Обработчик изменений совместной базы данных
   void _handleCollaborativeDatabaseChanges() {
     if (mounted) {
-      print('Обновление экрана расписания из-за изменений в совместной базе данных');
-      if (_selectedDate != null) {
-        _loadSchedule();
+      // ОПТИМИЗИРОВАНО: Убираем избыточное логирование
+      // print('Обновление экрана расписания из-за изменений в совместной базе данных');
+      
+      // ИСПРАВЛЕНИЕ: Загружаем данные только при переключении базы
+      final enhancedCollabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
+      final currentDatabaseId = enhancedCollabProvider.isUsingSharedDatabase 
+          ? enhancedCollabProvider.currentDatabaseId 
+          : null;
+      
+      // Проверяем, изменилась ли база данных
+      if (_lastLoadedDatabaseId != currentDatabaseId && _selectedDate != null) {
+        _forceReloadSchedule();
       }
     }
   }
 
-  Future<void> _loadSchedule() async {
+  // ИСПРАВЛЕНИЕ: Новый метод для условной загрузки данных
+  void _loadScheduleIfNeeded() {
+    if (_selectedDate == null) return;
+    
+    final collabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
+    final currentDatabaseId = collabProvider.isUsingSharedDatabase 
+        ? collabProvider.currentDatabaseId 
+        : null;
+    
+    // Загружаем данные только если база изменилась или данные еще не загружены
+    if (!_isDataLoaded || _lastLoadedDatabaseId != currentDatabaseId) {
+      _loadSchedule();
+    }
+  }
+
+  // ИСПРАВЛЕНИЕ: Метод для принудительной перезагрузки
+  void _forceReloadSchedule() {
+    _isDataLoaded = false;
+    _lastLoadedDatabaseId = null;
     if (_selectedDate != null) {
-      String dateKey = DateFormat('yyyy-MM-dd').format(_selectedDate!);
+      _loadSchedule();
+    }
+  }
+
+  Future<void> _loadSchedule() async {
+    if (_selectedDate == null) return;
+    
+    // ИСПРАВЛЕНИЕ: Защита от повторных загрузок
+    if (_isLoading) {
+      print('Загрузка расписания уже выполняется, пропускаем');
+      return;
+    }
+    
+    setState(() => _isLoading = true);
+    
+    String dateKey = DateFormat('yyyy-MM-dd').format(_selectedDate!);
+    
+    try {
+      // ИСПРАВЛЕНИЕ: Используем только EnhancedCollaborativeProvider
+      final enhancedCollabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
+      final currentDatabaseId = enhancedCollabProvider.isUsingSharedDatabase 
+          ? enhancedCollabProvider.currentDatabaseId 
+          : null;
       
-      try {
-        // Проверяем, используется ли совместная база данных
-        String? databaseId;
-        try {
-          final collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
-          if (collabProvider.isUsingSharedDatabase) {
-            databaseId = collabProvider.currentDatabaseId;
-          }
-        } catch (e) {
-          print('Ошибка при получении информации о совместной базе: $e');
+      print('Загрузка расписания для базы: ${currentDatabaseId ?? "локальной"}');
+      
+      final entries = await DatabaseHelper().getScheduleEntries(currentDatabaseId);
+      
+      // Фильтруем записи, которые непосредственно для выбранной даты
+      List<ScheduleEntry> directEntries = entries.where((entry) => entry.date == dateKey).toList();
+      
+      // Список для повторяющихся событий, которые должны быть показаны на выбранную дату
+      List<ScheduleEntry> recurringEntries = [];
+      
+      // Проверяем повторяющиеся события
+      for (var entry in entries) {
+        // Пропускаем непосредственные записи для этой даты (уже включены выше)
+        if (entry.date == dateKey) continue;
+        
+        // Пропускаем записи без повторения
+        if (entry.recurrence.type == RecurrenceType.none) continue;
+        
+        // Проверяем, должно ли это повторяющееся событие отображаться в выбранный день
+        if (_shouldShowRecurringEntry(entry, _selectedDate!)) {
+          // Клонируем запись с датой выбранного дня
+          ScheduleEntry clonedEntry = ScheduleEntry(
+            id: entry.id,
+            time: entry.time,
+            date: dateKey,
+            note: entry.note,
+            dynamicFieldsJson: entry.dynamicFieldsJson,
+            recurrence: entry.recurrence,
+          );
+          recurringEntries.add(clonedEntry);
         }
-        
-        // Получаем все записи из базы данных
-        List<ScheduleEntry> allEntries = await DatabaseHelper().getScheduleEntries(databaseId);
-        
-        // Фильтруем записи, которые непосредственно для выбранной даты
-        List<ScheduleEntry> directEntries = allEntries.where((entry) => entry.date == dateKey).toList();
-        
-        // Список для повторяющихся событий, которые должны быть показаны на выбранную дату
-        List<ScheduleEntry> recurringEntries = [];
-        
-        // Проверяем повторяющиеся события
-        for (var entry in allEntries) {
-          // Пропускаем непосредственные записи для этой даты (уже включены выше)
-          if (entry.date == dateKey) continue;
+      }
+      
+      if (mounted) {
+        setState(() {
+          // Объединяем прямые записи и повторяющиеся
+          _scheduleEntries = [...directEntries, ...recurringEntries];
           
-          // Пропускаем записи без повторения
-          if (entry.recurrence.type == RecurrenceType.none) continue;
-          
-          // Проверяем, должно ли это повторяющееся событие отображаться в выбранный день
-          if (_shouldShowRecurringEntry(entry, _selectedDate!)) {
-            // Клонируем запись с датой выбранного дня
-            ScheduleEntry clonedEntry = ScheduleEntry(
-              id: entry.id,
-              time: entry.time,
-              date: dateKey,
-              note: entry.note,
-              dynamicFieldsJson: entry.dynamicFieldsJson,
-              recurrence: entry.recurrence,
-            );
-            recurringEntries.add(clonedEntry);
-          }
-        }
-        
-        if (mounted) {
-          setState(() {
-            // Объединяем прямые записи и повторяющиеся
-            _schedule = [...directEntries, ...recurringEntries];
+          // Сортируем события по времени начала и окончания
+          _scheduleEntries.sort((a, b) {
+            final aTimes = a.time.split(' - ');
+            final bTimes = b.time.split(' - ');
             
-            // Сортируем события по времени начала и окончания
-            _schedule.sort((a, b) {
-              final aTimes = a.time.split(' - ');
-              final bTimes = b.time.split(' - ');
+            if (aTimes.length < 2 || bTimes.length < 2) {
+              // Обработка некорректного формата времени
+              return 0;
+            }
+            
+            final aStart = aTimes[0].split(':');
+            final bStart = bTimes[0].split(':');
+            
+            if (aStart.length < 2 || bStart.length < 2) {
+              // Обработка некорректного формата времени
+              return 0;
+            }
+            
+            try {
+              final aStartMinutes = int.parse(aStart[0]) * 60 + int.parse(aStart[1]);
+              final bStartMinutes = int.parse(bStart[0]) * 60 + int.parse(bStart[1]);
               
-              if (aTimes.length < 2 || bTimes.length < 2) {
+              if (aStartMinutes != bStartMinutes) {
+                return aStartMinutes.compareTo(bStartMinutes);
+              }
+              
+              final aEnd = aTimes[1].split(':');
+              final bEnd = bTimes[1].split(':');
+              
+              if (aEnd.length < 2 || bEnd.length < 2) {
                 // Обработка некорректного формата времени
                 return 0;
               }
               
-              final aStart = aTimes[0].split(':');
-              final bStart = bTimes[0].split(':');
+              final aEndMinutes = int.parse(aEnd[0]) * 60 + int.parse(aEnd[1]);
+              final bEndMinutes = int.parse(bEnd[0]) * 60 + int.parse(bEnd[1]);
               
-              if (aStart.length < 2 || bStart.length < 2) {
-                // Обработка некорректного формата времени
-                return 0;
-              }
-              
-              try {
-                final aStartMinutes = int.parse(aStart[0]) * 60 + int.parse(aStart[1]);
-                final bStartMinutes = int.parse(bStart[0]) * 60 + int.parse(bStart[1]);
-                
-                if (aStartMinutes != bStartMinutes) {
-                  return aStartMinutes.compareTo(bStartMinutes);
-                }
-                
-                final aEnd = aTimes[1].split(':');
-                final bEnd = bTimes[1].split(':');
-                
-                if (aEnd.length < 2 || bEnd.length < 2) {
-                  // Обработка некорректного формата времени
-                  return 0;
-                }
-                
-                final aEndMinutes = int.parse(aEnd[0]) * 60 + int.parse(aEnd[1]);
-                final bEndMinutes = int.parse(bEnd[0]) * 60 + int.parse(bEnd[1]);
-                
-                return aEndMinutes.compareTo(bEndMinutes);
-              } catch (e) {
-                print('Ошибка при сортировке записей расписания: $e');
-                return 0;
-              }
-            });
-            _selectedIndex = null;
-          });
-        }
-      } catch (e) {
-        print('Ошибка при загрузке расписания: $e');
-        
-        // Повторная попытка загрузки данных после небольшой задержки
-        if (mounted) {
-          Future.delayed(Duration(milliseconds: 500), () {
-            if (mounted) {
-              _loadSchedule();
+              return aEndMinutes.compareTo(bEndMinutes);
+            } catch (e) {
+              print('Ошибка при сортировке записей расписания: $e');
+              return 0;
             }
           });
-        }
+          _selectedIndex = null;
+          
+          // ИСПРАВЛЕНИЕ: Устанавливаем флаги успешной загрузки
+          _isLoading = false;
+          _isDataLoaded = true;
+          _lastLoadedDatabaseId = currentDatabaseId;
+        });
+      }
+    } catch (e) {
+      print('Ошибка при загрузке расписания: $e');
+      
+      if (mounted) {
+        setState(() => _isLoading = false);
+        
+        // Повторная попытка загрузки данных после небольшой задержки
+        Future.delayed(Duration(milliseconds: 500), () {
+          if (mounted) {
+            _loadSchedule();
+          }
+        });
       }
     }
   }
@@ -330,10 +389,10 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
     final newStartMinutes = int.parse(newStart[0]) * 60 + int.parse(newStart[1]);
     final newEndMinutes = int.parse(newEnd[0]) * 60 + int.parse(newEnd[1]);
 
-    for (int i = 0; i < _schedule.length; i++) {
+    for (int i = 0; i < _scheduleEntries.length; i++) {
       if (excludeIndex != null && i == excludeIndex) continue;
       
-      final entry = _schedule[i];
+      final entry = _scheduleEntries[i];
       final entryTimes = entry.time.split(' - ');
       final entryStart = entryTimes[0].split(':');
       final entryEnd = entryTimes[1].split(':');
@@ -396,7 +455,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
     // Получаем идентификатор текущей базы данных для правильного сохранения
     String? databaseId;
     try {
-      final collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
+      final collabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
       if (collabProvider.isUsingSharedDatabase) {
         databaseId = collabProvider.currentDatabaseId;
       }
@@ -798,7 +857,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
 
   // Метод редактирования интервала с использованием маски для поля времени.
   void _editSchedule(int index) {
-    ScheduleEntry entry = _schedule[index];
+    ScheduleEntry entry = _scheduleEntries[index];
     TextEditingController timeController =
         TextEditingController(text: entry.time);
     TextEditingController shortNoteController =
@@ -1184,7 +1243,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                         // Сохраняем существующий databaseId или устанавливаем новый если нужно
                         if (entry.databaseId == null) {
                           try {
-                            final collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
+                            final collabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
                             if (collabProvider.isUsingSharedDatabase) {
                               entry.databaseId = collabProvider.currentDatabaseId;
                               print('Обновление записи расписания с установкой базы: ${entry.databaseId}');
@@ -1198,7 +1257,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                         
                         DatabaseHelper().updateScheduleEntry(entry).then((_) {
                           setState(() {
-                            _schedule[index] = entry;
+                            _scheduleEntries[index] = entry;
                           });
                           _loadSchedule();
                           showCustomToastWithIcon(
@@ -1247,7 +1306,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                     // Сохраняем существующий databaseId или устанавливаем новый если нужно
                     if (entry.databaseId == null) {
                       try {
-                        final collabProvider = Provider.of<CollaborativeDatabaseProvider>(context, listen: false);
+                        final collabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
                         if (collabProvider.isUsingSharedDatabase) {
                           entry.databaseId = collabProvider.currentDatabaseId;
                           print('Обновление записи расписания с установкой базы: ${entry.databaseId}');
@@ -1261,7 +1320,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                     
                     DatabaseHelper().updateScheduleEntry(entry).then((_) {
                       setState(() {
-                        _schedule[index] = entry;
+                        _scheduleEntries[index] = entry;
                       });
                       _loadSchedule();
                       showCustomToastWithIcon(
@@ -1290,7 +1349,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
 
   // Удаление интервала
   void _deleteScheduleEntry(int index) {
-    ScheduleEntry entry = _schedule[index];
+    ScheduleEntry entry = _scheduleEntries[index];
     
     // Если у события есть повторения, спрашиваем пользователя, что именно удалить
     if (entry.recurrence.type != RecurrenceType.none) {
@@ -1306,7 +1365,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                   Navigator.of(dialogContext).pop();
                   // Удаляем только текущий экземпляр события
                   setState(() {
-                    _schedule.removeAt(index);
+                    _scheduleEntries.removeAt(index);
                     _selectedIndex = null;
                   });
                   
@@ -1325,7 +1384,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                   // Удаляем все повторения
                   DatabaseHelper().deleteScheduleEntry(entry.id!).then((_) {
                     setState(() {
-                      _schedule.removeAt(index);
+                      _scheduleEntries.removeAt(index);
                       _selectedIndex = null;
                     });
                     
@@ -1353,7 +1412,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
       // Обычное удаление для непосредственного события без повторений
       DatabaseHelper().deleteScheduleEntry(entry.id!).then((_) {
         setState(() {
-          _schedule.removeAt(index);
+          _scheduleEntries.removeAt(index);
           _selectedIndex = null;
         });
         
@@ -1470,11 +1529,11 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                         Expanded(
                           child: ListView.separated(
                             padding: const EdgeInsets.all(8),
-                            itemCount: _schedule.length,
+                            itemCount: _scheduleEntries.length,
                             separatorBuilder: (context, index) =>
                                 const Divider(color: Colors.cyan),
                             itemBuilder: (context, index) {
-                              ScheduleEntry entry = _schedule[index];
+                              ScheduleEntry entry = _scheduleEntries[index];
                               String dynamicFieldsDisplay = '';
                               if (entry.dynamicFieldsJson != null &&
                                   entry.dynamicFieldsJson!.isNotEmpty) {
@@ -1583,14 +1642,14 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                           child: Container(
                             padding: const EdgeInsets.all(8),
                             child: (_selectedIndex == null ||
-                                    _selectedIndex! >= _schedule.length)
+                                    _selectedIndex! >= _scheduleEntries.length)
                                 ? const Center(
                                     child: Text('Выберите интервал',
                                         style: TextStyle(color: Colors.white)),
                                   )
                                 : SingleChildScrollView(
                                     child: Text(
-                                      _schedule[_selectedIndex!].note ?? '',
+                                      _scheduleEntries[_selectedIndex!].note ?? '',
                                       style: const TextStyle(color: Colors.white70),
                                     ),
                                   ),

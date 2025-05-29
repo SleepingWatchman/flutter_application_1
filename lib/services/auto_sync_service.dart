@@ -19,16 +19,25 @@ class AutoSyncService {
   AutoSyncService(this._collaborationService, this._dbHelper);
 
   Future<void> initialize() async {
-    // Запуск периодической синхронизации
-    _startPeriodicSync();
+    // ВРЕМЕННО ОТКЛЮЧЕНО: Запуск периодической синхронизации
+    // _startPeriodicSync();
+    print('AutoSyncService инициализирован, но автоматическая синхронизация отключена для избежания конфликтов с EnhancedSyncService');
   }
 
   void _startPeriodicSync() {
-    _syncTimer?.cancel();
-    _syncTimer = Timer.periodic(_syncInterval, (_) => syncIfNeeded());
+    // ОТКЛЮЧЕНО: Во избежание конфликтов с EnhancedSyncService
+    // _syncTimer?.cancel();
+    // _syncTimer = Timer.periodic(_syncInterval, (_) => syncIfNeeded());
+    print('Периодическая синхронизация отключена во избежание конфликтов');
   }
 
   Future<void> syncIfNeeded() async {
+    // ВРЕМЕННО ОТКЛЮЧЕНО: Синхронизация для избежания конфликтов
+    print('syncIfNeeded() вызван в AutoSyncService, но пропущен во избежание конфликтов с EnhancedSyncService');
+    return;
+
+    // Закомментированный оригинальный код:
+    /*
     if (_isSyncing || _currentDatabaseId == null) return;
 
     try {
@@ -48,6 +57,7 @@ class AutoSyncService {
     } finally {
       _isSyncing = false;
     }
+    */
   }
 
   Future<void> _performSync() async {

@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../providers/collaborative_database_provider.dart';
+import '../../providers/enhanced_collaborative_provider.dart';
 import '../../providers/database_provider.dart';
 import '../../providers/auth_provider.dart';
-import '../../models/collaborative_database.dart';
+import '../../models/enhanced_collaborative_database.dart';
+import '../../models/collaborative_database_role.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import '../auth/login_screen.dart';
+import 'invitations_screen.dart';
+import 'invite_user_screen.dart';
 
 class SharedDatabasesScreen extends StatefulWidget {
   const SharedDatabasesScreen({Key? key}) : super(key: key);
@@ -30,7 +33,7 @@ class _SharedDatabasesScreenState extends State<SharedDatabasesScreen> {
         );
         return;
       }
-      context.read<CollaborativeDatabaseProvider>().loadDatabases();
+      context.read<EnhancedCollaborativeProvider>().loadDatabases();
     });
   }
 
@@ -60,7 +63,7 @@ class _SharedDatabasesScreenState extends State<SharedDatabasesScreen> {
           ElevatedButton(
             onPressed: () {
               if (_createController.text.isNotEmpty) {
-                context.read<CollaborativeDatabaseProvider>().createDatabase(_createController.text);
+                context.read<EnhancedCollaborativeProvider>().createDatabase(_createController.text);
                 _createController.clear();
                 Navigator.of(context).pop();
               }
@@ -76,66 +79,86 @@ class _SharedDatabasesScreenState extends State<SharedDatabasesScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Импортировать базу данных'),
-        content: TextField(
-          controller: _importController,
-          decoration: const InputDecoration(
-            labelText: 'ID базы данных',
-          ),
-        ),
+        title: const Text('Присоединиться к базе данных'),
+        content: const Text('Для присоединения к базе данных используйте приглашения.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Отмена'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              if (_importController.text.isNotEmpty) {
-                context.read<CollaborativeDatabaseProvider>().importDatabase(_importController.text);
-                _importController.clear();
-                Navigator.of(context).pop();
-              }
-            },
-            child: const Text('Импортировать'),
+            child: const Text('Понятно'),
           ),
         ],
       ),
     );
   }
 
-  void _showCollaboratorsDialog(CollaborativeDatabase database) {
+  void _showCollaboratorsDialog(EnhancedCollaborativeDatabase database) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Соавторы'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              title: Text(database.ownerId),
-              subtitle: const Text('Владелец'),
-            ),
-            ...database.collaborators.entries.map(
-              (entry) => ListTile(
-                title: Text(entry.key),
-                subtitle: Text(entry.value == CollaborativeDatabaseRole.owner ? 'Владелец' : 'Соавтор'),
-                trailing: database.isOwner(context.read<AuthProvider>().user!.id)
-                    ? IconButton(
+        title: const Text('Участники'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: database.users.length,
+            itemBuilder: (context, index) {
+              final user = database.users[index];
+              final isOwner = user.role == CollaborativeDatabaseRole.owner;
+              final canManage = database.isOwner(context.read<AuthProvider>().user?.id ?? '');
+              
+              return ListTile(
+                leading: CircleAvatar(
+                  backgroundImage: user.photoURL != null 
+                      ? NetworkImage(user.photoURL!) 
+                      : null,
+                  child: user.photoURL == null 
+                      ? Text(user.displayName?.substring(0, 1).toUpperCase() ?? user.email.substring(0, 1).toUpperCase())
+                      : null,
+                ),
+                title: Text(user.displayName ?? user.email),
+                subtitle: Text(user.email),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Chip(
+                      label: Text(isOwner ? 'Владелец' : 'Участник'),
+                      backgroundColor: isOwner ? Colors.orange : Colors.blue,
+                    ),
+                    if (canManage && !isOwner) ...[
+                      const SizedBox(width: 8),
+                      IconButton(
                         icon: const Icon(Icons.delete),
                         onPressed: () {
-                          context.read<CollaborativeDatabaseProvider>().removeCollaborator(
+                          context.read<EnhancedCollaborativeProvider>().removeUser(
                                 database.id,
-                                entry.key,
+                                user.userId,
                               );
                           Navigator.of(context).pop();
                         },
-                      )
-                    : null,
-              ),
-            ),
-          ],
+                      ),
+                    ],
+                  ],
+                ),
+              );
+            },
+          ),
         ),
         actions: [
+          if (database.isOwner(context.read<AuthProvider>().user?.id ?? '')) ...[
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.of(context).pop();
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => InviteUserScreen(database: database),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.person_add),
+              label: const Text('Пригласить'),
+            ),
+            const SizedBox(width: 8),
+          ],
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
             child: const Text('Закрыть'),
@@ -147,7 +170,7 @@ class _SharedDatabasesScreenState extends State<SharedDatabasesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer2<CollaborativeDatabaseProvider, AuthProvider>(
+    return Consumer2<EnhancedCollaborativeProvider, AuthProvider>(
       builder: (context, provider, auth, _) {
         if (provider.isLoading) {
           return const Center(child: CircularProgressIndicator());
@@ -205,6 +228,49 @@ class _SharedDatabasesScreenState extends State<SharedDatabasesScreen> {
           appBar: AppBar(
             title: const Text('Совместные базы данных'),
             actions: [
+              Consumer<EnhancedCollaborativeProvider>(
+                builder: (context, provider, _) {
+                  final invitationsCount = provider.pendingInvitations.length;
+                  return Stack(
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.mail),
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => const InvitationsScreen(),
+                            ),
+                          );
+                        },
+                      ),
+                      if (invitationsCount > 0)
+                        Positioned(
+                          right: 8,
+                          top: 8,
+                          child: Container(
+                            padding: const EdgeInsets.all(2),
+                            decoration: BoxDecoration(
+                              color: Colors.red,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            constraints: const BoxConstraints(
+                              minWidth: 16,
+                              minHeight: 16,
+                            ),
+                            child: Text(
+                              '$invitationsCount',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        ),
+                    ],
+                  );
+                },
+              ),
               IconButton(
                 icon: const Icon(Icons.refresh),
                 onPressed: () {

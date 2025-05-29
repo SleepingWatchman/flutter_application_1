@@ -10,7 +10,7 @@ import 'package:dio/dio.dart';
 /// Сервис для работы с совместными базами данных (коллаборация)
 class CollaborationService {
   final AuthService _authService;
-  final String _baseUrl = 'http://localhost:5294/api/shareddatabase';
+  final String _baseUrl = 'http://localhost:8080/api/collaboration/databases';
   final DatabaseHelper _dbHelper = DatabaseHelper();
   final Dio _dio = Dio();
 
@@ -31,7 +31,7 @@ class CollaborationService {
       print('Используемый токен: $token');
 
       final response = await http.get(
-        Uri.parse(_baseUrl),
+        Uri.parse('$_baseUrl/with-users'),
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
@@ -43,7 +43,7 @@ class CollaborationService {
 
       if (response.statusCode == 200) {
         final List<dynamic> data = json.decode(response.body);
-        return data.map((json) => SharedDatabase.fromJson(json)).toList();
+        return data.map((json) => _parseSharedDatabaseWithUsers(json)).toList();
       } else if (response.statusCode == 401) {
         throw Exception('Не авторизован');
       } else if (response.statusCode == 403) {
@@ -55,6 +55,36 @@ class CollaborationService {
       print('Ошибка в getSharedDatabases: $e');
       rethrow;
     }
+  }
+
+  SharedDatabase _parseSharedDatabaseWithUsers(Map<String, dynamic> json) {
+    // Получаем информацию о пользователях
+    final List<dynamic> users = json['users'] ?? [];
+    final String currentUserId = _authService.getCurrentUserId() ?? '';
+    
+    // Определяем, является ли текущий пользователь владельцем
+    final int ownerId = json['owner_user_id'] ?? 0;
+    final bool isOwner = currentUserId == ownerId.toString();
+    
+    // Собираем список соавторов (исключая владельца)
+    final List<String> collaborators = users
+        .where((user) => user['role'] != 'owner')
+        .map((user) => user['user_id'].toString())
+        .toList();
+
+    return SharedDatabase(
+      id: json['id'].toString(),
+      name: json['name'] ?? '',
+      ownerId: ownerId.toString(),
+      createdAt: DateTime.parse(json['created_at'] ?? DateTime.now().toIso8601String()),
+      collaborators: collaborators,
+      serverId: json['id'].toString(),
+      databasePath: 'shared_${json['id']}.db',
+      isOwner: isOwner,
+      lastSync: json['updated_at'] != null 
+          ? DateTime.parse(json['updated_at'])
+          : null,
+    );
   }
 
   Future<SharedDatabase> createSharedDatabase(String name) async {
@@ -221,11 +251,23 @@ class CollaborationService {
         throw Exception('Не авторизован');
       }
 
+      print('Начало синхронизации базы данных ${database.id}');
+
       // Получаем только измененные записи с последней синхронизации
       final lastSync = await _getLastSyncTime(database.id);
       final changes = await _dbHelper.getChangesSince(lastSync);
       
-      if (changes.isEmpty) return;
+      print('Найдено изменений с последней синхронизации: ${changes.length}');
+      
+      // ИСПРАВЛЕНО: Всегда выполняем синхронизацию, даже если нет локальных изменений
+      // Это позволяет получить изменения с сервера
+      
+      final requestBody = {
+        'changes': changes,
+        'lastSync': lastSync?.toIso8601String(),
+      };
+
+      print('Отправляем запрос синхронизации: ${json.encode(requestBody)}');
 
       final response = await http.post(
         Uri.parse('$_baseUrl/${database.id}/sync'),
@@ -233,18 +275,19 @@ class CollaborationService {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
         },
-        body: json.encode({
-          'changes': changes,
-          'lastSync': lastSync?.toIso8601String(),
-        }),
+        body: json.encode(requestBody),
       );
+
+      print('Ответ сервера: ${response.statusCode} - ${response.body}');
 
       if (response.statusCode == 200) {
         await _updateLastSyncTime(database.id);
         // Применяем изменения с сервера
         final data = json.decode(response.body);
         final serverChanges = data['changes'] as List;
+        print('Получено изменений с сервера: ${serverChanges.length}');
         await _dbHelper.applyServerChanges(serverChanges);
+        print('Синхронизация завершена успешно');
       } else if (response.statusCode == 401) {
         throw Exception('Не авторизован');
       } else if (response.statusCode == 403) {

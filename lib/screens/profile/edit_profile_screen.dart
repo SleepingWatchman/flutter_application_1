@@ -136,7 +136,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                       backgroundImage: _imageFile != null
                           ? FileImage(_imageFile!)
                           : (user?.photoURL != null
-                              ? NetworkImage(user!.photoURL!)
+                              ? NetworkImage('${user!.photoURL!}?t=${DateTime.now().millisecondsSinceEpoch}')
                               : null) as ImageProvider?,
                       child: (_imageFile == null && user?.photoURL == null)
                           ? const Icon(Icons.person, size: 50)

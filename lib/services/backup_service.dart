@@ -69,7 +69,7 @@ class UserBackupService {
   }
 
   Future<void> _uploadBackup(BackupData backupData) async {
-    final url = Uri.parse('$_baseUrl/api/UserBackup/upload');
+    final url = Uri.parse('$_baseUrl/api/backup/personal/upload');
     
     // Используем UTF-8 кодировку для правильной обработки русских символов
     final jsonData = utf8.encode(jsonEncode(backupData.toJson()));
@@ -105,7 +105,7 @@ class UserBackupService {
   }
 
   Future<BackupData> _downloadLatestBackup() async {
-    final url = Uri.parse('$_baseUrl/api/UserBackup/download/latest');
+    final url = Uri.parse('$_baseUrl/api/backup/personal/download/latest');
     final response = await http.get(
       url,
       headers: {
@@ -113,6 +113,21 @@ class UserBackupService {
         'Accept-Charset': 'utf-8',
       },
     );
+
+    if (response.statusCode == 404) {
+      // Если резервная копия не найдена, возвращаем пустую резервную копию
+      print('Резервная копия не найдена, создаем пустую');
+      return BackupData(
+        folders: [],
+        notes: [],
+        scheduleEntries: [],
+        pinboardNotes: [],
+        connections: [],
+        noteImages: [],
+        databaseId: null,
+        userId: '',
+      );
+    }
 
     if (response.statusCode != 200) {
       throw Exception('Ошибка при загрузке резервной копии: ${response.statusCode}');
@@ -264,7 +279,7 @@ class CollaborationBackupService {
   }
 
   Future<void> _uploadBackup(String databaseId, BackupData backupData) async {
-    final url = Uri.parse('$_baseUrl/api/CollaborationBackup/$databaseId/upload');
+    final url = Uri.parse('$_baseUrl/api/collaboration/data/$databaseId');
     final jsonData = jsonEncode(backupData.toJson());
     
     final request = http.MultipartRequest('POST', url)
@@ -298,7 +313,7 @@ class CollaborationBackupService {
   }
 
   Future<BackupData> _downloadLatestBackup(String databaseId) async {
-    final url = Uri.parse('$_baseUrl/api/CollaborationBackup/$databaseId/download/latest');
+    final url = Uri.parse('$_baseUrl/api/collaboration/data/$databaseId');
     final response = await http.get(
       url,
       headers: {

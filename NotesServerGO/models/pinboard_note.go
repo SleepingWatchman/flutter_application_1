@@ -14,6 +14,6 @@ type PinboardNote struct {
 	BackgroundColor int       `json:"background_color" db:"BackgroundColor"` // ARGB int
 	IconCodePoint   int       `json:"icon" db:"IconCodePoint"`               // Храним CodePoint иконки из Flutter (map['icon'])
 	DatabaseId      int64     `json:"database_id" db:"DatabaseId"`
-	CreatedAt       time.Time `json:"created_at" db:"CreatedAt"`
-	UpdatedAt       time.Time `json:"updated_at" db:"UpdatedAt"`
+	CreatedAt       time.Time `json:"-" db:"CreatedAt"`
+	UpdatedAt       time.Time `json:"-" db:"UpdatedAt"`
 }

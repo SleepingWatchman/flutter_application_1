@@ -46,12 +46,12 @@ class PinboardNoteDB {
       id: map['id'],
       title: map['title'] ?? '',
       content: map['content'] ?? '',
-      posX: map['position_x'] ?? 0.0,
-      posY: map['position_y'] ?? 0.0,
-      width: map['width'] ?? 200.0,
-      height: map['height'] ?? 150.0,
+      posX: (map['position_x'] ?? 0.0).toDouble(),
+      posY: (map['position_y'] ?? 0.0).toDouble(),
+      width: (map['width'] ?? 200.0).toDouble(),
+      height: (map['height'] ?? 150.0).toDouble(),
       backgroundColor: map['background_color'] ?? 0xFF424242,
-      icon: _getIconKey(map['icon'] ?? Icons.person.codePoint), // Преобразуем codePoint в ключ
+      icon: _getIconKeyFromValue(map['icon']), // Безопасное преобразование
       database_id: map['database_id'] as String?,
     );
   }
@@ -85,5 +85,16 @@ class PinboardNoteDB {
     if (codePoint == Icons.directions_car.codePoint) return 'car';
     if (codePoint == Icons.close.codePoint) return 'close';
     return 'person';
+  }
+
+  // Безопасное преобразование значения icon
+  static String _getIconKeyFromValue(dynamic iconValue) {
+    if (iconValue is String) {
+      return iconValue;
+    } else if (iconValue is int) {
+      return _getIconKey(iconValue);
+    } else {
+      throw Exception("Неверный формат icon");
+    }
   }
 } 

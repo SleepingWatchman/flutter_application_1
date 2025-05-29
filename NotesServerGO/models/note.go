@@ -13,8 +13,8 @@ type Note struct {
 	Title        string    `json:"title" db:"Title"`
 	Content      *string   `json:"content,omitempty" db:"Content"`
 	FolderID     *int64    `json:"folder_id,omitempty" db:"FolderId"` // omitempty, если папки нет
-	CreatedAt    time.Time `json:"created_at" db:"CreatedAt"`
-	UpdatedAt    time.Time `json:"updated_at" db:"UpdatedAt"`
+	CreatedAt    time.Time `json:"-" db:"CreatedAt"`
+	UpdatedAt    time.Time `json:"-" db:"UpdatedAt"`
 	ImagesJson   string    `json:"images,omitempty" db:"ImagesJson"`
 	MetadataJson string    `json:"metadata,omitempty" db:"MetadataJson"`
 	ContentJson  *string   `json:"content_json,omitempty" db:"ContentJson"`

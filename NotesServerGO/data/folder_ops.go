@@ -37,7 +37,7 @@ func CreateFolder(folder *models.Folder) (int64, error) {
 // GetFolderByID извлекает папку по ее ID и ID совместной БД.
 func GetFolderByID(id int64, sharedDbID int64) (*models.Folder, error) {
 	folder := &models.Folder{}
-	query := `SELECT Id, DatabaseId, Name, ParentId, CreatedAt, UpdatedAt, Color, IsExpanded
+	query := `SELECT Id, DatabaseId, Name, ParentId, Color, IsExpanded
 	          FROM Folders WHERE Id = ? AND DatabaseId = ?`
 	err := MainDB.Get(folder, query, id, sharedDbID)
 	if err != nil {
@@ -52,7 +52,7 @@ func GetFolderByID(id int64, sharedDbID int64) (*models.Folder, error) {
 // GetAllFoldersBySharedDBID извлекает все папки для указанной совместной БД.
 func GetAllFoldersBySharedDBID(sharedDbID int64) ([]models.Folder, error) {
 	var folders []models.Folder
-	query := `SELECT Id, DatabaseId, Name, ParentId, CreatedAt, UpdatedAt, Color, IsExpanded
+	query := `SELECT Id, DatabaseId, Name, ParentId, Color, IsExpanded
 	          FROM Folders WHERE DatabaseId = ? ORDER BY Name ASC`
 	err := MainDB.Select(&folders, query, sharedDbID)
 	if err != nil {
@@ -120,7 +120,7 @@ func CreateFolderWithTx(tx *sqlx.Tx, folder *models.Folder) (int64, error) {
 // GetFolderByIDWithTx извлекает папку по ID и ID совместной БД в рамках транзакции.
 func GetFolderByIDWithTx(tx *sqlx.Tx, id int64, sharedDbID int64) (*models.Folder, error) {
 	folder := &models.Folder{}
-	query := `SELECT Id, DatabaseId, Name, ParentId, CreatedAt, UpdatedAt, Color, IsExpanded
+	query := `SELECT Id, DatabaseId, Name, ParentId, Color, IsExpanded
 	          FROM Folders WHERE Id = ? AND DatabaseId = ?`
 	err := tx.Get(folder, query, id, sharedDbID)
 	if err != nil {
@@ -135,7 +135,7 @@ func GetFolderByIDWithTx(tx *sqlx.Tx, id int64, sharedDbID int64) (*models.Folde
 // GetAllFoldersBySharedDBIDWithTx извлекает все папки для указанной совместной БД в рамках транзакции.
 func GetAllFoldersBySharedDBIDWithTx(tx *sqlx.Tx, sharedDbID int64) ([]models.Folder, error) {
 	var folders []models.Folder
-	query := `SELECT Id, DatabaseId, Name, ParentId, CreatedAt, UpdatedAt, Color, IsExpanded
+	query := `SELECT Id, DatabaseId, Name, ParentId, Color, IsExpanded
 	          FROM Folders WHERE DatabaseId = ? ORDER BY Name ASC`
 	err := tx.Select(&folders, query, sharedDbID)
 	if err != nil {
@@ -204,7 +204,7 @@ func GetFoldersForDatabase(databaseID int64) ([]models.Folder, error) {
 	// Все папки, принадлежащие databaseID, должны быть включены.
 	// Если databaseID == 0, то это личная база, и OwnerUserId должен быть использован (но этот сценарий здесь не рассматривается).
 
-	finalQuery := `SELECT Id, Name, ParentId, CreatedAt, UpdatedAt, DatabaseId, Color, IsExpanded 
+	finalQuery := `SELECT Id, Name, ParentId, DatabaseId, Color, IsExpanded 
 	               FROM Folders 
 	               WHERE DatabaseId = ? 
 	               ORDER BY Name ASC`

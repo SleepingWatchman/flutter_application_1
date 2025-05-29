@@ -124,6 +124,13 @@ func SyncSharedDatabaseHandler(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	// Обработка ScheduleEntries
+	existingScheduleEntryIDs, err := data.GetAllScheduleEntryIDsForDBWithTx(tx, sharedDbID)
+	if err != nil {
+		err = fmt.Errorf("ошибка при получении ID существующих ScheduleEntries для БД %d: %w", sharedDbID, err)
+		log.Printf("Sync Error (DB %d, User %d): %v", sharedDbID, currentUserID, err)
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	processedScheduleEntryIDs := make(map[int64]bool) // Для отслеживания обработанных ID
 
 	for _, clientEntry := range syncData.ScheduleEntries {
@@ -184,6 +191,22 @@ func SyncSharedDatabaseHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		processedScheduleEntryIDs[serverEntryID] = true
 	}
+
+	// КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Удаление ScheduleEntries, которые есть на сервере, но не были обработаны
+	for _, serverID := range existingScheduleEntryIDs {
+		if _, ok := processedScheduleEntryIDs[serverID]; !ok {
+			log.Printf("Sync: Удаление ScheduleEntry с ID %d из БД %d, так как она не пришла от клиента.", serverID, sharedDbID)
+			deleteErr := data.DeleteScheduleEntryWithTx(tx, serverID, sharedDbID, currentUserID)
+			if deleteErr != nil && deleteErr != sql.ErrNoRows {
+				err = fmt.Errorf("ошибка при удалении ScheduleEntry (ID %d, DB %d): %w", serverID, sharedDbID, deleteErr)
+				log.Printf("Sync Error (DB %d, User %d): %v", sharedDbID, currentUserID, err)
+				respondError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			log.Printf("Sync: Успешно удалена ScheduleEntry с ID %d из БД %d.", serverID, sharedDbID)
+		}
+	}
+	// Конец обработки ScheduleEntries
 
 	// Обработка Folders
 	existingFolderIDs, err := data.GetAllFolderIDsForSharedDBWithTx(tx, sharedDbID)
@@ -254,21 +277,16 @@ func SyncSharedDatabaseHandler(w http.ResponseWriter, r *http.Request) {
 		clientToServerFolderMap[clientFolder.ID] = serverFolderID
 	}
 
-	// Удаление Folders, которые есть на сервере, но не были обработаны (не пришли от клиента)
+	// КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: НЕ удаляем папки сразу!
+	// Сохраняем список папок для удаления и сделаем это в КОНЦЕ
+	var foldersToDelete []int64
 	for _, serverID := range existingFolderIDs {
 		if _, ok := processedFolderIDs[serverID]; !ok {
-			log.Printf("Sync: Удаление Folder с ID %d из БД %d, так как она не пришла от клиента.", serverID, sharedDbID)
-			deleteErr := data.DeleteFolderWithTx(tx, serverID, sharedDbID)
-			if deleteErr != nil && deleteErr != sql.ErrNoRows { // Игнорируем ошибку, если уже удалена
-				err = fmt.Errorf("ошибка при удалении Folder (ID %d, DB %d): %w", serverID, sharedDbID, deleteErr)
-				log.Printf("Sync Error (DB %d, User %d): %v", sharedDbID, currentUserID, err)
-				respondError(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-			log.Printf("Sync: Успешно удалена Folder с ID %d из БД %d.", serverID, sharedDbID)
+			foldersToDelete = append(foldersToDelete, serverID)
+			log.Printf("Sync: Folder с ID %d отмечена для удаления из БД %d (будет удалена в конце)", serverID, sharedDbID)
 		}
 	}
-	// Конец обработки Folders
+	// Конец обработки Folders (удаление отложено)
 
 	// Обработка Notes
 	existingNoteIDs, err := data.GetAllNoteIDsForSharedDBWithTx(tx, sharedDbID)
@@ -293,8 +311,17 @@ func SyncSharedDatabaseHandler(w http.ResponseWriter, r *http.Request) {
 				log.Printf("Sync: Заметка ID %d, folder_id замаплен с %d на %d", clientNote.ID, clientFolderID, serverFolderID)
 			} else {
 				log.Printf("Sync: Предупреждение - папка с клиентским ID %d не найдена в мапинге для заметки %d", clientFolderID, clientNote.ID)
-				// Устанавливаем folder_id в nil, чтобы избежать FOREIGN KEY ошибки
-				clientNote.FolderID = nil
+
+				// ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА: Возможно, папка уже существует на сервере с тем же ID
+				existingFolder, checkErr := data.GetFolderByIDWithTx(tx, clientFolderID, sharedDbID)
+				if checkErr == nil && existingFolder != nil {
+					log.Printf("Sync: Папка ID %d уже существует на сервере для БД %d, используем её", clientFolderID, sharedDbID)
+					// Folder_id остается тем же
+				} else {
+					log.Printf("Sync: Папка ID %d не существует на сервере для БД %d, обнуляем folder_id", clientFolderID, sharedDbID)
+					// Устанавливаем folder_id в nil, чтобы избежать FOREIGN KEY ошибки
+					clientNote.FolderID = nil
+				}
 			}
 		}
 
@@ -461,7 +488,11 @@ func SyncSharedDatabaseHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	// Конец обработки PinboardNotes
 
+	// КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Перемещаю обработку NoteImages ПОСЛЕ Notes и PinboardNotes
+	// чтобы карта clientToServerNoteMap была создана до использования
+
 	// Обработка Connections
+	// Получаем все существующие ID соединений для этой БД
 	existingConnectionIDs, err := data.GetAllConnectionIDsForSharedDBWithTx(tx, sharedDbID)
 	if err != nil {
 		err = fmt.Errorf("ошибка при получении ID существующих Connections для БД %d: %w", sharedDbID, err)
@@ -470,15 +501,6 @@ func SyncSharedDatabaseHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	processedConnectionIDs := make(map[int64]bool)
-
-	// КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Получаем ОБНОВЛЕННЫЙ список всех существующих PinboardNote ID после создания новых
-	existingPinboardNoteIDs, pinboardErr = data.GetAllPinboardNoteIDsForSharedDBWithTx(tx, sharedDbID)
-	if pinboardErr != nil {
-		err = fmt.Errorf("ошибка при получении обновленных ID PinboardNote для БД %d: %w", sharedDbID, pinboardErr)
-		log.Printf("Sync Error (DB %d, User %d): %v", sharedDbID, currentUserID, err)
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
 
 	// Создаем ОБНОВЛЕННУЮ карту для быстрой проверки существования PinboardNote
 	existingPinboardNoteMap := make(map[int64]bool)
@@ -501,76 +523,40 @@ func SyncSharedDatabaseHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Sync: Карта маппинга клиент->сервер PinboardNote: %v", clientToServerPinboardNoteMap)
 
 		if clientConnection.FromNoteId > 0 {
-			if serverFromID, exists := clientToServerPinboardNoteMap[clientConnection.FromNoteId]; exists {
-				// ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА: Убеждаемся, что замапленный ID действительно существует в базе
-				if existingPinboardNoteMap[serverFromID] {
-					clientConnection.FromNoteId = serverFromID
-					log.Printf("Sync: Connection ID %d, fromNoteId замаплен с %d на %d", clientConnection.Id, originalFromID, serverFromID)
-				} else {
-					log.Printf("Sync: Ошибка - замапленный PinboardNote с серверным ID %d не существует в БД %d для Connection %d (fromNoteId). Пропускаем создание Connection.", serverFromID, sharedDbID, clientConnection.Id)
-					mappingSuccessful = false
-				}
+			if serverFromID, exists := clientToServerPinboardNoteMap[originalFromID]; exists {
+				clientConnection.FromNoteId = serverFromID
+				log.Printf("Sync: Connection ID %d, fromNoteId замаплен с %d на %d", clientConnection.Id, originalFromID, serverFromID)
+			} else if _, existsDirectly := existingPinboardNoteMap[originalFromID]; existsDirectly {
+				// Клиентский ID совпадает с серверным ID
+				log.Printf("Sync: Connection ID %d, fromNoteId %d используется как есть (совпадает с серверным)", clientConnection.Id, originalFromID)
 			} else {
-				log.Printf("Sync: Ошибка - PinboardNote с клиентским ID %d не найдена в мапинге для Connection %d (fromNoteId). Пропускаем создание Connection.", originalFromID, clientConnection.Id)
+				log.Printf("Sync: ОШИБКА - PinboardNote с клиентским ID %d не найдена в мапинге и не существует на сервере для Connection %d", originalFromID, clientConnection.Id)
 				mappingSuccessful = false
 			}
 		}
 
 		if clientConnection.ToNoteId > 0 && mappingSuccessful {
-			if serverToID, exists := clientToServerPinboardNoteMap[clientConnection.ToNoteId]; exists {
-				// ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА: Убеждаемся, что замапленный ID действительно существует в базе
-				if existingPinboardNoteMap[serverToID] {
-					clientConnection.ToNoteId = serverToID
-					log.Printf("Sync: Connection ID %d, toNoteId замаплен с %d на %d", clientConnection.Id, originalToID, serverToID)
-				} else {
-					log.Printf("Sync: Ошибка - замапленный PinboardNote с серверным ID %d не существует в БД %d для Connection %d (toNoteId). Пропускаем создание Connection.", serverToID, sharedDbID, clientConnection.Id)
-					mappingSuccessful = false
-				}
+			if serverToID, exists := clientToServerPinboardNoteMap[originalToID]; exists {
+				clientConnection.ToNoteId = serverToID
+				log.Printf("Sync: Connection ID %d, toNoteId замаплен с %d на %d", clientConnection.Id, originalToID, serverToID)
+			} else if _, existsDirectly := existingPinboardNoteMap[originalToID]; existsDirectly {
+				// Клиентский ID совпадает с серверным ID
+				log.Printf("Sync: Connection ID %d, toNoteId %d используется как есть (совпадает с серверным)", clientConnection.Id, originalToID)
 			} else {
-				log.Printf("Sync: Ошибка - PinboardNote с клиентским ID %d не найдена в мапинге для Connection %d (toNoteId). Пропускаем создание Connection.", originalToID, clientConnection.Id)
+				log.Printf("Sync: ОШИБКА - PinboardNote с клиентским ID %d не найдена в мапинге и не существует на сервере для Connection %d", originalToID, clientConnection.Id)
 				mappingSuccessful = false
 			}
 		}
 
-		// Пропускаем создание Connection если маппинг не удался
 		if !mappingSuccessful {
-			log.Printf("Sync: Пропускаем Connection ID %d из-за неудачного маппинга PinboardNote ID", clientConnection.Id)
-			continue
-		}
-
-		// ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА: Убеждаемся, что PinboardNote действительно существуют в базе (двойная проверка)
-		if clientConnection.FromNoteId > 0 {
-			exists, checkErr := data.CheckPinboardNoteExistsWithTx(tx, clientConnection.FromNoteId, sharedDbID)
-			if checkErr != nil {
-				err = fmt.Errorf("ошибка проверки существования PinboardNote FromNoteId %d: %w", clientConnection.FromNoteId, checkErr)
-				log.Printf("Sync Error (DB %d, User %d): %v", sharedDbID, currentUserID, err)
-				respondError(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-			if !exists {
-				log.Printf("Sync: PinboardNote с ID %d (FromNoteId) не существует в БД %d. Пропускаем Connection %d", clientConnection.FromNoteId, sharedDbID, clientConnection.Id)
-				continue
-			}
-		}
-
-		if clientConnection.ToNoteId > 0 {
-			exists, checkErr := data.CheckPinboardNoteExistsWithTx(tx, clientConnection.ToNoteId, sharedDbID)
-			if checkErr != nil {
-				err = fmt.Errorf("ошибка проверки существования PinboardNote ToNoteId %d: %w", clientConnection.ToNoteId, checkErr)
-				log.Printf("Sync Error (DB %d, User %d): %v", sharedDbID, currentUserID, err)
-				respondError(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-			if !exists {
-				log.Printf("Sync: PinboardNote с ID %d (ToNoteId) не существует в БД %d. Пропускаем Connection %d", clientConnection.ToNoteId, sharedDbID, clientConnection.Id)
-				continue
-			}
+			log.Printf("Sync: Пропуск Connection ID %d из-за неудачного маппинга PinboardNote ID", clientConnection.Id)
+			continue // Пропускаем это соединение, если мапинг не удался
 		}
 
 		var serverConnectionID int64
 
 		if clientConnection.Id == 0 {
-			log.Printf("Sync: Создание новой Connection для БД %d, клиентские данные: fromNoteId=%d, toNoteId=%d", sharedDbID, clientConnection.FromNoteId, clientConnection.ToNoteId)
+			log.Printf("Sync: Создание новой Connection для БД %d", sharedDbID)
 			createdID, createErr := data.CreateConnectionWithTx(tx, &clientConnection)
 			if createErr != nil {
 				err = fmt.Errorf("ошибка при создании Connection: %w", createErr)
@@ -637,6 +623,7 @@ func SyncSharedDatabaseHandler(w http.ResponseWriter, r *http.Request) {
 	// Конец обработки Connections
 
 	// Обработка NoteImages
+	// КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Теперь карта clientToServerNoteMap уже создана
 	// Определяем базовую директорию для изображений этой БД
 	baseImageDir := filepath.Join("uploads", "shared_db_"+strconv.FormatInt(sharedDbID, 10), "images")
 	if err := os.MkdirAll(baseImageDir, os.ModePerm); err != nil {
@@ -660,6 +647,7 @@ func SyncSharedDatabaseHandler(w http.ResponseWriter, r *http.Request) {
 		clientImage.DatabaseId = sharedDbID
 
 		// КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Маппинг note_id с клиентского на серверный
+		// Теперь карта clientToServerNoteMap уже создана!
 		if clientImage.NoteId > 0 {
 			clientNoteID := clientImage.NoteId
 			if serverNoteID, exists := clientToServerNoteMap[clientNoteID]; exists {
@@ -845,6 +833,20 @@ func SyncSharedDatabaseHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	imagePathsToDeleteAfterCommit = append(imagePathsToDeleteAfterCommit, serverImagePathsToDelete...)
 	// Конец обработки NoteImages
+
+	// КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Теперь безопасно удаляем папки в конце
+	// Все заметки уже обработаны и их folder_id либо замаплены, либо обнулены
+	for _, folderID := range foldersToDelete {
+		log.Printf("Sync: Удаление отложенной Folder с ID %d из БД %d", folderID, sharedDbID)
+		deleteErr := data.DeleteFolderWithTx(tx, folderID, sharedDbID)
+		if deleteErr != nil && deleteErr != sql.ErrNoRows {
+			err = fmt.Errorf("ошибка при отложенном удалении Folder (ID %d, DB %d): %w", folderID, sharedDbID, deleteErr)
+			log.Printf("Sync Error (DB %d, User %d): %v", sharedDbID, currentUserID, err)
+			respondError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		log.Printf("Sync: Успешно удалена отложенная Folder с ID %d из БД %d", folderID, sharedDbID)
+	}
 
 	// Получаем все актуальные данные для ответа ДО коммита транзакции
 	actualScheduleEntries, getErr := data.GetScheduleEntriesByDBIDWithTx(tx, sharedDbID)

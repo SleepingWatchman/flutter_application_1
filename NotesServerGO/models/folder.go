@@ -44,8 +44,8 @@ type Folder struct {
 	DatabaseID int64       `json:"database_id" db:"DatabaseId"`
 	Name       string      `json:"name" db:"Name"`
 	ParentID   *int64      `json:"parent_id,omitempty" db:"ParentId"`
-	CreatedAt  time.Time   `json:"created_at" db:"CreatedAt"`
-	UpdatedAt  time.Time   `json:"updated_at" db:"UpdatedAt"`
+	CreatedAt  time.Time   `json:"-" db:"CreatedAt"`
+	UpdatedAt  time.Time   `json:"-" db:"UpdatedAt"`
 	Color      int         `json:"color" db:"Color"`
 	IsExpanded BoolFromInt `json:"is_expanded" db:"IsExpanded"`
 }

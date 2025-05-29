@@ -74,10 +74,13 @@ func main() {
 	// Маршруты для синхронизации
 	collabRouter.HandleFunc("/{db_id:[0-9]+}/version", controllers.GetDatabaseVersionHandler).Methods(http.MethodGet)
 	collabRouter.HandleFunc("/{db_id:[0-9]+}/changes", controllers.GetDatabaseChangesHandler).Methods(http.MethodGet)
+	collabRouter.HandleFunc("/{db_id:[0-9]+}/data", controllers.GetDatabaseDataHandler).Methods(http.MethodGet)
 
 	// Новые маршруты для управления совместными БД
 	collabRouter.HandleFunc("/{db_id:[0-9]+}/leave", controllers.LeaveSharedDatabaseHandler).Methods(http.MethodPost)  // Новый обработчик
 	collabRouter.HandleFunc("/{db_id:[0-9]+}/export", controllers.ExportSharedDatabaseHandler).Methods(http.MethodGet) // Новый обработчик
+	collabRouter.HandleFunc("/{db_id:[0-9]+}/backup", controllers.BackupDatabaseDataHandler).Methods(http.MethodPost)  // Добавляем маршрут для backup
+	collabRouter.HandleFunc("/import", controllers.ImportSharedDatabaseHandler).Methods(http.MethodPost)               // Добавляем маршрут для импорта
 
 	// Маршруты для приглашений
 	invitationRouter := apiRouter.PathPrefix("/collaboration/invitations").Subrouter()

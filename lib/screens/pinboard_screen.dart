@@ -140,14 +140,19 @@ class _PinboardScreenState extends State<PinboardScreen> with WidgetsBindingObse
       // ОПТИМИЗИРОВАНО: Убираем избыточное логирование
       // print('Обновление экрана доски из-за изменений в базе данных');
       
-      // ИСПРАВЛЕНИЕ: Загружаем данные только если база изменилась
+      final databaseProvider = Provider.of<DatabaseProvider>(context, listen: false);
       final enhancedCollabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
       final currentDatabaseId = enhancedCollabProvider.isUsingSharedDatabase 
           ? enhancedCollabProvider.currentDatabaseId 
           : null;
       
-      // Проверяем, изменилась ли база данных
-      if (_lastLoadedDatabaseId != currentDatabaseId) {
+      // ИСПРАВЛЕНИЕ: Проверяем как изменение базы, так и флаг обновления
+      if (_lastLoadedDatabaseId != currentDatabaseId || databaseProvider.needsUpdate) {
+        // ЗАЩИТА ОТ ЦИКЛОВ: Сбрасываем флаг ДО перезагрузки, чтобы избежать повторных вызовов
+        final wasUpdateNeeded = databaseProvider.needsUpdate;
+        if (wasUpdateNeeded) {
+          databaseProvider.resetUpdateFlag();
+        }
         _forceReloadPinboardNotes();
       }
     }
@@ -159,14 +164,19 @@ class _PinboardScreenState extends State<PinboardScreen> with WidgetsBindingObse
       // ОПТИМИЗИРОВАНО: Убираем избыточное логирование
       // print('Обновление экрана доски из-за изменений в совместной базе данных');
       
-      // ИСПРАВЛЕНИЕ: Загружаем данные только при переключении базы
+      final databaseProvider = Provider.of<DatabaseProvider>(context, listen: false);
       final enhancedCollabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
       final currentDatabaseId = enhancedCollabProvider.isUsingSharedDatabase 
           ? enhancedCollabProvider.currentDatabaseId 
           : null;
       
-      // Проверяем, изменилась ли база данных
-      if (_lastLoadedDatabaseId != currentDatabaseId) {
+      // ИСПРАВЛЕНИЕ: Проверяем как изменение базы, так и флаг обновления
+      if (_lastLoadedDatabaseId != currentDatabaseId || databaseProvider.needsUpdate) {
+        // ЗАЩИТА ОТ ЦИКЛОВ: Сбрасываем флаг ДО перезагрузки, чтобы избежать повторных вызовов
+        final wasUpdateNeeded = databaseProvider.needsUpdate;
+        if (wasUpdateNeeded) {
+          databaseProvider.resetUpdateFlag();
+        }
         _forceReloadPinboardNotes();
       }
     }
@@ -183,6 +193,13 @@ class _PinboardScreenState extends State<PinboardScreen> with WidgetsBindingObse
     // ИСПРАВЛЕНИЕ: Защита от повторных загрузок
     if (_isLoading) {
       print('Загрузка доски уже выполняется, пропускаем');
+      return;
+    }
+    
+    // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Проверяем блокировку операций с базой данных
+    final databaseProvider = Provider.of<DatabaseProvider>(context, listen: false);
+    if (databaseProvider.isBlocked) {
+      print('⚠️ Загрузка доски заблокирована во время переключения базы данных');
       return;
     }
     

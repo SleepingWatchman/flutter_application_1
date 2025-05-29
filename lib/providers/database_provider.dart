@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
+import 'dart:async';
 
 class DatabaseProvider extends ChangeNotifier {
   bool _needsUpdate = false;
@@ -16,6 +17,7 @@ class DatabaseProvider extends ChangeNotifier {
   bool _isInitializing = false;
   String? _currentDatabaseId;
   bool _isRestoringPersonalData = false;
+  bool _isBlocked = false;
 
   bool get needsUpdate => _needsUpdate;
   String? get lastError => _lastError;
@@ -23,6 +25,7 @@ class DatabaseProvider extends ChangeNotifier {
   String? get currentDatabaseId => _currentDatabaseId;
   DatabaseHelper get dbHelper => _dbHelper;
   bool get isRestoringPersonalData => _isRestoringPersonalData;
+  bool get isBlocked => _isBlocked;
 
   void setCollaborationProvider(CollaborationProvider provider) {
     try {
@@ -54,11 +57,9 @@ class DatabaseProvider extends ChangeNotifier {
         _needsUpdate = value;
         print('DatabaseProvider: setNeedsUpdate($value)');
         
-        // ИСПРАВЛЕНИЕ: Убираем автоматическую синхронизацию для предотвращения бесконечных циклов
-        // Синхронизация должна вызываться явно, когда это необходимо
-        
-        // Уведомляем слушателей после всех изменений
-        notifyListeners();
+        // ИСПРАВЛЕНИЕ: НЕ вызываем notifyListeners() для каждого setNeedsUpdate
+        // Это создает бесконечные циклы обновления UI
+        // notifyListeners() будет вызван только в конце операций
       }
     } catch (e) {
       _lastError = 'Ошибка при обновлении состояния: $e';
@@ -173,26 +174,14 @@ class DatabaseProvider extends ChangeNotifier {
   Future<void> initializeSharedDatabase(String databaseId) async {
     try {
       _isInitializing = true;
-      notifyListeners();
+      // НЕ вызываем notifyListeners() здесь, чтобы не блокировать UI
       
       print('Инициализация совместной базы данных в DatabaseProvider: $databaseId');
       
-      // ИСПРАВЛЕНИЕ: Сохраняем резервную копию ТОЛЬКО если это первое переключение
-      if (_currentDatabaseId == null) {
-        try {
-          print('Создание резервной копии личных данных...');
-          final currentBackup = await createBackup(_currentDatabaseId);
-          await savePersonalBackup(currentBackup);
-          print('Резервная копия личных данных создана');
-        } catch (e) {
-          print('Ошибка создания резервной копии: $e');
-          // Не критично, продолжаем
-        }
-      } else {
-        print('Резервная копия уже создана, пропускаем');
-      }
+      // ИСПРАВЛЕНИЕ: Убираем создание резервной копии из initializeSharedDatabase
+      // Это уже делается в enhanced_collaborative_provider
       
-      // ИСПРАВЛЕНИЕ: Убираем долгие транзакции - используем прямой вызов DatabaseHelper
+      // ИСПРАВЛЕНИЕ: Быстрая инициализация без долгих операций
       try {
         await _dbHelper.initializeSharedDatabase(databaseId);
         print('Совместная база инициализирована через DatabaseHelper');
@@ -204,8 +193,8 @@ class DatabaseProvider extends ChangeNotifier {
       // Устанавливаем текущую базу данных
       _currentDatabaseId = databaseId;
       
-      // Устанавливаем флаг обновления
-      setNeedsUpdate(true);
+      // ИСПРАВЛЕНИЕ: Устанавливаем флаг обновления БЕЗ вызова notifyListeners
+      _needsUpdate = true;
       
       _lastError = null;
       print('Инициализация совместной базы в DatabaseProvider завершена');
@@ -215,6 +204,7 @@ class DatabaseProvider extends ChangeNotifier {
       // НЕ перебрасываем исключение, чтобы не блокировать приложение
     } finally {
       _isInitializing = false;
+      // ТОЛЬКО ОДИН вызов notifyListeners в конце
       notifyListeners();
     }
   }
@@ -228,50 +218,28 @@ class DatabaseProvider extends ChangeNotifier {
     
     try {
       _isInitializing = true;
-      notifyListeners();
+      // НЕ вызываем notifyListeners() здесь - это блокирует UI
       
       print('Переключение на базу данных в DatabaseProvider: ${databaseId ?? "локальную"}');
       
-      // ИСПРАВЛЕНИЕ: Быстрая очистка кешированных данных
+      // ИСПРАВЛЕНИЕ: Быстрая очистка кешированных данных БЕЗ долгих операций
       await _clearCachedData();
       
-      // ИСПРАВЛЕНИЕ: При переключении на личную базу НЕ создаем резервную копию, а ВОССТАНАВЛИВАЕМ личные данные
-      if (_currentDatabaseId != null && databaseId == null) {
-        try {
-          _isRestoringPersonalData = true; // УСТАНАВЛИВАЕМ ФЛАГ
-          print('Восстановление личных данных при переключении на личную базу...');
-          final personalBackup = await getPersonalBackup();
-          if (personalBackup != null) {
-            print('Найдена резервная копия личных данных, восстанавливаем...');
-            await restoreFromBackup(personalBackup, null);
-            print('Личные данные успешно восстановлены');
-          } else {
-            print('Резервная копия личных данных не найдена');
-          }
-        } catch (e) {
-          print('Ошибка восстановления личных данных: $e');
-          // Не критично, продолжаем
-        } finally {
-          _isRestoringPersonalData = false; // СБРАСЫВАЕМ ФЛАГ
-        }
-      } else {
-        print('Восстановление личных данных не требуется для данного переключения');
-      }
+      // ИСПРАВЛЕНИЕ: НЕ делаем восстановление личных данных в UI потоке
+      // Это будет сделано в enhanced_collaborative_provider
       
-      // Обновляем текущую базу данных
+      // Устанавливаем текущую базу данных
       _currentDatabaseId = databaseId;
       
-      // Устанавливаем флаг обновления
-      setNeedsUpdate(true);
-      
+      print('DatabaseProvider переключен на базу: ${databaseId ?? "локальную"}');
       _lastError = null;
-      print('Переключение на базу данных в DatabaseProvider ${databaseId ?? "локальную"} завершено успешно');
     } catch (e) {
       _lastError = 'Ошибка переключения базы данных: $e';
       print(_lastError);
-      // НЕ перебрасываем исключение, чтобы не блокировать приложение
+      // НЕ перебрасываем исключение
     } finally {
       _isInitializing = false;
+      // ТОЛЬКО ОДИН вызов notifyListeners в конце
       notifyListeners();
     }
   }
@@ -295,26 +263,32 @@ class DatabaseProvider extends ChangeNotifier {
 
   // Методы для получения данных с учетом текущей базы данных
   Future<List<dynamic>> getNotesForCurrentDatabase() async {
+    _checkIfBlocked();
     return await _dbHelper.getAllNotes(_currentDatabaseId);
   }
   
   Future<List<dynamic>> getFoldersForCurrentDatabase() async {
+    _checkIfBlocked();
     return await _dbHelper.getFolders(_currentDatabaseId);
   }
   
   Future<List<dynamic>> getScheduleEntriesForCurrentDatabase() async {
+    _checkIfBlocked();
     return await _dbHelper.getScheduleEntries(_currentDatabaseId);
   }
   
   Future<List<dynamic>> getPinboardNotesForCurrentDatabase() async {
+    _checkIfBlocked();
     return await _dbHelper.getPinboardNotes(_currentDatabaseId);
   }
   
   Future<List<dynamic>> getConnectionsForCurrentDatabase() async {
+    _checkIfBlocked();
     return await _dbHelper.getConnectionsDB(_currentDatabaseId);
   }
   
   Future<List<dynamic>> getImagesForCurrentDatabase() async {
+    _checkIfBlocked();
     return await _dbHelper.getAllImages(_currentDatabaseId);
   }
   
@@ -357,5 +331,41 @@ class DatabaseProvider extends ChangeNotifier {
       connection['database_id'] = _currentDatabaseId;
     }
     return await _dbHelper.insertConnection(connection);
+  }
+
+  // ИСПРАВЛЕНИЕ: Новый метод для финального уведомления UI
+  void notifyUpdate() {
+    try {
+      print('DatabaseProvider: Принудительное обновление UI');
+      notifyListeners();
+    } catch (e) {
+      _lastError = 'Ошибка при обновлении UI: $e';
+      print(_lastError);
+    }
+  }
+  
+  // ИСПРАВЛЕНИЕ: Метод для блокировки/разблокировки операций с базой данных
+  void setIsBlocked(bool blocked) {
+    _isBlocked = blocked;
+    print('DatabaseProvider: операции с базой данных ${blocked ? "заблокированы" : "разблокированы"}');
+    
+    // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Автоматическая разблокировка через таймаут
+    if (blocked) {
+      Timer(Duration(seconds: 60), () {
+        if (_isBlocked) {
+          print('⚠️ ПРИНУДИТЕЛЬНАЯ РАЗБЛОКИРОВКА: Операции с базой данных принудительно разблокированы через 60 секунд');
+          _isBlocked = false;
+          notifyListeners(); // Уведомляем UI об изменении состояния
+        }
+      });
+    }
+  }
+  
+  // ИСПРАВЛЕНИЕ: Проверка блокировки перед операциями с базой данных
+  void _checkIfBlocked() {
+    if (_isBlocked) {
+      print('⚠️ Операция с базой данных заблокирована во время переключения');
+      throw Exception('Операции с базой данных заблокированы во время переключения');
+    }
   }
 } 

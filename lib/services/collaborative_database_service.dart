@@ -231,7 +231,7 @@ class CollaborativeDatabaseService {
         // Попытка загрузить данные с сервера с таймаутом
         try {
           final getResponse = await _dio.get(
-            '$_serverBaseUrl/collaboration/data/$databaseId',
+            '$_serverBaseUrl/collaboration/databases/$databaseId/data',
             options: Options(
               validateStatus: (status) => status != null && status < 500,
               receiveTimeout: const Duration(seconds: 10),
@@ -494,7 +494,7 @@ class CollaborativeDatabaseService {
   Future<void> _getAndRestoreServerData(String databaseId) async {
     try {
       final getResponse = await _dio.get(
-        '$_serverBaseUrl/collaboration/data/$databaseId',
+        '$_serverBaseUrl/collaboration/databases/$databaseId/data',
         options: Options(
           validateStatus: (status) => status != null && status < 500,
           receiveTimeout: const Duration(seconds: 10),
@@ -567,7 +567,7 @@ class CollaborativeDatabaseService {
       }
 
       final response = await _dio.post(
-        '$_serverBaseUrl/collaboration/data/import',
+        '$_serverBaseUrl/collaboration/databases/import',
         data: {'databaseId': databaseId},
         options: Options(
           validateStatus: (status) => status != null && status < 500,
@@ -694,7 +694,7 @@ class CollaborativeDatabaseService {
       
       // Отправляем данные на сервер
       final response = await _dio.post(
-        '$_serverBaseUrl/collaboration/data/$databaseId/backup',
+        '$_serverBaseUrl/collaboration/databases/$databaseId/backup',
         data: preparedData,
         options: Options(
           headers: {

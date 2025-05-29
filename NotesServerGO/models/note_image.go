@@ -10,6 +10,6 @@ type NoteImage struct {
 	FileName   string    `json:"file_name" db:"FileName"`               // Имя файла, которое клиент присылает и ожидает
 	ImageData  string    `json:"image_data,omitempty" db:"-"`           // Base64 строка данных изображения (от клиента), не хранится в БД
 	DatabaseId int64     `json:"database_id,omitempty" db:"DatabaseId"` // ID совместной БД, к которой относится NoteId
-	CreatedAt  time.Time `json:"created_at" db:"CreatedAt"`
-	UpdatedAt  time.Time `json:"updated_at,omitempty" db:"UpdatedAt"` // На сервере для отслеживания, клиент может не слать
+	CreatedAt  time.Time `json:"-" db:"CreatedAt"`                      // ИСПРАВЛЕНИЕ: убираю из JSON
+	UpdatedAt  time.Time `json:"-" db:"UpdatedAt"`                      // ИСПРАВЛЕНИЕ: убираю из JSON
 }

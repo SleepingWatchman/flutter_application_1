@@ -279,7 +279,7 @@ class CollaborationBackupService {
   }
 
   Future<void> _uploadBackup(String databaseId, BackupData backupData) async {
-    final url = Uri.parse('$_baseUrl/api/collaboration/data/$databaseId');
+    final url = Uri.parse('$_baseUrl/api/collaboration/databases/$databaseId/data');
     final jsonData = jsonEncode(backupData.toJson());
     
     final request = http.MultipartRequest('POST', url)
@@ -313,7 +313,7 @@ class CollaborationBackupService {
   }
 
   Future<BackupData> _downloadLatestBackup(String databaseId) async {
-    final url = Uri.parse('$_baseUrl/api/collaboration/data/$databaseId');
+    final url = Uri.parse('$_baseUrl/api/collaboration/databases/$databaseId/data');
     final response = await http.get(
       url,
       headers: {

@@ -10,6 +10,6 @@ type Connection struct {
 	Name            string    `json:"name" db:"Name"`
 	ConnectionColor int       `json:"connection_color" db:"ConnectionColor"` // ARGB int
 	DatabaseId      int64     `json:"database_id" db:"DatabaseId"`
-	CreatedAt       time.Time `json:"created_at" db:"CreatedAt"`
-	UpdatedAt       time.Time `json:"updated_at" db:"UpdatedAt"`
+	CreatedAt       time.Time `json:"-" db:"CreatedAt"`
+	UpdatedAt       time.Time `json:"-" db:"UpdatedAt"`
 }

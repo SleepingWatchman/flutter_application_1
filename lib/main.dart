@@ -17,6 +17,7 @@ import 'screens/auth/login_screen.dart';
 import 'services/collaborative_database_service.dart';
 import 'services/collaborative_role_service.dart';
 import 'services/enhanced_sync_service.dart';
+import 'services/server_health_service.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:dio/dio.dart';
 
@@ -188,6 +189,15 @@ class _MainScreenState extends State<MainScreen> {
       
       final enhancedCollabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
       enhancedCollabProvider.addListener(_handleCollaborativeDatabaseChanges);
+      
+      // Инициализируем сервис проверки состояния сервера
+      try {
+        final serverHealthService = ServerHealthService();
+        serverHealthService.initialize(context);
+        print('🏥 HEALTH: Сервис мониторинга сервера запущен в MainScreen');
+      } catch (e) {
+        print('🏥 HEALTH: Ошибка при инициализации сервиса мониторинга: $e');
+      }
     });
   }
   
@@ -303,62 +313,113 @@ class _MainScreenState extends State<MainScreen> {
       appBar: AppBar(
         title: Consumer<EnhancedCollaborativeProvider>(
           builder: (context, enhancedProvider, child) {
-            if (enhancedProvider.isUsingSharedDatabase) {
-              // Если используется совместная база, показываем её имя
-              final currentDbId = enhancedProvider.currentDatabaseId;
-              final currentDb = enhancedProvider.databases
-                  .where((db) => db.id == currentDbId)
-                  .firstOrNull;
-              final dbName = currentDb?.name ?? 'Совместная база';
-              
-              return Row(
-                children: [
-                  const Text('Notes App'),
-                  const SizedBox(width: 10),
+            return Row(
+              children: [
+                const Text('Notes App'),
+                const SizedBox(width: 10),
+                // Постоянный индикатор статуса сервера
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: enhancedProvider.isServerAvailable 
+                        ? Colors.green.withOpacity(0.15)
+                        : Colors.red.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: enhancedProvider.isServerAvailable 
+                          ? Colors.green.withOpacity(0.4)
+                          : Colors.red.withOpacity(0.4),
+                      width: 0.5,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        enhancedProvider.isServerAvailable 
+                            ? Icons.cloud_done 
+                            : Icons.cloud_off,
+                        size: 12,
+                        color: enhancedProvider.isServerAvailable 
+                            ? Colors.green
+                            : Colors.red,
+                      ),
+                      const SizedBox(width: 3),
+                      Text(
+                        enhancedProvider.isServerAvailable ? 'Онлайн' : 'Офлайн',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w500,
+                          color: enhancedProvider.isServerAvailable 
+                              ? Colors.green
+                              : Colors.red,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                // Дополнительный индикатор для совместной базы
+                if (enhancedProvider.isUsingSharedDatabase) ...[
+                  const SizedBox(width: 8),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                     decoration: BoxDecoration(
-                      color: enhancedProvider.isServerAvailable 
-                          ? Colors.green.withOpacity(0.2)
-                          : Colors.orange.withOpacity(0.2),
+                      color: enhancedProvider.syncStatus == SyncStatus.syncing
+                          ? Colors.blue.withOpacity(0.15)
+                          : Colors.cyan.withOpacity(0.15),
                       borderRadius: BorderRadius.circular(10),
                       border: Border.all(
-                        color: enhancedProvider.isServerAvailable 
-                            ? Colors.green.withOpacity(0.5)
-                            : Colors.orange.withOpacity(0.5),
+                        color: enhancedProvider.syncStatus == SyncStatus.syncing
+                            ? Colors.blue.withOpacity(0.4)
+                            : Colors.cyan.withOpacity(0.4),
                       ),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(
-                          enhancedProvider.isServerAvailable 
-                              ? Icons.people 
-                              : Icons.sync_problem,
+                          enhancedProvider.syncStatus == SyncStatus.syncing 
+                              ? Icons.sync 
+                              : Icons.people,
                           size: 14,
-                          color: enhancedProvider.isServerAvailable 
-                              ? Colors.green
-                              : Colors.orange,
+                          color: enhancedProvider.syncStatus == SyncStatus.syncing 
+                              ? Colors.blue
+                              : Colors.cyan,
                         ),
                         const SizedBox(width: 4),
                         Text(
-                          dbName,
+                          enhancedProvider.syncStatus == SyncStatus.syncing 
+                              ? 'Синхронизация...'
+                              : () {
+                                  final currentDbId = enhancedProvider.currentDatabaseId;
+                                  final currentDb = enhancedProvider.databases
+                                      .where((db) => db.id == currentDbId)
+                                      .firstOrNull;
+                                  return currentDb?.name ?? 'Совместная база';
+                                }(),
                           style: TextStyle(
                             fontSize: 12,
-                            color: enhancedProvider.isServerAvailable 
-                                ? Colors.green
-                                : Colors.orange,
+                            color: enhancedProvider.syncStatus == SyncStatus.syncing 
+                                ? Colors.blue
+                                : Colors.cyan,
                           ),
                         ),
+                        if (enhancedProvider.syncStatus == SyncStatus.syncing)
+                          Container(
+                            margin: const EdgeInsets.only(left: 4),
+                            width: 12,
+                            height: 12,
+                            child: const CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+                            ),
+                          ),
                       ],
                     ),
                   ),
                 ],
-              );
-            } else {
-              // Для личной базы показываем стандартный заголовок
-              return const Text('Notes App');
-            }
+              ],
+            );
           },
         ),
         leading: IconButton(

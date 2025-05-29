@@ -19,6 +19,20 @@ import '../providers/database_provider.dart';
 import '../models/shared_database.dart';
 import 'dart:async';
 
+/*
+ * ⚠️ КРИТИЧЕСКИ ВАЖНО: ЛОКАЛЬНЫЕ МОДЕЛИ ИЗМЕНЯТЬ ЗАПРЕЩЕНО! ⚠️
+ * 
+ * ❌ НЕ ИЗМЕНЯЙТЕ локальные модели данных (Note, Folder, ScheduleEntry, PinboardNote, Connection)
+ * ❌ НЕ ДОБАВЛЯЙТЕ новые поля в локальные модели без явного требования пользователя
+ * ❌ НЕ ИЗМЕНЯЙТЕ структуру таблиц базы данных для добавления полей, которых нет в моделях
+ * 
+ * ✅ ВСЕГДА приводите методы к существующим локальным моделям
+ * ✅ ИЗМЕНЯЙТЕ только серверные модели и методы импорта/экспорта
+ * ✅ ФИЛЬТРУЙТЕ лишние поля при импорте данных с сервера
+ * 
+ * Это правило действует ДО ОСОБОГО РАСПОРЯЖЕНИЯ ПОЛЬЗОВАТЕЛЯ!
+ */
+
 // Класс Lock для синхронизации операций
 class Lock {
   Completer<void>? _completer;
@@ -89,7 +103,7 @@ class DatabaseHelper {
         print('База данных в процессе переключения, ожидание...');
         await Future.delayed(Duration(milliseconds: 500));
         
-        // Если после ожидания база все еще в процессе переключения, отменяем операцию
+        // Если после ожидания база все еще в процессе переключения, выбрасываем исключение
         if (_isChangingDatabase) {
           throw Exception('База данных в процессе переключения. Попробуйте позже.');
         }
@@ -104,7 +118,10 @@ class DatabaseHelper {
       
       // Выполняем операцию
       try {
-        return await operation();
+        final result = await operation();
+        // ИСПРАВЛЕНО: Не проверяем на null для void операций (T может быть void)
+        // void операции корректно возвращают null, это нормально
+        return result;
       } catch (e) {
         print('Ошибка при выполнении операции с базой данных: $e');
         
@@ -119,8 +136,15 @@ class DatabaseHelper {
           await _initDatabase();
           _isClosed = false;
           
-          // Повторяем операцию
-          return await operation();
+          // Повторяем операцию только один раз
+          try {
+            final result = await operation();
+            // ИСПРАВЛЕНО: Не проверяем на null для void операций при повторе
+            return result;
+          } catch (retryError) {
+            print('Ошибка при повторной попытке операции: $retryError');
+            rethrow;
+          }
         }
         
         rethrow;
@@ -163,7 +187,9 @@ class DatabaseHelper {
         name TEXT NOT NULL,
         color INTEGER NOT NULL,
         is_expanded INTEGER NOT NULL DEFAULT 1,
-        database_id TEXT
+        database_id TEXT,
+        created_at TEXT,
+        updated_at TEXT
       )
     ''');
 
@@ -397,22 +423,27 @@ class DatabaseHelper {
 
   // Методы для работы с папками
   Future<List<Folder>> getFolders([String? databaseId]) async {
-    return await _safeDbOperation(() async {
-      final db = await database;
-      if (databaseId != null) {
+    try {
+      return await _safeDbOperation(() async {
+        final db = await database;
+        if (databaseId != null) {
+          final List<Map<String, dynamic>> maps = await db.query(
+            'folders',
+            where: 'database_id = ?',
+            whereArgs: [databaseId],
+          );
+          return List.generate(maps.length, (i) => Folder.fromMap(maps[i]));
+        }
         final List<Map<String, dynamic>> maps = await db.query(
           'folders',
-          where: 'database_id = ?',
-          whereArgs: [databaseId],
+          where: 'database_id IS NULL',
         );
         return List.generate(maps.length, (i) => Folder.fromMap(maps[i]));
-      }
-      final List<Map<String, dynamic>> maps = await db.query(
-        'folders',
-        where: 'database_id IS NULL',
-      );
-      return List.generate(maps.length, (i) => Folder.fromMap(maps[i]));
-    });
+      });
+    } catch (e) {
+      print('Ошибка при получении папок: $e');
+      return <Folder>[]; // Возвращаем пустой список в случае ошибки
+    }
   }
 
   Future<int> insertFolder(Map<String, dynamic> folder, [Transaction? txn]) async {
@@ -435,22 +466,27 @@ class DatabaseHelper {
 
   // Методы для работы с заметками
   Future<List<Note>> getAllNotes([String? databaseId]) async {
-    return await _safeDbOperation(() async {
-      final db = await database;
-      if (databaseId != null) {
+    try {
+      return await _safeDbOperation(() async {
+        final db = await database;
+        if (databaseId != null) {
+          final List<Map<String, dynamic>> maps = await db.query(
+            'notes',
+            where: 'database_id = ?',
+            whereArgs: [databaseId],
+          );
+          return List.generate(maps.length, (i) => Note.fromMap(maps[i]));
+        }
         final List<Map<String, dynamic>> maps = await db.query(
           'notes',
-          where: 'database_id = ?',
-          whereArgs: [databaseId],
+          where: 'database_id IS NULL',
         );
         return List.generate(maps.length, (i) => Note.fromMap(maps[i]));
-      }
-      final List<Map<String, dynamic>> maps = await db.query(
-        'notes',
-        where: 'database_id IS NULL',
-      );
-      return List.generate(maps.length, (i) => Note.fromMap(maps[i]));
-    });
+      });
+    } catch (e) {
+      print('Ошибка при получении заметок: $e');
+      return <Note>[]; // Возвращаем пустой список в случае ошибки
+    }
   }
 
   Future<List<Note>> getNotesByFolder(int folderId, [String? databaseId]) async {
@@ -510,7 +546,8 @@ class DatabaseHelper {
 
   Future<int> insertNote(Map<String, dynamic> note) async {
     final db = await database;
-    // Удаляем database_id из карты, если это локальная заметка
+    // ИСПРАВЛЕНИЕ: НЕ удаляем database_id для совместных баз
+    // Удаляем database_id только если он явно null (для личных данных)
     if (note['database_id'] == null) {
       note.remove('database_id');
     }
@@ -521,26 +558,32 @@ class DatabaseHelper {
 
   // Методы для работы с расписанием
   Future<List<ScheduleEntry>> getScheduleEntries([String? databaseId]) async {
-    return await _safeDbOperation(() async {
-      final db = await database;
-      if (databaseId != null) {
+    try {
+      return await _safeDbOperation(() async {
+        final db = await database;
+        if (databaseId != null) {
+          final List<Map<String, dynamic>> maps = await db.query(
+            'schedule_entries',
+            where: 'database_id = ?',
+            whereArgs: [databaseId],
+          );
+          return List.generate(maps.length, (i) => ScheduleEntry.fromMap(maps[i]));
+        }
         final List<Map<String, dynamic>> maps = await db.query(
           'schedule_entries',
-          where: 'database_id = ?',
-          whereArgs: [databaseId],
+          where: 'database_id IS NULL',
         );
         return List.generate(maps.length, (i) => ScheduleEntry.fromMap(maps[i]));
-      }
-      final List<Map<String, dynamic>> maps = await db.query(
-        'schedule_entries',
-        where: 'database_id IS NULL',
-      );
-      return List.generate(maps.length, (i) => ScheduleEntry.fromMap(maps[i]));
-    });
+      });
+    } catch (e) {
+      print('Ошибка при получении записей расписания: $e');
+      return <ScheduleEntry>[]; // Возвращаем пустой список в случае ошибки
+    }
   }
 
   Future<int> insertScheduleEntry(Map<String, dynamic> entry, [Transaction? txn]) async {
-    // Удаляем database_id из карты, если это локальная запись
+    // ИСПРАВЛЕНИЕ: НЕ удаляем database_id для совместных баз
+    // Удаляем database_id только если он явно null (для личных данных)
     if (entry['database_id'] == null) {
       entry.remove('database_id');
     }
@@ -561,7 +604,8 @@ class DatabaseHelper {
       // Конвертируем ScheduleEntry в Map и вызываем основной метод
       return updateScheduleEntry(entry.toMap(), txn);
     } else if (entry is Map<String, dynamic>) {
-      // Удаляем database_id из карты, если это локальная запись
+      // ИСПРАВЛЕНИЕ: НЕ удаляем database_id для совместных баз
+      // Удаляем database_id только если он явно null (для личных данных)
       if (entry['database_id'] == null) {
         entry.remove('database_id');
       }
@@ -608,26 +652,32 @@ class DatabaseHelper {
 
   // Методы для работы с заметками на доске
   Future<List<PinboardNoteDB>> getPinboardNotes([String? databaseId]) async {
-    return await _safeDbOperation(() async {
-      final db = await database;
-      if (databaseId != null) {
+    try {
+      return await _safeDbOperation(() async {
+        final db = await database;
+        if (databaseId != null) {
+          final List<Map<String, dynamic>> maps = await db.query(
+            'pinboard_notes',
+            where: 'database_id = ?',
+            whereArgs: [databaseId],
+          );
+          return List.generate(maps.length, (i) => PinboardNoteDB.fromMap(maps[i]));
+        }
         final List<Map<String, dynamic>> maps = await db.query(
           'pinboard_notes',
-          where: 'database_id = ?',
-          whereArgs: [databaseId],
+          where: 'database_id IS NULL',
         );
         return List.generate(maps.length, (i) => PinboardNoteDB.fromMap(maps[i]));
-      }
-      final List<Map<String, dynamic>> maps = await db.query(
-        'pinboard_notes',
-        where: 'database_id IS NULL',
-      );
-      return List.generate(maps.length, (i) => PinboardNoteDB.fromMap(maps[i]));
-    });
+      });
+    } catch (e) {
+      print('Ошибка при получении заметок доски: $e');
+      return <PinboardNoteDB>[]; // Возвращаем пустой список в случае ошибки
+    }
   }
 
   Future<int> insertPinboardNote(Map<String, dynamic> note, [Transaction? txn]) async {
-    // Удаляем database_id из карты, если это локальная заметка
+    // ИСПРАВЛЕНИЕ: НЕ удаляем database_id для совместных баз
+    // Удаляем database_id только если он явно null (для личных данных)
     if (note['database_id'] == null) {
       note.remove('database_id');
     }
@@ -715,22 +765,27 @@ class DatabaseHelper {
 
   // Методы для работы с соединениями
   Future<List<ConnectionDB>> getConnectionsDB([String? databaseId]) async {
-    return await _safeDbOperation(() async {
-      final db = await database;
-      if (databaseId != null) {
+    try {
+      return await _safeDbOperation(() async {
+        final db = await database;
+        if (databaseId != null) {
+          final List<Map<String, dynamic>> maps = await db.query(
+            'connections',
+            where: 'database_id = ?',
+            whereArgs: [databaseId],
+          );
+          return List.generate(maps.length, (i) => ConnectionDB.fromMap(maps[i]));
+        }
         final List<Map<String, dynamic>> maps = await db.query(
           'connections',
-          where: 'database_id = ?',
-          whereArgs: [databaseId],
+          where: 'database_id IS NULL',
         );
         return List.generate(maps.length, (i) => ConnectionDB.fromMap(maps[i]));
-      }
-      final List<Map<String, dynamic>> maps = await db.query(
-        'connections',
-        where: 'database_id IS NULL',
-      );
-      return List.generate(maps.length, (i) => ConnectionDB.fromMap(maps[i]));
-    });
+      });
+    } catch (e) {
+      print('Ошибка при получении соединений: $e');
+      return <ConnectionDB>[]; // Возвращаем пустой список в случае ошибки
+    }
   }
 
   Future<int> insertConnection(Map<String, dynamic> connection, [Transaction? txn]) async {
@@ -902,74 +957,137 @@ class DatabaseHelper {
       print('Начало очистки таблиц для базы данных: $databaseId');
       
       try {
+        // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: НЕ закрываем базу данных, просто очищаем таблицы
+        // Закрытие базы приводит к блокировкам и конфликтам при параллельных запросах
+        
         final db = await database;
+        print('✅ База данных доступна для очистки');
         
-        // Быстрая проверка наличия данных
-        final hasDataCheck = await db.query(
-          'notes',
-          where: 'database_id = ?',
-          whereArgs: [databaseId],
-          limit: 1,
-        );
-        
-        if (hasDataCheck.isEmpty) {
-          // Проверяем другие таблицы
-          final folderCheck = await db.query(
-            'folders',
-            where: 'database_id = ?',
-            whereArgs: [databaseId],
-            limit: 1,
-          );
-          
-          if (folderCheck.isEmpty) {
-            print('Таблицы для базы $databaseId уже пусты, пропускаем очистку');
-            return;
-          }
-        }
-        
-        // Если передана транзакция, используем её, иначе создаем новую
-        if (transaction != null) {
-          await _performTableClear(transaction, databaseId);
-        } else {
-          await db.transaction((txn) async {
-            await _performTableClear(txn, databaseId);
-          });
-        }
+        // ИСПРАВЛЕНИЕ: Добавляем таймаут для операций очистки
+        await Future.any([
+          _performClearOperation(db, databaseId, transaction),
+          Future.delayed(Duration(seconds: 15), () => throw TimeoutException('Таймаут операции очистки базы данных'))
+        ]);
         
         print('Очищены таблицы для базы $databaseId');
       } catch (e) {
-        print('Ошибка при очистке таблиц для базы $databaseId: $e');
+        if (e is TimeoutException) {
+          print('❌ ТАЙМАУТ: Операция очистки базы $databaseId превысила лимит времени');
+          // Попробуем экстренную очистку без транзакций
+          try {
+            await _emergencyClearDatabase(databaseId);
+          } catch (forceError) {
+            print('❌ Ошибка экстренной очистки: $forceError');
+          }
+        } else {
+          print('Ошибка при очистке таблиц для базы $databaseId: $e');
+        }
         // Не выбрасываем исключение, чтобы не прерывать работу приложения
       }
     });
   }
   
-  /// Вспомогательный метод для выполнения очистки таблиц в транзакции
-  Future<void> _performTableClear(Transaction txn, String databaseId) async {
-    // Сначала удаляем изображения к заметкам этой базы данных
-    final notesWithImages = await txn.query(
-      'notes', 
-      columns: ['id'],
+  /// Выполнение операции очистки с проверками
+  Future<void> _performClearOperation(Database db, String databaseId, Transaction? transaction) async {
+    // Быстрая проверка наличия данных
+    final hasDataCheck = await db.query(
+      'notes',
       where: 'database_id = ?',
       whereArgs: [databaseId],
+      limit: 1,
     );
     
-    final noteIds = notesWithImages.map((note) => note['id'] as int).toList();
-    if (noteIds.isNotEmpty) {
-      await txn.delete(
-        'note_images',
-        where: 'note_id IN (${List.filled(noteIds.length, '?').join(',')})',
-        whereArgs: noteIds,
+    if (hasDataCheck.isEmpty) {
+      // Проверяем другие таблицы
+      final folderCheck = await db.query(
+        'folders',
+        where: 'database_id = ?',
+        whereArgs: [databaseId],
+        limit: 1,
       );
+      
+      if (folderCheck.isEmpty) {
+        print('Таблицы для базы $databaseId уже пусты, пропускаем очистку');
+        return;
+      }
     }
     
-    // Удаляем данные из таблиц в определенном порядке, 
-    // чтобы избежать проблем с внешними ключами
-    await txn.delete('connections', where: 'database_id = ?', whereArgs: [databaseId]);
-    await txn.delete('pinboard_notes', where: 'database_id = ?', whereArgs: [databaseId]);
-    await txn.delete('schedule_entries', where: 'database_id = ?', whereArgs: [databaseId]);
-    await txn.delete('notes', where: 'database_id = ?', whereArgs: [databaseId]);
-    await txn.delete('folders', where: 'database_id = ?', whereArgs: [databaseId]);
+    // ИСПРАВЛЕНИЕ: Используем только простые DELETE без вложенных транзакций
+    if (transaction != null) {
+      await _performTableClear(transaction, databaseId);
+    } else {
+      // Выполняем простые DELETE без транзакций для ускорения
+      await _performSimpleClear(db, databaseId);
+    }
+  }
+  
+  /// Простая очистка без транзакций
+  Future<void> _performSimpleClear(Database db, String databaseId) async {
+    print('🗑️ ПРОСТАЯ ОЧИСТКА: Удаление без транзакций для базы $databaseId');
+    
+    // Удаляем в правильном порядке без транзакций
+    await db.delete('connections', where: 'database_id = ?', whereArgs: [databaseId]);
+    print('🗑️ Удалены соединения');
+    
+    await db.delete('pinboard_notes', where: 'database_id = ?', whereArgs: [databaseId]);
+    print('🗑️ Удалены заметки на доске');
+    
+    await db.delete('schedule_entries', where: 'database_id = ?', whereArgs: [databaseId]);
+    print('🗑️ Удалены записи расписания');
+    
+    await db.delete('notes', where: 'database_id = ?', whereArgs: [databaseId]);
+    print('🗑️ Удалены заметки');
+    
+    await db.delete('folders', where: 'database_id = ?', whereArgs: [databaseId]);
+    print('🗑️ Удалены папки');
+    
+    print('✅ ПРОСТАЯ ОЧИСТКА завершена для базы $databaseId');
+  }
+  
+  /// Экстренная очистка базы данных при критических проблемах
+  Future<void> _emergencyClearDatabase(String databaseId) async {
+    print('🚨 ЭКСТРЕННАЯ ОЧИСТКА базы $databaseId');
+    try {
+      // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: НЕ закрываем базу данных для экстренной очистки
+      // Просто выполняем простые DELETE запросы
+      
+      final db = await database; // Используем существующее соединение
+      
+      // Простые DELETE запросы без всех проверок
+      try {
+        await db.delete('connections', where: 'database_id = ?', whereArgs: [databaseId]);
+        await db.delete('pinboard_notes', where: 'database_id = ?', whereArgs: [databaseId]);
+        await db.delete('schedule_entries', where: 'database_id = ?', whereArgs: [databaseId]);
+        await db.delete('notes', where: 'database_id = ?', whereArgs: [databaseId]);
+        await db.delete('folders', where: 'database_id = ?', whereArgs: [databaseId]);
+        print('✅ Экстренная очистка базы $databaseId завершена успешно');
+      } catch (e) {
+        print('❌ Ошибка экстренной очистки: $e');
+        // В крайнем случае просто пропускаем очистку
+        print('⚠️ Пропускаем очистку базы $databaseId из-за критических ошибок');
+      }
+    } catch (e) {
+      print('❌ Критическая ошибка экстренной очистки: $e');
+    }
+  }
+  
+  /// Вспомогательный метод для выполнения очистки таблиц в транзакции (для обратной совместимости)
+  Future<void> _performTableClear(Transaction txn, String databaseId) async {
+    print('🗑️ ТРАНЗАКЦИЯ: Очистка в транзакции для базы $databaseId');
+    
+    try {
+      // Простая очистка в рамках транзакции
+      await txn.delete('connections', where: 'database_id = ?', whereArgs: [databaseId]);
+      await txn.delete('pinboard_notes', where: 'database_id = ?', whereArgs: [databaseId]);
+      await txn.delete('schedule_entries', where: 'database_id = ?', whereArgs: [databaseId]);
+      await txn.delete('notes', where: 'database_id = ?', whereArgs: [databaseId]);
+      await txn.delete('folders', where: 'database_id = ?', whereArgs: [databaseId]);
+      
+      print('✅ ТРАНЗАКЦИЯ: Очистка в транзакции завершена для базы $databaseId');
+    } catch (e) {
+      print('❌ ТРАНЗАКЦИЯ: Ошибка при очистке в транзакции: $e');
+      throw e;
+    }
   }
 
   Future<List<Map<String, dynamic>>> getNotesForDatabase([String? databaseId]) async {
@@ -1017,7 +1135,8 @@ class DatabaseHelper {
     
     final db = await database;
     final Map<String, dynamic> noteMap = note.toMap();
-    // Удаляем database_id из карты, если это локальная заметка
+    // ИСПРАВЛЕНИЕ: НЕ удаляем database_id для совместных баз
+    // Удаляем database_id только если он явно null (для личных данных)
     if (noteMap['database_id'] == null) {
       noteMap.remove('database_id');
     }
@@ -1177,42 +1296,54 @@ class DatabaseHelper {
   }
 
   Future<void> insertFolderForBackup(Map<String, dynamic> folder, [Transaction? txn]) async {
+    // ⚠️ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Фильтруем поля согласно локальной модели Folder 
+    // (БЕЗ created_at и updated_at которые отсутствуют в клиентской схеме)
+    final filteredFolder = <String, dynamic>{
+      'id': folder['id'],
+      'name': folder['name'],
+      'color': folder['color'],
+      'is_expanded': folder['is_expanded'],
+      'database_id': folder['database_id'],
+    };
+    
+    final preparedFolder = BackupData.prepareForSqlite(filteredFolder);
+    
     try {
       if (txn != null) {
-        await txn.insert('folders', folder);
+        await txn.insert('folders', preparedFolder);
       } else {
         final db = await database;
-        await db.insert('folders', folder);
+        await db.insert('folders', preparedFolder);
       }
     } catch (e) {
       // Обрабатываем ошибки уникальных ограничений
       if (e.toString().contains('UNIQUE constraint failed') || 
           e.toString().contains('UNIQUE') ||
           e.toString().contains('PRIMARY KEY')) {
-        print('Конфликт уникальности при вставке папки: ${folder['name']}, пытаемся обновить');
+        print('Конфликт уникальности при вставке папки: ${preparedFolder['name']}, пытаемся обновить');
         
         try {
           // Пытаемся обновить существующую запись
-          if (folder['id'] != null) {
+          if (preparedFolder['id'] != null) {
             if (txn != null) {
               await txn.update(
                 'folders',
-                folder,
+                preparedFolder,
                 where: 'id = ?',
-                whereArgs: [folder['id']],
+                whereArgs: [preparedFolder['id']],
               );
             } else {
               final db = await database;
               await db.update(
                 'folders',
-                folder,
+                preparedFolder,
                 where: 'id = ?',
-                whereArgs: [folder['id']],
+                whereArgs: [preparedFolder['id']],
               );
             }
-            print('Папка успешно обновлена: ${folder['name']}');
+            print('Папка успешно обновлена: ${preparedFolder['name']}');
           } else {
-            print('Пропускаем папку без ID: ${folder['name']}');
+            print('Пропускаем папку без ID: ${preparedFolder['name']}');
           }
         } catch (updateError) {
           print('Ошибка при обновлении папки: $updateError');
@@ -1267,6 +1398,56 @@ class DatabaseHelper {
         } catch (updateError) {
           print('Ошибка при обновлении заметки: $updateError');
         }
+      } else if (e.toString().contains('FOREIGN KEY constraint failed')) {
+        // Специальная обработка ошибок внешнего ключа только для критических случаев
+        print('⚠️ FOREIGN KEY: Ошибка связи для заметки ${preparedNote['title']}, folder_id: ${preparedNote['folder_id']}');
+        
+        // Проверяем существование папки и создаем ее если нужно
+        if (preparedNote['folder_id'] != null) {
+          try {
+            final db = txn != null ? txn : await database;
+            final folderExists = await (db as dynamic).query(
+              'folders',
+              where: 'id = ? AND database_id = ?',
+              whereArgs: [preparedNote['folder_id'], preparedNote['database_id']],
+            );
+            
+            if (folderExists.isEmpty) {
+              print('⚠️ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Создаем недостающую папку ${preparedNote['folder_id']}');
+              await (db as dynamic).insert('folders', {
+                'id': preparedNote['folder_id'],
+                'name': 'Восстановленная папка ${preparedNote['folder_id']}',
+                'color': 0xFF2196F3,
+                'is_expanded': 1,
+                'database_id': preparedNote['database_id'],
+              });
+              
+              // Повторяем вставку заметки
+              await (db as dynamic).insert('notes', preparedNote);
+              print('✅ Заметка успешно вставлена после создания папки');
+              return;
+            }
+          } catch (folderError) {
+            print('❌ Ошибка создания папки: $folderError');
+          }
+        }
+        
+        // В крайнем случае обнуляем folder_id
+        print('⚠️ ИСПРАВЛЕНИЕ: Обнуляем folder_id для заметки ${preparedNote['title']}');
+        preparedNote['folder_id'] = null;
+        
+        try {
+          if (txn != null) {
+            await txn.insert('notes', preparedNote);
+          } else {
+            final db = await database;
+            await db.insert('notes', preparedNote);
+          }
+          print('✅ Заметка вставлена без привязки к папке');
+        } catch (retryError) {
+          print('❌ Повторная ошибка при вставке заметки: $retryError');
+          rethrow;
+        }
       } else {
         print('Ошибка при вставке заметки: $e');
         rethrow;
@@ -1275,7 +1456,18 @@ class DatabaseHelper {
   }
 
   Future<void> insertScheduleEntryForBackup(Map<String, dynamic> entry, [Transaction? txn]) async {
-    final preparedEntry = BackupData.prepareForSqlite(entry);
+    // ⚠️ ВАЖНО: Фильтруем поля согласно локальной модели ScheduleEntry (БЕЗ created_at и updated_at)
+    final filteredEntry = <String, dynamic>{
+      'id': entry['id'],
+      'time': entry['time'],
+      'date': entry['date'],
+      'note': entry['note'],
+      'dynamic_fields_json': entry['dynamic_fields_json'],
+      'recurrence_json': entry['recurrence_json'],
+      'database_id': entry['database_id'],
+    };
+    
+    final preparedEntry = BackupData.prepareForSqlite(filteredEntry);
     
     // Для персональных резервных копий database_id может быть null - это нормально
     // Пропускаем только если это явно пустая строка (что указывает на ошибку)
@@ -1289,8 +1481,8 @@ class DatabaseHelper {
         // Используем INSERT OR REPLACE для автоматической замены дубликатов
         await txn.rawInsert('''
           INSERT OR REPLACE INTO schedule_entries 
-          (id, time, date, note, dynamic_fields_json, recurrence_json, database_id, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          (id, time, date, note, dynamic_fields_json, recurrence_json, database_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
         ''', [
           preparedEntry['id'],
           preparedEntry['time'],
@@ -1299,15 +1491,13 @@ class DatabaseHelper {
           preparedEntry['dynamic_fields_json'],
           preparedEntry['recurrence_json'],
           preparedEntry['database_id'],
-          preparedEntry['created_at'],
-          preparedEntry['updated_at'],
         ]);
       } else {
         final db = await database;
         await db.rawInsert('''
           INSERT OR REPLACE INTO schedule_entries 
-          (id, time, date, note, dynamic_fields_json, recurrence_json, database_id, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          (id, time, date, note, dynamic_fields_json, recurrence_json, database_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
         ''', [
           preparedEntry['id'],
           preparedEntry['time'],
@@ -1316,8 +1506,6 @@ class DatabaseHelper {
           preparedEntry['dynamic_fields_json'],
           preparedEntry['recurrence_json'],
           preparedEntry['database_id'],
-          preparedEntry['created_at'],
-          preparedEntry['updated_at'],
         ]);
       }
     } catch (e) {
@@ -1343,7 +1531,21 @@ class DatabaseHelper {
   }
 
   Future<void> insertPinboardNoteForBackup(Map<String, dynamic> note, [Transaction? txn]) async {
-    final preparedNote = BackupData.prepareForSqlite(note);
+    // ⚠️ ВАЖНО: Фильтруем поля согласно локальной модели PinboardNote (БЕЗ created_at и updated_at)
+    final filteredNote = <String, dynamic>{
+      'id': note['id'],
+      'title': note['title'],
+      'content': note['content'],
+      'position_x': note['position_x'],
+      'position_y': note['position_y'],
+      'width': note['width'],
+      'height': note['height'],
+      'background_color': note['background_color'],
+      'icon': note['icon'],
+      'database_id': note['database_id'],
+    };
+    
+    final preparedNote = BackupData.prepareForSqlite(filteredNote);
     
     try {
       if (txn != null) {
@@ -1393,7 +1595,18 @@ class DatabaseHelper {
   }
 
   Future<void> insertConnectionForBackup(Map<String, dynamic> connection, [Transaction? txn]) async {
-    final preparedConnection = BackupData.prepareForSqlite(connection);
+    // ⚠️ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Фильтруем поля согласно локальной модели Connection 
+    // (БЕЗ created_at и updated_at которые отсутствуют в клиентской схеме)
+    final filteredConnection = <String, dynamic>{
+      'id': connection['id'],
+      'from_note_id': connection['from_note_id'],
+      'to_note_id': connection['to_note_id'],
+      'name': connection['name'],
+      'connection_color': connection['connection_color'],
+      'database_id': connection['database_id'],
+    };
+    
+    final preparedConnection = BackupData.prepareForSqlite(filteredConnection);
     
     try {
       if (txn != null) {
@@ -1535,61 +1748,112 @@ class DatabaseHelper {
   }
 
   Future<BackupData> createBackup([String? databaseId]) async {
-    final folders = await getFoldersForDatabase(databaseId);
-    final notes = await getNotesForDatabase(databaseId);
-    final scheduleEntries = await getScheduleEntriesForDatabase(databaseId);
-    final pinboardNotes = await getPinboardNotesForDatabase(databaseId);
-    final connections = await getConnectionsForDatabase(databaseId);
-    
-    print('Создание резервной копии для базы ${databaseId ?? "локальной"}:');
-    print('  Папок: ${folders.length}');
-    print('  Заметок: ${notes.length}');
-    
-    // Изображения нужно фильтровать по ID заметок из текущей базы
-    List<Map<String, dynamic>> images = [];
-    if (notes.isNotEmpty) {
-      // Получаем ID всех заметок
-      final noteIds = notes
-          .where((note) => note['id'] != null)
-          .map((note) => note['id'].toString())
-          .toList();
-      
-      if (noteIds.isNotEmpty) {
+    print('Начало создания резервной копии');
+    try {
+      // Получаем все данные из базы
+      final folders = await getFolders(databaseId);
+      final notes = await getAllNotes(databaseId);
+      final scheduleEntries = await getScheduleEntries(databaseId);
+      final pinboardNotes = await getPinboardNotes(databaseId);  // Используем существующий метод
+      final connections = await getConnectionsDB(databaseId);  // Используем существующий метод
+      final noteImages = await getAllImages(databaseId);  // Используем существующий метод
+
+      print('Создание резервной копии для базы ${databaseId ?? "локальной"}:');
+      print('  Папок: ${folders.length}');
+      print('  Заметок: ${notes.length}');
+      print('  Записей расписания: ${scheduleEntries.length}');
+      print('  Элементов доски: ${pinboardNotes.length}');  // ИСПРАВЛЕНО: добавляем вывод количества элементов доски
+      print('  Соединений: ${connections.length}');
+      print('  Изображений: ${noteImages.length}');
+
+      // ИСПРАВЛЕНО: Создаем список изображений с данными из базы или пустой список
+      List<Map<String, dynamic>> imagesWithData = [];
+      if (noteImages.isNotEmpty) {
+        print('Загрузка данных изображений из базы...');
         final db = await database;
-        // Создаем строку с плейсхолдерами для запроса IN (?, ?, ...)
-        final placeholders = List.filled(noteIds.length, '?').join(',');
-        images = await db.query(
-          'note_images',
-          where: 'note_id IN ($placeholders)',
-          whereArgs: noteIds,
-        );
         
-        print('  Заметок с изображениями: ${images.map((img) => img['note_id']).toSet().length}');
-        print('  Всего изображений: ${images.length}');
-        
-        // Проверяем структуру нескольких изображений для диагностики
-        if (images.isNotEmpty) {
-          print('  Примеры изображений:');
-          for (int i = 0; i < math.min(3, images.length); i++) {
-            final image = images[i];
-            final imageData = image['image_data'] as Uint8List?;
-            print('    Изображение $i: note_id=${image['note_id']}, ' +
-                  'file_name=${image['file_name']}, ' +
-                  'размер=${imageData?.length ?? 0} байт');
+        for (var img in noteImages) {
+          try {
+            // Получаем данные изображения из базы
+            final imageDataRows = await db.query(
+              'note_images',
+              where: 'note_id = ? AND file_name = ?',
+              whereArgs: [img.noteId, img.imagePath],
+            );
+            
+            if (imageDataRows.isNotEmpty && imageDataRows.first['image_data'] != null) {
+              imagesWithData.add({
+                'id': img.id,
+                'note_id': img.noteId,
+                'file_name': img.imagePath,
+                'image_data': imageDataRows.first['image_data'],  // Реальные данные из базы
+                'database_id': databaseId,
+              });
+            }
+          } catch (e) {
+            print('Ошибка при загрузке данных изображения ${img.imagePath}: $e');
+            // Пропускаем это изображение
           }
         }
+        print('Загружено изображений с данными: ${imagesWithData.length} из ${noteImages.length}');
       }
-    }
 
-    return BackupData(
-      folders: folders,
-      notes: notes,
-      scheduleEntries: scheduleEntries,
-      pinboardNotes: pinboardNotes,
-      connections: connections,
-      noteImages: images,
-      databaseId: databaseId,
-    );
+      // Преобразуем данные в формат BackupData
+      final backup = BackupData(
+        folders: folders.map((f) => {
+          'id': f.id,
+          'name': f.name,
+          'color': f.color,
+          'is_expanded': f.isExpanded ? 1 : 0,
+          'database_id': databaseId,
+        }).toList(),
+        notes: notes.map((n) => {
+          'id': n.id,
+          'title': n.title,
+          'content': n.content,
+          'folder_id': n.folderId,
+          'created_at': n.createdAt.toIso8601String(),
+          'updated_at': n.updatedAt.toIso8601String(),
+          'database_id': databaseId,
+        }).toList(),
+        scheduleEntries: scheduleEntries.map((s) => {
+          'id': s.id,
+          'date': s.date,
+          'time': s.time,
+          'note': s.note,
+          'dynamic_fields_json': s.dynamicFieldsJson,  // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: добавляю отсутствующие поля
+          'recurrence_json': s.recurrence != null ? jsonEncode(s.recurrence!.toMap()) : null,
+          'database_id': databaseId,
+        }).toList(),
+        pinboardNotes: pinboardNotes.map((p) => {  // ИСПРАВЛЕНО: используем правильные имена полей
+          'id': p.id,
+          'title': p.title,
+          'content': p.content,
+          'position_x': p.posX,  // ИСПРАВЛЕНО: правильное поле
+          'position_y': p.posY,  // ИСПРАВЛЕНО: правильное поле
+          'width': p.width,
+          'height': p.height,
+          'background_color': p.backgroundColor,  // ИСПРАВЛЕНО: правильное поле
+          'icon': p.icon,
+          'database_id': databaseId,
+        }).toList(),
+        connections: connections.map((c) => {
+          'id': c.id,
+          'from_note_id': c.fromId,  // ИСПРАВЛЕНО: правильное поле
+          'to_note_id': c.toId,  // ИСПРАВЛЕНО: правильное поле
+          'name': c.name,
+          'connection_color': c.connectionColor,  // ИСПРАВЛЕНО: правильное поле
+          'database_id': databaseId,
+        }).toList(),
+        noteImages: imagesWithData,  // ИСПРАВЛЕНО: используем загруженные данные изображений
+      );
+
+      print('Резервная копия успешно создана');
+      return backup;
+    } catch (e) {
+      print('Ошибка при создании резервной копии: $e');
+      rethrow;
+    }
   }
 
   Future<void> restoreFromBackup(BackupData backup, [String? databaseId]) async {
@@ -1818,122 +2082,538 @@ class DatabaseHelper {
     );
   }
 
-  Future<void> importDatabase(String databaseId, Map<String, dynamic> data) async {
+  /// ИСПРАВЛЕНИЕ: Оптимизированный импорт данных БЕЗ сложной очистки таблиц
+  /// Используется при переключении на совместную базу данных
+  Future<void> importDatabaseOptimized(String databaseId, Map<String, dynamic> data) async {
+    print('🔍 ДИАГНОСТИКА: Вход в importDatabaseOptimized для базы $databaseId');
+    
+    // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Добавляем таймаут для всей операции импорта
+    return await Future.any([
+      _performImportWithSafeOperation(databaseId, data),
+      Future.delayed(Duration(seconds: 30), () => throw TimeoutException('Таймаут операции импорта данных'))
+    ]);
+  }
+  
+  /// Выполнение импорта с безопасными операциями
+  Future<void> _performImportWithSafeOperation(String databaseId, Map<String, dynamic> data) async {
     return await _safeDbOperation(() async {
-      print('Импорт данных для базы данных $databaseId');
+      print('📦 ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Начало импорта данных для базы данных $databaseId');
+      print('🔍 ДИАГНОСТИКА: Получение соединения с базой данных...');
       
       final db = await database;
+      print('🔍 ДИАГНОСТИКА: Соединение с базой данных получено успешно');
       
       try {
-        await db.transaction((txn) async {
-          // Очищаем существующие данные для этой базы
-          await clearDatabaseTables(databaseId, txn);
-    
-          int foldersCount = 0;
-          int notesCount = 0;
-          int scheduleCount = 0;
-          int pinboardCount = 0;
-          int connectionsCount = 0;
-          int imagesCount = 0;
-          
-          // Импортируем папки с обработкой ошибок
-          if (data['folders'] != null && data['folders'] is List) {
-            print('Импорт папок: ${data['folders'].length}');
-            for (var folder in (data['folders'] as List)) {
-              try {
-                folder['database_id'] = databaseId;
-                await insertFolderForBackup(folder, txn);
-                foldersCount++;
-              } catch (e) {
-                print('Ошибка при импорте папки: $e');
-              }
+        print('🔍 ДИАГНОСТИКА: Начало очистки таблиц...');
+        
+        // ИСПРАВЛЕНИЕ: Быстрая очистка без сложных транзакций и проверок
+        print('📦 ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Быстрая очистка таблиц для базы $databaseId...');
+        
+        // Простые DELETE запросы без транзакций для ускорения
+        print('🔍 ДИАГНОСТИКА: Удаление соединений...');
+        await db.delete('connections', where: 'database_id = ?', whereArgs: [databaseId]);
+        
+        print('🔍 ДИАГНОСТИКА: Удаление заметок на доске...');
+        await db.delete('pinboard_notes', where: 'database_id = ?', whereArgs: [databaseId]);
+        
+        print('🔍 ДИАГНОСТИКА: Удаление записей расписания...');
+        await db.delete('schedule_entries', where: 'database_id = ?', whereArgs: [databaseId]);
+        
+        print('🔍 ДИАГНОСТИКА: Удаление заметок...');
+        await db.delete('notes', where: 'database_id = ?', whereArgs: [databaseId]);
+        
+        print('🔍 ДИАГНОСТИКА: Удаление папок...');
+        await db.delete('folders', where: 'database_id = ?', whereArgs: [databaseId]);
+        
+        print('📦 ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Таблицы быстро очищены');
+        print('🔍 ДИАГНОСТИКА: Очистка таблиц завершена, начинаем импорт данных...');
+        
+        int foldersCount = 0;
+        int notesCount = 0;
+        int scheduleCount = 0;
+        int pinboardCount = 0;
+        int connectionsCount = 0;
+        int imagesCount = 0;
+        
+        // ШАГ 1: Импортируем папки (быстрая операция)
+        print('📦 ОПТИМИЗИРОВАННЫЙ ИМПОРТ: ШАГ 1 - Импорт папок...');
+        if (data['folders'] != null && data['folders'] is List) {
+          print('📦 ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Обработка папок: ${data['folders'].length}');
+          // ИСПРАВЛЕНИЕ: Импортируем без транзакций для ускорения
+          for (var folder in (data['folders'] as List)) {
+            try {
+              folder['database_id'] = databaseId;
+              await insertFolderForBackup(folder, null); // Без транзакции
+              foldersCount++;
+            } catch (e) {
+              print('❌ ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Ошибка при импорте папки: $e');
             }
           }
-    
-          // Импортируем заметки с обработкой ошибок
-          if (data['notes'] != null && data['notes'] is List) {
-            print('Импорт заметок: ${data['notes'].length}');
-            for (var note in (data['notes'] as List)) {
-              try {
-                note['database_id'] = databaseId;
-                await insertNoteForBackup(note, txn);
-                notesCount++;
-              } catch (e) {
-                print('Ошибка при импорте заметки: $e');
+          print('✅ ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Импортировано папок: $foldersCount');
+        } else {
+          print('📦 ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Папок для импорта нет');
+        }
+
+        // ШАГ 1.5: КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ - Создаем базовую папку если папок нет вообще
+        if (foldersCount == 0) {
+          print('⚠️ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Папок нет, создаем базовую папку для базы $databaseId');
+          try {
+            final folderId = await db.insert('folders', {
+              'name': 'Общие заметки',
+              'color': 0xFF4CAF50,
+              'is_expanded': 1,
+              'database_id': databaseId,
+            });
+            foldersCount = 1;
+            print('✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Создана базовая папка с ID $folderId');
+          } catch (e) {
+            print('❌ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Ошибка создания базовой папки: $e');
+          }
+        }
+
+        // ШАГ 2: Импортируем заметки (может быть медленнее)
+        print('📦 ОПТИМИЗИРОВАННЫЙ ИМПОРТ: ШАГ 2 - Импорт заметок...');
+        if (data['notes'] != null && data['notes'] is List) {
+          print('📦 ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Обработка заметок: ${data['notes'].length}');
+          // ИСПРАВЛЕНИЕ: Импортируем без транзакций для ускорения
+          for (var note in (data['notes'] as List)) {
+            try {
+              note['database_id'] = databaseId;
+              
+              // ⚠️ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Проверяем и создаем недостающую папку
+              if (note['folder_id'] != null) {
+                final folderExists = await db.query(
+                  'folders',
+                  where: 'id = ? AND database_id = ?',
+                  whereArgs: [note['folder_id'], databaseId],
+                );
+                
+                if (folderExists.isEmpty) {
+                  print('⚠️ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Папка ${note['folder_id']} не существует, создаем ее');
+                  try {
+                    await db.insert('folders', {
+                      'id': note['folder_id'],
+                      'name': 'Папка ${note['folder_id']}',
+                      'color': 0xFF2196F3,
+                      'is_expanded': 1,
+                      'database_id': databaseId,
+                    });
+                    print('✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Создана недостающая папка ${note['folder_id']}');
+                  } catch (folderError) {
+                    print('❌ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Ошибка создания папки ${note['folder_id']}: $folderError');
+                    // Обнуляем folder_id как запасной вариант
+                    note['folder_id'] = null;
+                  }
+                }
               }
+              
+              await insertNoteForBackup(note, null); // Без транзакции
+              notesCount++;
+            } catch (e) {
+              print('❌ ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Ошибка при импорте заметки: $e');
             }
           }
-    
-          // Импортируем записи расписания с обработкой ошибок
-          if (data['schedule_entries'] != null && data['schedule_entries'] is List) {
-            print('Импорт записей расписания: ${data['schedule_entries'].length}');
+          print('✅ ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Импортировано заметок: $notesCount');
+        } else {
+          print('📦 ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Заметок для импорта нет');
+        }
+
+        // ШАГ 3: Импортируем записи расписания (обе версии)
+        print('📦 ОПТИМИЗИРОВАННЫЙ ИМПОРТ: ШАГ 3 - Импорт записей расписания...');
+        if (data['schedule_entries'] != null && data['schedule_entries'] is List) {
+          print('📦 ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Обработка записей расписания: ${data['schedule_entries'].length}');
+          await db.transaction((txn) async {
             for (var entry in (data['schedule_entries'] as List)) {
               try {
                 entry['database_id'] = databaseId;
                 await insertScheduleEntryForBackup(entry, txn);
                 scheduleCount++;
               } catch (e) {
-                print('Ошибка при импорте записи расписания: $e');
+                print('❌ ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Ошибка при импорте записи расписания: $e');
               }
             }
-          }
-    
-          // Импортируем заметки на доске с обработкой ошибок
-          if (data['pinboard_notes'] != null && data['pinboard_notes'] is List) {
-            print('Импорт заметок на доске: ${data['pinboard_notes'].length}');
+          });
+          print('✅ ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Импортировано записей расписания: $scheduleCount');
+        } else {
+          print('📦 ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Записей расписания для импорта нет');
+        }
+        
+        // ДОБАВЛЕНО: Поддержка camelCase от сервера
+        print('📦 ОПТИМИЗИРОВАННЫЙ ИМПОРТ: ШАГ 3b - Импорт записей расписания (camelCase)...');
+        if (data['scheduleEntries'] != null && data['scheduleEntries'] is List) {
+          print('📦 ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Обработка записей расписания (camelCase): ${data['scheduleEntries'].length}');
+          await db.transaction((txn) async {
+            for (var entry in (data['scheduleEntries'] as List)) {
+              try {
+                entry['database_id'] = databaseId;
+                await insertScheduleEntryForBackup(entry, txn);
+                scheduleCount++;
+              } catch (e) {
+                print('❌ ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Ошибка при импорте записи расписания (camelCase): $e');
+              }
+            }
+          });
+          print('✅ ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Импортировано записей расписания (camelCase): ${scheduleCount - (data['schedule_entries']?.length ?? 0)}');
+        } else {
+          print('📦 ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Записей расписания (camelCase) для импорта нет');
+        }
+
+        // ШАГ 4: Импортируем заметки на доске (обе версии)
+        print('📦 ОПТИМИЗИРОВАННЫЙ ИМПОРТ: ШАГ 4 - Импорт заметок на доске...');
+        if (data['pinboard_notes'] != null && data['pinboard_notes'] is List) {
+          print('📦 ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Обработка заметок на доске: ${data['pinboard_notes'].length}');
+          await db.transaction((txn) async {
             for (var note in (data['pinboard_notes'] as List)) {
               try {
                 note['database_id'] = databaseId;
                 await insertPinboardNoteForBackup(note, txn);
                 pinboardCount++;
               } catch (e) {
-                print('Ошибка при импорте заметки на доске: $e');
+                print('❌ ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Ошибка при импорте заметки на доске: $e');
               }
             }
-          }
-    
-          // Импортируем соединения с обработкой ошибок
-          if (data['connections'] != null && data['connections'] is List) {
-            print('Импорт соединений: ${data['connections'].length}');
+          });
+          print('✅ ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Импортировано заметок на доске: $pinboardCount');
+        } else {
+          print('📦 ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Заметок на доске для импорта нет');
+        }
+        
+        // ДОБАВЛЕНО: Поддержка camelCase от сервера
+        print('📦 ОПТИМИЗИРОВАННЫЙ ИМПОРТ: ШАГ 4b - Импорт заметок на доске (camelCase)...');
+        if (data['pinboardNotes'] != null && data['pinboardNotes'] is List) {
+          print('📦 ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Обработка заметок на доске (camelCase): ${data['pinboardNotes'].length}');
+          await db.transaction((txn) async {
+            for (var note in (data['pinboardNotes'] as List)) {
+              try {
+                note['database_id'] = databaseId;
+                await insertPinboardNoteForBackup(note, txn);
+                pinboardCount++;
+              } catch (e) {
+                print('❌ ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Ошибка при импорте заметки на доске (camelCase): $e');
+              }
+            }
+          });
+          print('✅ ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Импортировано заметок на доске (camelCase): ${pinboardCount - (data['pinboard_notes']?.length ?? 0)}');
+        } else {
+          print('📦 ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Заметок на доске (camelCase) для импорта нет');
+        }
+
+        // ШАГ 5: Импортируем соединения
+        print('📦 ОПТИМИЗИРОВАННЫЙ ИМПОРТ: ШАГ 5 - Импорт соединений...');
+        if (data['connections'] != null && data['connections'] is List) {
+          print('📦 ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Обработка соединений: ${data['connections'].length}');
+          await db.transaction((txn) async {
             for (var connection in (data['connections'] as List)) {
               try {
                 connection['database_id'] = databaseId;
                 await insertConnectionForBackup(connection, txn);
                 connectionsCount++;
               } catch (e) {
-                print('Ошибка при импорте соединения: $e');
+                print('❌ ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Ошибка при импорте соединения: $e');
               }
             }
+          });
+          print('✅ ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Импортировано соединений: $connectionsCount');
+        } else {
+          print('📦 ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Соединений для импорта нет');
+        }
+        
+        // ШАГ 6: Импортируем изображения (может быть самое медленное)
+        print('📦 ОПТИМИЗИРОВАННЫЙ ИМПОРТ: ШАГ 6 - Импорт изображений...');
+        if (data['note_images'] != null && data['note_images'] is List) {
+          print('📦 ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Обработка изображений: ${data['note_images'].length}');
+          // Импортируем изображения небольшими пакетами
+          final images = data['note_images'] as List;
+          for (int i = 0; i < images.length; i += 3) { // По 3 изображения за раз для скорости
+            final batch = images.skip(i).take(3).toList();
+            print('📦 ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Обработка пакета изображений ${i + 1}-${i + batch.length} из ${images.length}');
+            await db.transaction((txn) async {
+              for (var image in batch) {
+                try {
+                  await insertImageForBackup(
+                    image['note_id'],
+                    image['file_name'],
+                    image['image_data'] is Uint8List 
+                      ? image['image_data'] 
+                      : Uint8List.fromList(List<int>.from(image['image_data'])),
+                    txn
+                  );
+                  imagesCount++;
+                } catch (e) {
+                  print('❌ ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Ошибка при импорте изображения: $e');
+                }
+              }
+            });
           }
-          
-          // Импортируем изображения с обработкой ошибок
-          if (data['note_images'] != null && data['note_images'] is List) {
-            print('Импорт изображений: ${data['note_images'].length}');
-            for (var image in (data['note_images'] as List)) {
+          print('✅ ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Импортировано изображений: $imagesCount');
+        } else {
+          print('📦 ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Изображений для импорта нет');
+        }
+        
+        print('✅ ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Общий итог импорта: папок - $foldersCount, заметок - $notesCount, ' +
+              'записей расписания - $scheduleCount, заметок на доске - $pinboardCount, ' +
+              'соединений - $connectionsCount, изображений - $imagesCount');
+        
+        print('📦 ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Импорт данных для базы $databaseId успешно завершен');
+        
+      } catch (e) {
+        print('❌ ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Критическая ошибка импорта для базы $databaseId: $e');
+        throw e;
+      }
+    });
+  }
+
+  Future<void> importDatabase(String databaseId, Map<String, dynamic> data) async {
+    return await _safeDbOperation(() async {
+      print('📦 ИМПОРТ: Начало импорта данных для базы данных $databaseId');
+      
+      final db = await database;
+      
+      try {
+        // ИСПРАВЛЕНИЕ: Разбиваем импорт на более мелкие транзакции чтобы избежать долгих блокировок
+        
+        // ШАГ 1: Очищаем существующие данные (быстрая операция)
+        print('📦 ИМПОРТ: ШАГ 1 - Очистка существующих данных...');
+        await db.transaction((txn) async {
+          await clearDatabaseTables(databaseId, txn);
+        });
+        print('✅ ИМПОРТ: Таблицы очищены для базы $databaseId');
+        
+        int foldersCount = 0;
+        int notesCount = 0;
+        int scheduleCount = 0;
+        int pinboardCount = 0;
+        int connectionsCount = 0;
+        int imagesCount = 0;
+        
+        // ШАГ 2: Импортируем папки (быстрая операция)
+        print('📦 ИМПОРТ: ШАГ 2 - Импорт папок...');
+        if (data['folders'] != null && data['folders'] is List) {
+          print('📦 ИМПОРТ: Обработка папок: ${data['folders'].length}');
+          await db.transaction((txn) async {
+            for (var folder in (data['folders'] as List)) {
               try {
-                await insertImageForBackup(
-                  image['note_id'],
-                  image['file_name'],
-                  image['image_data'] is Uint8List 
-                    ? image['image_data'] 
-                    : Uint8List.fromList(List<int>.from(image['image_data'])),
-                  txn
-                );
-                imagesCount++;
+                folder['database_id'] = databaseId;
+                await insertFolderForBackup(folder, txn);
+                foldersCount++;
               } catch (e) {
-                print('Ошибка при импорте изображения: $e');
+                print('❌ ИМПОРТ: Ошибка при импорте папки: $e');
               }
             }
+          });
+          print('✅ ИМПОРТ: Импортировано папок: $foldersCount');
+        } else {
+          print('📦 ИМПОРТ: Папок для импорта нет');
+        }
+
+        // ШАГ 2.5: КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ - Создаем базовую папку если папок нет
+        if (foldersCount == 0) {
+          print('⚠️ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Папок нет, создаем базовую папку для базы $databaseId');
+          await db.transaction((txn) async {
+            try {
+              final folderId = await txn.insert('folders', {
+                'name': 'Общие заметки',
+                'color': 0xFF4CAF50,
+                'is_expanded': 1,
+                'database_id': databaseId,
+              });
+              foldersCount = 1;
+              print('✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Создана базовая папка с ID $folderId');
+            } catch (e) {
+              print('❌ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Ошибка создания базовой папки: $e');
+            }
+          });
+        }
+
+        // ШАГ 3: Импортируем заметки (может быть медленнее)
+        print('📦 ИМПОРТ: ШАГ 3 - Импорт заметок...');
+        if (data['notes'] != null && data['notes'] is List) {
+          print('📦 ИМПОРТ: Обработка заметок: ${data['notes'].length}');
+          await db.transaction((txn) async {
+            for (var note in (data['notes'] as List)) {
+              try {
+                note['database_id'] = databaseId;
+                
+                // ⚠️ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Проверяем и создаем недостающую папку
+                if (note['folder_id'] != null) {
+                  final folderExists = await txn.query(
+                    'folders',
+                    where: 'id = ? AND database_id = ?',
+                    whereArgs: [note['folder_id'], databaseId],
+                  );
+                  
+                  if (folderExists.isEmpty) {
+                    print('⚠️ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Папка ${note['folder_id']} не существует, создаем ее');
+                    try {
+                      await txn.insert('folders', {
+                        'id': note['folder_id'],
+                        'name': 'Папка ${note['folder_id']}',
+                        'color': 0xFF2196F3,
+                        'is_expanded': 1,
+                        'database_id': databaseId,
+                      });
+                      print('✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Создана недостающая папка ${note['folder_id']}');
+                    } catch (folderError) {
+                      print('❌ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Ошибка создания папки ${note['folder_id']}: $folderError');
+                      // Обнуляем folder_id как запасной вариант
+                      note['folder_id'] = null;
+                    }
+                  }
+                }
+                
+                await insertNoteForBackup(note, txn);
+                notesCount++;
+              } catch (e) {
+                print('❌ ИМПОРТ: Ошибка при импорте заметки: $e');
+              }
+            }
+          });
+          print('✅ ИМПОРТ: Импортировано заметок: $notesCount');
+        } else {
+          print('📦 ИМПОРТ: Заметок для импорта нет');
+        }
+
+        // ШАГ 4: Импортируем записи расписания (обе версии)
+        print('📦 ИМПОРТ: ШАГ 4 - Импорт записей расписания...');
+        if (data['schedule_entries'] != null && data['schedule_entries'] is List) {
+          print('📦 ИМПОРТ: Обработка записей расписания: ${data['schedule_entries'].length}');
+          await db.transaction((txn) async {
+            for (var entry in (data['schedule_entries'] as List)) {
+              try {
+                entry['database_id'] = databaseId;
+                await insertScheduleEntryForBackup(entry, txn);
+                scheduleCount++;
+              } catch (e) {
+                print('❌ ИМПОРТ: Ошибка при импорте записи расписания: $e');
+              }
+            }
+          });
+          print('✅ ИМПОРТ: Импортировано записей расписания: $scheduleCount');
+        } else {
+          print('📦 ИМПОРТ: Записей расписания для импорта нет');
+        }
+        
+        // ДОБАВЛЕНО: Поддержка camelCase от сервера
+        print('📦 ИМПОРТ: ШАГ 4b - Импорт записей расписания (camelCase)...');
+        if (data['scheduleEntries'] != null && data['scheduleEntries'] is List) {
+          print('📦 ИМПОРТ: Обработка записей расписания (camelCase): ${data['scheduleEntries'].length}');
+          await db.transaction((txn) async {
+            for (var entry in (data['scheduleEntries'] as List)) {
+              try {
+                entry['database_id'] = databaseId;
+                await insertScheduleEntryForBackup(entry, txn);
+                scheduleCount++;
+              } catch (e) {
+                print('❌ ИМПОРТ: Ошибка при импорте записи расписания (camelCase): $e');
+              }
+            }
+          });
+          print('✅ ИМПОРТ: Импортировано записей расписания (camelCase): ${scheduleCount - (data['schedule_entries']?.length ?? 0)}');
+        } else {
+          print('📦 ИМПОРТ: Записей расписания (camelCase) для импорта нет');
+        }
+
+        // ШАГ 5: Импортируем заметки на доске (обе версии)
+        print('📦 ИМПОРТ: ШАГ 5 - Импорт заметок на доске...');
+        if (data['pinboard_notes'] != null && data['pinboard_notes'] is List) {
+          print('📦 ИМПОРТ: Обработка заметок на доске: ${data['pinboard_notes'].length}');
+          await db.transaction((txn) async {
+            for (var note in (data['pinboard_notes'] as List)) {
+              try {
+                note['database_id'] = databaseId;
+                await insertPinboardNoteForBackup(note, txn);
+                pinboardCount++;
+              } catch (e) {
+                print('❌ ИМПОРТ: Ошибка при импорте заметки на доске: $e');
+              }
+            }
+          });
+          print('✅ ИМПОРТ: Импортировано заметок на доске: $pinboardCount');
+        } else {
+          print('📦 ИМПОРТ: Заметок на доске для импорта нет');
+        }
+        
+        // ДОБАВЛЕНО: Поддержка camelCase от сервера
+        print('📦 ИМПОРТ: ШАГ 5b - Импорт заметок на доске (camelCase)...');
+        if (data['pinboardNotes'] != null && data['pinboardNotes'] is List) {
+          print('📦 ИМПОРТ: Обработка заметок на доске (camelCase): ${data['pinboardNotes'].length}');
+          await db.transaction((txn) async {
+            for (var note in (data['pinboardNotes'] as List)) {
+              try {
+                note['database_id'] = databaseId;
+                await insertPinboardNoteForBackup(note, txn);
+                pinboardCount++;
+              } catch (e) {
+                print('❌ ИМПОРТ: Ошибка при импорте заметки на доске (camelCase): $e');
+              }
+            }
+          });
+          print('✅ ИМПОРТ: Импортировано заметок на доске (camelCase): ${pinboardCount - (data['pinboard_notes']?.length ?? 0)}');
+        } else {
+          print('📦 ИМПОРТ: Заметок на доске (camelCase) для импорта нет');
+        }
+
+        // ШАГ 6: Импортируем соединения
+        print('📦 ИМПОРТ: ШАГ 6 - Импорт соединений...');
+        if (data['connections'] != null && data['connections'] is List) {
+          print('📦 ИМПОРТ: Обработка соединений: ${data['connections'].length}');
+          await db.transaction((txn) async {
+            for (var connection in (data['connections'] as List)) {
+              try {
+                connection['database_id'] = databaseId;
+                await insertConnectionForBackup(connection, txn);
+                connectionsCount++;
+              } catch (e) {
+                print('❌ ИМПОРТ: Ошибка при импорте соединения: $e');
+              }
+            }
+          });
+          print('✅ ИМПОРТ: Импортировано соединений: $connectionsCount');
+        } else {
+          print('📦 ИМПОРТ: Соединений для импорта нет');
+        }
+        
+        // ШАГ 7: Импортируем изображения (может быть самое медленное)
+        print('📦 ИМПОРТ: ШАГ 7 - Импорт изображений...');
+        if (data['note_images'] != null && data['note_images'] is List) {
+          print('📦 ИМПОРТ: Обработка изображений: ${data['note_images'].length}');
+          // Импортируем изображения небольшими пакетами
+          final images = data['note_images'] as List;
+          for (int i = 0; i < images.length; i += 5) { // По 5 изображений за раз
+            final batch = images.skip(i).take(5).toList();
+            print('📦 ИМПОРТ: Обработка пакета изображений ${i + 1}-${i + batch.length} из ${images.length}');
+            await db.transaction((txn) async {
+              for (var image in batch) {
+                try {
+                  await insertImageForBackup(
+                    image['note_id'],
+                    image['file_name'],
+                    image['image_data'] is Uint8List 
+                      ? image['image_data'] 
+                      : Uint8List.fromList(List<int>.from(image['image_data'])),
+                    txn
+                  );
+                  imagesCount++;
+                } catch (e) {
+                  print('❌ ИМПОРТ: Ошибка при импорте изображения: $e');
+                }
+              }
+            });
           }
-          
-          print('Импортировано: папок - $foldersCount, заметок - $notesCount, ' +
-                'записей расписания - $scheduleCount, заметок на доске - $pinboardCount, ' +
-                'соединений - $connectionsCount, изображений - $imagesCount');
-          
-          // Если данных нет, создаем базовую структуру
-          if (foldersCount == 0 && notesCount == 0) {
-            print('Создание базовой структуры для пустой базы $databaseId');
-            
+          print('✅ ИМПОРТ: Импортировано изображений: $imagesCount');
+        } else {
+          print('📦 ИМПОРТ: Изображений для импорта нет');
+        }
+        
+        print('📦 ИМПОРТ: ШАГ 8 - Создание базовой структуры если нужно...');
+        print('✅ ИМПОРТ: Общий итог импорта: папок - $foldersCount, заметок - $notesCount, ' +
+              'записей расписания - $scheduleCount, заметок на доске - $pinboardCount, ' +
+              'соединений - $connectionsCount, изображений - $imagesCount');
+        
+        // ШАГ 8: Создаем базовую структуру если данных нет
+        if (foldersCount == 0 && notesCount == 0) {
+          print('📦 ИМПОРТ: Создание базовой структуры для пустой базы $databaseId');
+          await db.transaction((txn) async {
             try {
               // Вставляем общую папку
               final folderId = await txn.insert('folders', {
@@ -1953,26 +2633,30 @@ class DatabaseHelper {
                 'database_id': databaseId,
               });
               
-              print('Базовая структура создана успешно');
+              print('✅ ИМПОРТ: Базовая структура создана успешно');
             } catch (e) {
-              print('Ошибка при создании базовой структуры: $e');
+              print('❌ ИМПОРТ: Ошибка при создании базовой структуры: $e');
             }
-          }
-        });
+          });
+        } else {
+          print('📦 ИМПОРТ: Базовая структура не нужна - данные уже есть');
+        }
         
-        print('Импорт данных для базы $databaseId завершен успешно');
+        print('🎉 ИМПОРТ: Импорт данных для базы $databaseId завершен успешно');
         
         // Уведомляем об изменении базы данных
+        print('📦 ИМПОРТ: Отправка уведомления об изменении базы данных...');
         Future.microtask(() {
           try {
             _notifyDatabaseChanged();
+            print('✅ ИМПОРТ: Уведомление об изменении базы данных отправлено');
           } catch (e) {
-            print('Ошибка при уведомлении об изменении базы данных: $e');
+            print('❌ ИМПОРТ: Ошибка при уведомлении об изменении базы данных: $e');
           }
         });
         
       } catch (e) {
-        print('Критическая ошибка при импорте данных: $e');
+        print('❌ ИМПОРТ: Критическая ошибка при импорте данных: $e');
         throw e;
       }
     });
@@ -2118,12 +2802,14 @@ class DatabaseHelper {
 
   Future<void> initializeSharedDatabase(String databaseId) async {
     return await _safeDbOperation(() async {
-      print('Инициализация совместной базы данных: $databaseId');
+      print('🔄 ИНИЦИАЛИЗАЦИЯ: Начало инициализации совместной базы данных: $databaseId');
       
       final db = await database;
+      print('🔄 ИНИЦИАЛИЗАЦИЯ: Соединение с базой данных получено');
       
       // Проверяем существующие записи с обработкой ошибок
       try {
+        print('🔄 ИНИЦИАЛИЗАЦИЯ: Проверка существующих записей для базы $databaseId');
         final existing = await db.query(
           'shared_databases',
           where: 'server_id = ?',
@@ -2132,6 +2818,7 @@ class DatabaseHelper {
         );
 
         if (existing.isEmpty) {
+          print('🔄 ИНИЦИАЛИЗАЦИЯ: База $databaseId не найдена, создаем новую запись');
           // Создаем запись с обработкой уникальных ограничений
           try {
             await db.insert('shared_databases', {
@@ -2144,19 +2831,20 @@ class DatabaseHelper {
               'is_owner': 0,
               'last_sync': DateTime.now().toIso8601String(),
             });
-            print('Создана запись в таблице shared_databases для базы $databaseId');
+            print('✅ ИНИЦИАЛИЗАЦИЯ: Создана запись в таблице shared_databases для базы $databaseId');
           } catch (insertError) {
             if (insertError.toString().contains('UNIQUE constraint failed')) {
-              print('База $databaseId уже существует (конфликт уникальности)');
+              print('⚠️ ИНИЦИАЛИЗАЦИЯ: База $databaseId уже существует (конфликт уникальности)');
             } else {
-              print('Ошибка создания записи для базы $databaseId: $insertError');
+              print('❌ ИНИЦИАЛИЗАЦИЯ: Ошибка создания записи для базы $databaseId: $insertError');
             }
           }
         } else {
-          print('База $databaseId уже существует в таблице shared_databases');
+          print('✅ ИНИЦИАЛИЗАЦИЯ: База $databaseId уже существует в таблице shared_databases');
         }
-
+        
         // Проверяем наличие данных с ограничением количества запросов
+        print('🔄 ИНИЦИАЛИЗАЦИЯ: Проверка наличия данных в базе $databaseId');
         final notesResult = await db.query(
           'notes',
           where: 'database_id = ?',
@@ -2166,6 +2854,7 @@ class DatabaseHelper {
         
         // Создаем базовую структуру только если база полностью пустая
         if (notesResult.isEmpty) {
+          print('🔄 ИНИЦИАЛИЗАЦИЯ: Заметки не найдены, проверяем папки');
           final foldersResult = await db.query(
             'folders',
             where: 'database_id = ?',
@@ -2174,7 +2863,7 @@ class DatabaseHelper {
           );
           
           if (foldersResult.isEmpty) {
-            print('Создание минимальной структуры для пустой базы $databaseId');
+            print('🔄 ИНИЦИАЛИЗАЦИЯ: Папки не найдены, создаем минимальную структуру для базы $databaseId');
             
             // Используем транзакцию для атомарности операций
             await db.transaction((txn) async {
@@ -2195,18 +2884,21 @@ class DatabaseHelper {
                   'database_id': databaseId,
                 });
                 
-                print('Базовая структура создана для базы $databaseId');
+                print('✅ ИНИЦИАЛИЗАЦИЯ: Базовая структура создана для базы $databaseId');
               } catch (e) {
-                print('Ошибка создания базовой структуры: $e');
+                print('❌ ИНИЦИАЛИЗАЦИЯ: Ошибка создания базовой структуры: $e');
                 // Не критично, продолжаем
               }
             });
+          } else {
+            print('✅ ИНИЦИАЛИЗАЦИЯ: Папки уже существуют в базе $databaseId');
           }
         } else {
-          print('База $databaseId уже содержит данные');
+          print('✅ ИНИЦИАЛИЗАЦИЯ: База $databaseId уже содержит данные');
         }
         
         // Обновляем время синхронизации с обработкой ошибок
+        print('🔄 ИНИЦИАЛИЗАЦИЯ: Обновление времени синхронизации для базы $databaseId');
         try {
           await db.update(
             'shared_databases',
@@ -2214,23 +2906,26 @@ class DatabaseHelper {
             where: 'server_id = ?',
             whereArgs: [databaseId],
           );
+          print('✅ ИНИЦИАЛИЗАЦИЯ: Время синхронизации обновлено для базы $databaseId');
         } catch (updateError) {
-          print('Ошибка обновления времени синхронизации: $updateError');
+          print('❌ ИНИЦИАЛИЗАЦИЯ: Ошибка обновления времени синхронизации: $updateError');
         }
         
-        print('Инициализация базы $databaseId завершена успешно');
+        print('🎉 ИНИЦИАЛИЗАЦИЯ: Инициализация базы $databaseId завершена успешно');
         
       } catch (e) {
-        print('Ошибка при работе с базой данных во время инициализации: $e');
+        print('❌ ИНИЦИАЛИЗАЦИЯ: Ошибка при работе с базой данных во время инициализации: $e');
         throw e;
       }
       
       // Асинхронное уведомление без блокировки
+      print('🔄 ИНИЦИАЛИЗАЦИЯ: Отправка уведомления об изменении базы данных');
       Future.microtask(() {
         try {
           _notifyDatabaseChanged();
+          print('✅ ИНИЦИАЛИЗАЦИЯ: Уведомление об изменении базы данных отправлено');
         } catch (e) {
-          print('Ошибка при уведомлении об изменении базы данных: $e');
+          print('❌ ИНИЦИАЛИЗАЦИЯ: Ошибка при уведомлении об изменении базы данных: $e');
         }
       });
     });

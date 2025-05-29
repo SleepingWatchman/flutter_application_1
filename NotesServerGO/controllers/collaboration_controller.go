@@ -412,24 +412,47 @@ func ExportSharedDatabaseHandler(w http.ResponseWriter, r *http.Request) {
 // GetDatabaseDataHandler обрабатывает получение данных совместной базы данных
 // Этот эндпоинт по сути делает то же самое, что и Export, возвращая все данные БД.
 func GetDatabaseDataHandler(w http.ResponseWriter, r *http.Request) {
+	log.Printf("GetDatabaseDataHandler: получен запрос %s %s", r.Method, r.URL.Path)
+
 	vars := mux.Vars(r)
-	dbIDStr := vars["databaseId"] // Обратите внимание, что в main.go здесь databaseId, а не db_id
+	log.Printf("GetDatabaseDataHandler: переменные пути: %+v", vars)
+
+	// Поддерживаем два формата параметров: db_id и databaseId
+	var dbIDStr string
+	if dbID, exists := vars["db_id"]; exists {
+		dbIDStr = dbID
+		log.Printf("GetDatabaseDataHandler: используем параметр db_id = %s", dbIDStr)
+	} else if databaseID, exists := vars["databaseId"]; exists {
+		dbIDStr = databaseID
+		log.Printf("GetDatabaseDataHandler: используем параметр databaseId = %s", dbIDStr)
+	} else {
+		log.Printf("GetDatabaseDataHandler: ОШИБКА - не найден параметр ID базы данных в %+v", vars)
+		respondError(w, http.StatusBadRequest, "Не найден параметр ID базы данных.")
+		return
+	}
+
 	dbID, err := strconv.ParseInt(dbIDStr, 10, 64)
 	if err != nil {
+		log.Printf("GetDatabaseDataHandler: ОШИБКА - неверный формат ID: %s, ошибка: %v", dbIDStr, err)
 		respondError(w, http.StatusBadRequest, "Неверный формат ID базы данных: "+err.Error())
 		return
 	}
 
+	log.Printf("GetDatabaseDataHandler: обработка запроса для БД ID = %d", dbID)
+
 	userID, ok := r.Context().Value(middleware.UserIDKey).(int64)
 	if !ok {
+		log.Printf("GetDatabaseDataHandler: ОШИБКА - не удалось получить ID пользователя из токена")
 		respondError(w, http.StatusUnauthorized, "Не удалось получить ID пользователя из токена.")
 		return
 	}
 
+	log.Printf("GetDatabaseDataHandler: пользователь ID = %d запрашивает данные БД %d", userID, dbID)
+
 	// Используем ту же функцию, что и для экспорта
 	backupData, err := data.ExportSharedDatabase(dbID, userID)
 	if err != nil {
-		log.Printf("Ошибка при получении данных БД %d для пользователя %d: %v", dbID, userID, err)
+		log.Printf("GetDatabaseDataHandler: ОШИБКА при получении данных БД %d для пользователя %d: %v", dbID, userID, err)
 		if err.Error() == fmt.Sprintf("пользователь %d не имеет доступа к БД %d", userID, dbID) {
 			respondError(w, http.StatusForbidden, err.Error())
 		} else {
@@ -438,13 +461,25 @@ func GetDatabaseDataHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Printf("GetDatabaseDataHandler: успешно получены данные БД %d для пользователя %d, отправляем ответ", dbID, userID)
 	respondJSON(w, http.StatusOK, backupData)
 }
 
 // BackupDatabaseDataHandler обрабатывает сохранение резервной копии данных совместной базы данных
 func BackupDatabaseDataHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	dbIDStr := vars["databaseId"] // Убедитесь, что это имя параметра совпадает с определением в main.go
+
+	// Поддерживаем два формата параметров: db_id и databaseId
+	var dbIDStr string
+	if dbID, exists := vars["db_id"]; exists {
+		dbIDStr = dbID
+	} else if databaseID, exists := vars["databaseId"]; exists {
+		dbIDStr = databaseID
+	} else {
+		respondError(w, http.StatusBadRequest, "Не найден параметр ID базы данных.")
+		return
+	}
+
 	dbID, err := strconv.ParseInt(dbIDStr, 10, 64)
 	if err != nil {
 		respondError(w, http.StatusBadRequest, "Неверный формат ID базы данных: "+err.Error())

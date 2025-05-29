@@ -91,14 +91,9 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
     _databaseProvider = Provider.of<DatabaseProvider>(context, listen: false);
     _enhancedCollaborativeProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
     
-    // ИСПРАВЛЕНИЕ: Загружаем данные только если есть флаг обновления
-    if (_databaseProvider!.needsUpdate) {
-      _forceReloadData();
-      _databaseProvider!.resetUpdateFlag();
-    } else {
-      // Загружаем данные только если они нужны
-      _loadDataIfNeeded();
-    }
+    // ИСПРАВЛЕНИЕ: НЕ автоматически перезагружаем данные в didChangeDependencies
+    // Это создает бесконечные циклы при переключении баз данных
+    // Загрузка данных будет вызываться только явно через _handleDatabaseChanges
   }
 
   @override
@@ -131,7 +126,16 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
       setState(() {
         _isActive = true;
       });
-      _loadData();
+      
+      // ИСПРАВЛЕНИЕ: Проверяем флаг обновления при восстановлении активности экрана
+      final databaseProvider = Provider.of<DatabaseProvider>(context, listen: false);
+      if (databaseProvider.needsUpdate) {
+        print('📱 АКТИВАЦИЯ: Экран заметок активирован и требует обновления данных');
+        _forceReloadData();
+        databaseProvider.resetUpdateFlag();
+      } else {
+        _loadData();
+      }
     } else if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
       setState(() {
         _isActive = false;
@@ -140,16 +144,21 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
   }
 
   Future<void> _loadData() async {
-    // ИСПРАВЛЕНИЕ: Защита от повторных загрузок
     if (_isLoading) {
       print('Загрузка данных уже выполняется, пропускаем');
+      return;
+    }
+    
+    // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Проверяем блокировку операций с базой данных
+    final databaseProvider = Provider.of<DatabaseProvider>(context, listen: false);
+    if (databaseProvider.isBlocked) {
+      print('⚠️ Загрузка данных заблокирована во время переключения базы данных');
       return;
     }
     
     setState(() => _isLoading = true);
     try {
       // Получаем провайдеры для доступа к текущему database_id
-      final databaseProvider = Provider.of<DatabaseProvider>(context, listen: false);
       final enhancedCollabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
       
       // ИСПРАВЛЕНИЕ: Используем ТОЛЬКО EnhancedCollaborativeProvider для определения текущей базы
@@ -616,7 +625,9 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
       } else {
         _selectedFolder = folder;
         _isFolderExpanded = true;
-        _loadData(); // Загружаем все заметки вместо только тех, которые в папке
+        _selectedNote = null;
+        _noteTitleController.clear();
+        _noteContentController.clear();
       }
     });
   }
@@ -861,7 +872,10 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
     setState(() {
       _selectedFolder = folder;
       _selectedNote = null;
-      _notes = _notes.where((note) => note.folderId == folder.id).toList();
+      // ИСПРАВЛЕНИЕ: НЕ изменяем список _notes при выборе папки!
+      // Отображение заметок должно происходить через кэш в методе _getNotesForFolder
+      _noteTitleController.clear();
+      _noteContentController.clear();
     });
   }
 
@@ -1307,7 +1321,8 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
         if (databaseProvider.needsUpdate) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) {
-              _loadData();
+              print('🔄 UI ОБНОВЛЕНИЕ: Экран заметок обновляет данные по флагу needsUpdate');
+              _forceReloadData();
               databaseProvider.resetUpdateFlag();
             }
           });
@@ -1553,18 +1568,29 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
   // Обработчик изменений базы данных
   void _handleDatabaseChanges() {
     if (mounted) {
-      // ОПТИМИЗИРОВАНО: Убираем избыточное логирование
-      // print('Обновление экрана заметок из-за изменений в базе данных');
+      // ИСПРАВЛЕНИЕ: Убираем избыточное логирование
       
-      // ИСПРАВЛЕНИЕ: Загружаем данные только если база изменилась
+      // ЗАЩИТА ОТ ЦИКЛОВ: Проверяем флаги загрузки
+      if (_isLoading) {
+        print('Загрузка уже выполняется, пропускаем обработку изменений');
+        return;
+      }
+      
+      final databaseProvider = Provider.of<DatabaseProvider>(context, listen: false);
       final enhancedCollabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
       final currentDatabaseId = enhancedCollabProvider.isUsingSharedDatabase 
           ? enhancedCollabProvider.currentDatabaseId 
           : null;
       
-      // Проверяем, изменилась ли база данных
-      if (_lastLoadedDatabaseId != currentDatabaseId) {
-        _forceReloadData();
+      // ИСПРАВЛЕНИЕ: Проверяем как изменение базы, так и флаг обновления
+      if (_lastLoadedDatabaseId != currentDatabaseId || databaseProvider.needsUpdate) {
+        // ЗАЩИТА ОТ ЦИКЛОВ: Сбрасываем флаг ДО перезагрузки, чтобы избежать повторных вызовов
+        final wasUpdateNeeded = databaseProvider.needsUpdate;
+        if (wasUpdateNeeded) {
+          databaseProvider.resetUpdateFlag();
+        }
+        // ИСПРАВЛЕНИЕ: Используем _loadDataIfNeeded вместо _forceReloadData для менее агрессивной перезагрузки
+        _loadDataIfNeeded();
       }
     }
   }
@@ -1572,24 +1598,41 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
   // Обработчик изменений совместной базы данных
   void _handleCollaborativeDatabaseChanges() {
     if (mounted) {
-      // ОПТИМИЗИРОВАНО: Убираем избыточное логирование
-      // print('Обновление экрана заметок из-за изменений в совместной базе данных');
+      // ИСПРАВЛЕНИЕ: Убираем избыточное логирование
       
-      // ИСПРАВЛЕНИЕ: Загружаем данные только при переключении базы
+      // ЗАЩИТА ОТ ЦИКЛОВ: Проверяем флаги загрузки
+      if (_isLoading) {
+        print('Загрузка уже выполняется, пропускаем обработку изменений совместной базы');
+        return;
+      }
+      
+      final databaseProvider = Provider.of<DatabaseProvider>(context, listen: false);
       final enhancedCollabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
       final currentDatabaseId = enhancedCollabProvider.isUsingSharedDatabase 
           ? enhancedCollabProvider.currentDatabaseId 
           : null;
       
-      // Проверяем, изменилась ли база данных
-      if (_lastLoadedDatabaseId != currentDatabaseId) {
-        _forceReloadData();
+      // ИСПРАВЛЕНИЕ: Проверяем как изменение базы, так и флаг обновления
+      if (_lastLoadedDatabaseId != currentDatabaseId || databaseProvider.needsUpdate) {
+        // ЗАЩИТА ОТ ЦИКЛОВ: Сбрасываем флаг ДО перезагрузки, чтобы избежать повторных вызовов
+        final wasUpdateNeeded = databaseProvider.needsUpdate;
+        if (wasUpdateNeeded) {
+          databaseProvider.resetUpdateFlag();
+        }
+        // ИСПРАВЛЕНИЕ: Используем _loadDataIfNeeded вместо _forceReloadData для менее агрессивной перезагрузки
+        _loadDataIfNeeded();
       }
     }
   }
 
   // ИСПРАВЛЕНИЕ: Новый метод для условной загрузки данных
   void _loadDataIfNeeded() {
+    // ЗАЩИТА ОТ ЦИКЛОВ: Не загружаем если уже идет загрузка
+    if (_isLoading) {
+      print('Загрузка данных уже выполняется, пропускаем _loadDataIfNeeded');
+      return;
+    }
+    
     final enhancedCollabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
     final currentDatabaseId = enhancedCollabProvider.isUsingSharedDatabase 
         ? enhancedCollabProvider.currentDatabaseId 
@@ -1597,7 +1640,10 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
     
     // Загружаем данные только если база изменилась или данные еще не загружены
     if (!_isDataLoaded || _lastLoadedDatabaseId != currentDatabaseId) {
+      print('Загрузка данных необходима: _isDataLoaded=$_isDataLoaded, _lastLoadedDatabaseId=$_lastLoadedDatabaseId, currentDatabaseId=$currentDatabaseId');
       _loadData();
+    } else {
+      print('Загрузка данных не требуется');
     }
   }
 

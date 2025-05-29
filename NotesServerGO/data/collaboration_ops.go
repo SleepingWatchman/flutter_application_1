@@ -403,79 +403,96 @@ func GetSharedDatabasesForUserByName(userID int64, name string) ([]models.Shared
 
 // ExportSharedDatabase собирает все данные для указанной совместной БД для экспорта.
 func ExportSharedDatabase(dbID int64, userID int64) (*models.BackupData, error) {
+	log.Printf("ExportSharedDatabase: начало экспорта БД %d для пользователя %d", dbID, userID)
+
 	// 1. Проверить доступ пользователя к базе данных (например, является ли он участником)
 	role, err := GetUserRoleInSharedDatabase(dbID, userID)
 	if err != nil {
+		log.Printf("ExportSharedDatabase: ошибка проверки доступа пользователя %d к БД %d: %v", userID, dbID, err)
 		return nil, fmt.Errorf("ошибка проверки доступа пользователя %d к БД %d: %w", userID, dbID, err)
 	}
 	if role == nil {
+		log.Printf("ExportSharedDatabase: пользователь %d не имеет доступа к БД %d", userID, dbID)
 		return nil, fmt.Errorf("пользователь %d не имеет доступа к БД %d", userID, dbID)
 	}
+	log.Printf("ExportSharedDatabase: роль пользователя %d в БД %d: %s", userID, dbID, *role)
 
 	// 2. Собрать данные
 	backupData := &models.BackupData{}
 
 	// Получение папок
-	// Предполагается, что есть функция GetFoldersForDatabase(dbID int64) ([]models.Folder, error)
-	// Если ее нет, нужно будет создать или адаптировать существующую GetFolders.
-	// Для примера, пока оставим так, но это потребует доработки.
-	folders, err := GetFoldersForDatabase(dbID) // ЗАГЛУШКА - НУЖНА РЕАЛИЗАЦИЯ/ПРОВЕРКА
+	log.Printf("ExportSharedDatabase: получение папок для БД %d", dbID)
+	folders, err := GetFoldersForDatabase(dbID)
 	if err != nil {
+		log.Printf("ExportSharedDatabase: ошибка получения папок для БД %d: %v", dbID, err)
 		return nil, fmt.Errorf("ошибка получения папок для БД %d: %w", dbID, err)
 	}
 	backupData.Folders = folders
+	log.Printf("ExportSharedDatabase: получено %d папок для БД %d", len(folders), dbID)
 
 	// Получение заметок
-	// Аналогично, нужна GetNotesForDatabase(dbID int64) ([]models.Note, error)
-	notes, err := GetNotesForDatabase(dbID) // ЗАГЛУШКА
+	log.Printf("ExportSharedDatabase: получение заметок для БД %d", dbID)
+	notes, err := GetNotesForDatabase(dbID)
 	if err != nil {
+		log.Printf("ExportSharedDatabase: ошибка получения заметок для БД %d: %v", dbID, err)
 		return nil, fmt.Errorf("ошибка получения заметок для БД %d: %w", dbID, err)
 	}
 	backupData.Notes = notes
+	log.Printf("ExportSharedDatabase: получено %d заметок для БД %d", len(notes), dbID)
 
 	// Получение записей расписания
-	// Нужна GetScheduleEntriesForDatabase(dbID int64) ([]models.ScheduleEntry, error)
-	scheduleEntries, err := GetScheduleEntriesForDatabase(dbID) // ЗАГЛУШКА
+	log.Printf("ExportSharedDatabase: получение записей расписания для БД %d", dbID)
+	scheduleEntries, err := GetScheduleEntriesForDatabase(dbID)
 	if err != nil {
+		log.Printf("ExportSharedDatabase: ошибка получения записей расписания для БД %d: %v", dbID, err)
 		return nil, fmt.Errorf("ошибка получения записей расписания для БД %d: %w", dbID, err)
 	}
 	backupData.ScheduleEntries = scheduleEntries
+	log.Printf("ExportSharedDatabase: получено %d записей расписания для БД %d", len(scheduleEntries), dbID)
 
 	// Получение заметок с доски
-	// Нужна GetPinboardNotesForDatabase(dbID int64) ([]models.PinboardNote, error)
-	pinboardNotes, err := GetPinboardNotesForDatabase(dbID) // ЗАГЛУШКА
+	log.Printf("ExportSharedDatabase: получение заметок с доски для БД %d", dbID)
+	pinboardNotes, err := GetPinboardNotesForDatabase(dbID)
 	if err != nil {
+		log.Printf("ExportSharedDatabase: ошибка получения заметок с доски для БД %d: %v", dbID, err)
 		return nil, fmt.Errorf("ошибка получения заметок с доски для БД %d: %w", dbID, err)
 	}
 	backupData.PinboardNotes = pinboardNotes
+	log.Printf("ExportSharedDatabase: получено %d заметок с доски для БД %d", len(pinboardNotes), dbID)
 
 	// Получение соединений (если они привязаны к БД)
-	// Нужна GetConnectionsForDatabase(dbID int64) ([]models.Connection, error)
-	connections, err := GetConnectionsForDatabase(dbID) // ЗАГЛУШКА
+	log.Printf("ExportSharedDatabase: получение соединений для БД %d", dbID)
+	connections, err := GetConnectionsForDatabase(dbID)
 	if err != nil {
+		log.Printf("ExportSharedDatabase: ошибка получения соединений для БД %d: %v", dbID, err)
 		return nil, fmt.Errorf("ошибка получения соединений для БД %d: %w", dbID, err)
 	}
 	backupData.Connections = connections
+	log.Printf("ExportSharedDatabase: получено %d соединений для БД %d", len(connections), dbID)
 
 	// Получение изображений
-	// Это сложнее, так как изображения связаны с заметками.
-	// Нужно будет получить все ID заметок из notes, а затем для них получить изображения.
-	// Нужна GetImagesForNoteIDs(noteIDs []int64) ([]models.NoteImage, error)
 	var allNoteImages []models.NoteImage
 	if len(notes) > 0 {
+		log.Printf("ExportSharedDatabase: получение изображений для %d заметок БД %d", len(notes), dbID)
 		noteIDs := make([]int64, len(notes))
 		for i, note := range notes {
-			noteIDs[i] = note.ID // Убедитесь, что у модели Note есть поле ID
+			noteIDs[i] = note.ID
 		}
-		images, err := GetImagesForNoteIDs(noteIDs) // ЗАГЛУШКА
+		images, err := GetImagesForNoteIDs(noteIDs)
 		if err != nil {
+			log.Printf("ExportSharedDatabase: ошибка получения изображений для заметок БД %d: %v", dbID, err)
 			return nil, fmt.Errorf("ошибка получения изображений для заметок БД %d: %w", dbID, err)
 		}
 		allNoteImages = images
+		log.Printf("ExportSharedDatabase: получено %d изображений для БД %d", len(allNoteImages), dbID)
+	} else {
+		log.Printf("ExportSharedDatabase: нет заметок, изображения не получаем для БД %d", dbID)
 	}
 	backupData.NoteImages = allNoteImages
 
-	log.Printf("Данные для экспорта БД %d собраны для пользователя %d", dbID, userID)
+	log.Printf("ExportSharedDatabase: данные для экспорта БД %d собраны для пользователя %d: %d папок, %d заметок, %d записей расписания, %d заметок доски, %d соединений, %d изображений",
+		dbID, userID, len(backupData.Folders), len(backupData.Notes), len(backupData.ScheduleEntries),
+		len(backupData.PinboardNotes), len(backupData.Connections), len(backupData.NoteImages))
 	return backupData, nil
 }
 
@@ -821,7 +838,7 @@ func CreateInvitation(sdbID int64, inviterUserID int64, inviteeEmail string, rol
 	// Проверяем, не является ли пользователь уже участником
 	var userID int64
 	userQuery := `SELECT Id FROM Users WHERE Email = ?`
-	err = MainDB.Get(&userID, userQuery, inviteeEmail)
+	err = AuthDB.Get(&userID, userQuery, inviteeEmail)
 	if err == nil {
 		// Пользователь существует, проверяем участие
 		existingRole, _ := GetUserRoleInSharedDatabase(sdbID, userID)
@@ -886,10 +903,10 @@ func AcceptInvitation(invitationID int64, userID int64) error {
 		return fmt.Errorf("приглашение истекло")
 	}
 
-	// Проверяем email пользователя
+	// Проверяем email пользователя (используем AuthDB вместо MainDB)
 	var userEmail string
 	userQuery := `SELECT Email FROM Users WHERE Id = ?`
-	err = tx.Get(&userEmail, userQuery, userID)
+	err = AuthDB.Get(&userEmail, userQuery, userID)
 	if err != nil {
 		return fmt.Errorf("failed to get user email: %w", err)
 	}
@@ -929,10 +946,10 @@ func DeclineInvitation(invitationID int64, userID int64) error {
 		return fmt.Errorf("failed to get invitation: %w", err)
 	}
 
-	// Проверяем email пользователя
+	// Проверяем email пользователя (используем AuthDB вместо MainDB)
 	var userEmail string
 	userQuery := `SELECT Email FROM Users WHERE Id = ?`
-	err = MainDB.Get(&userEmail, userQuery, userID)
+	err = AuthDB.Get(&userEmail, userQuery, userID)
 	if err != nil {
 		return fmt.Errorf("failed to get user email: %w", err)
 	}

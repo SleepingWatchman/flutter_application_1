@@ -29,7 +29,7 @@ class NoteImage {
     return {
       'id': id,
       'note_id': noteId,
-      'image_path': imagePath,
+      'file_name': imagePath,
       'created_at': createdAt.toIso8601String(),
     };
   }
@@ -38,8 +38,8 @@ class NoteImage {
     return NoteImage(
       id: map['id'],
       noteId: map['note_id'],
-      imagePath: map['image_path'],
-      createdAt: DateTime.parse(map['created_at']),
+      imagePath: map['file_name'] ?? 'unknown_file',
+      createdAt: DateTime.parse(map['created_at'] ?? DateTime.now().toIso8601String()),
     );
   }
 } 

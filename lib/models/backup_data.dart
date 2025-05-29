@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:typed_data';
+import 'package:flutter/material.dart';
 
 class BackupData {
   final List<Map<String, dynamic>> folders;
@@ -72,6 +73,17 @@ class BackupData {
           encoded[key] = value.toIso8601String();
         } else if (value is Uint8List) {
           encoded[key] = base64Encode(value);
+        } else if (value is Color) {
+          encoded[key] = value.value;
+        } else if (value != null && value.runtimeType.toString().contains('Color')) {
+          try {
+            encoded[key] = (value as dynamic).value as int;
+          } catch (e) {
+            print('Ошибка конвертации Color для $key: $e');
+            encoded[key] = 0xFF000000;
+          }
+        } else if (value is int && key.toLowerCase().contains('color')) {
+          encoded[key] = value;
         }
       });
       return encoded;
@@ -232,6 +244,9 @@ class BackupData {
     prepared.forEach((key, value) {
       if (value is DateTime) {
         prepared[key] = value.toIso8601String();
+      } else if (value is bool) {
+        // SQLite не поддерживает bool, конвертируем в int
+        prepared[key] = value ? 1 : 0;
       }
     });
     return prepared;

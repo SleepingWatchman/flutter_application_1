@@ -103,7 +103,12 @@ class BackupProvider extends ChangeNotifier {
       
       // После успешного восстановления уведомляем о необходимости обновления данных
       _needsReload = true;
-      _databaseProvider?.setNeedsUpdate(true);
+      
+      // ИСПРАВЛЕНИЕ: Только устанавливаем флаг, без дополнительного notifyListeners
+      if (_databaseProvider != null) {
+        _databaseProvider!.setNeedsUpdate(true);
+      }
+      
       _isLoading = false;
       _notifyIfNotDisposed();
     } catch (e) {
@@ -127,12 +132,20 @@ class BackupProvider extends ChangeNotifier {
 
   Future<void> restoreFromBackup(BackupData backupData, [String? databaseId]) async {
     await _dbHelper.restoreFromBackup(backupData, databaseId);
-    _databaseProvider?.setNeedsUpdate(true);
+    
+    // ИСПРАВЛЕНИЕ: Только устанавливаем флаг, без дополнительного notifyListeners
+    if (_databaseProvider != null) {
+      _databaseProvider!.setNeedsUpdate(true);
+    }
   }
 
   Future<void> restoreFromBackupData(BackupData backupData, [String? databaseId]) async {
     await _dbHelper.restoreFromBackup(backupData, databaseId);
-    _databaseProvider?.setNeedsUpdate(true);
+    
+    // ИСПРАВЛЕНИЕ: Только устанавливаем флаг, без дополнительного notifyListeners
+    if (_databaseProvider != null) {
+      _databaseProvider!.setNeedsUpdate(true);
+    }
   }
 
   Future<void> uploadCollaborationBackup(String databaseId) async {
@@ -163,7 +176,12 @@ class BackupProvider extends ChangeNotifier {
       
       // После успешного восстановления уведомляем о необходимости обновления данных
       _needsReload = true;
-      _databaseProvider?.setNeedsUpdate(true);
+      
+      // ИСПРАВЛЕНИЕ: Только устанавливаем флаг, без дополнительного notifyListeners
+      if (_databaseProvider != null) {
+        _databaseProvider!.setNeedsUpdate(true);
+      }
+      
       _isLoading = false;
       _notifyIfNotDisposed();
     } catch (e) {

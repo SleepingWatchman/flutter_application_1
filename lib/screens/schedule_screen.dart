@@ -152,14 +152,19 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
       // ОПТИМИЗИРОВАНО: Убираем избыточное логирование
       // print('Обновление экрана расписания из-за изменений в базе данных');
       
-      // ИСПРАВЛЕНИЕ: Загружаем данные только если база изменилась
+      final databaseProvider = Provider.of<DatabaseProvider>(context, listen: false);
       final enhancedCollabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
       final currentDatabaseId = enhancedCollabProvider.isUsingSharedDatabase 
           ? enhancedCollabProvider.currentDatabaseId 
           : null;
       
-      // Проверяем, изменилась ли база данных
-      if (_lastLoadedDatabaseId != currentDatabaseId && _selectedDate != null) {
+      // ИСПРАВЛЕНИЕ: Проверяем как изменение базы, так и флаг обновления
+      if ((_lastLoadedDatabaseId != currentDatabaseId || databaseProvider.needsUpdate) && _selectedDate != null) {
+        // ЗАЩИТА ОТ ЦИКЛОВ: Сбрасываем флаг ДО перезагрузки, чтобы избежать повторных вызовов
+        final wasUpdateNeeded = databaseProvider.needsUpdate;
+        if (wasUpdateNeeded) {
+          databaseProvider.resetUpdateFlag();
+        }
         _forceReloadSchedule();
       }
     }
@@ -171,14 +176,19 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
       // ОПТИМИЗИРОВАНО: Убираем избыточное логирование
       // print('Обновление экрана расписания из-за изменений в совместной базе данных');
       
-      // ИСПРАВЛЕНИЕ: Загружаем данные только при переключении базы
+      final databaseProvider = Provider.of<DatabaseProvider>(context, listen: false);
       final enhancedCollabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
       final currentDatabaseId = enhancedCollabProvider.isUsingSharedDatabase 
           ? enhancedCollabProvider.currentDatabaseId 
           : null;
       
-      // Проверяем, изменилась ли база данных
-      if (_lastLoadedDatabaseId != currentDatabaseId && _selectedDate != null) {
+      // ИСПРАВЛЕНИЕ: Проверяем как изменение базы, так и флаг обновления
+      if ((_lastLoadedDatabaseId != currentDatabaseId || databaseProvider.needsUpdate) && _selectedDate != null) {
+        // ЗАЩИТА ОТ ЦИКЛОВ: Сбрасываем флаг ДО перезагрузки, чтобы избежать повторных вызовов
+        final wasUpdateNeeded = databaseProvider.needsUpdate;
+        if (wasUpdateNeeded) {
+          databaseProvider.resetUpdateFlag();
+        }
         _forceReloadSchedule();
       }
     }
@@ -214,6 +224,13 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
     // ИСПРАВЛЕНИЕ: Защита от повторных загрузок
     if (_isLoading) {
       print('Загрузка расписания уже выполняется, пропускаем');
+      return;
+    }
+    
+    // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Проверяем блокировку операций с базой данных
+    final databaseProvider = Provider.of<DatabaseProvider>(context, listen: false);
+    if (databaseProvider.isBlocked) {
+      print('⚠️ Загрузка расписания заблокирована во время переключения базы данных');
       return;
     }
     

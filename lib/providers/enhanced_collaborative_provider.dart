@@ -5,6 +5,7 @@ import '../models/collaborative_database_role.dart';
 import '../services/collaborative_role_service.dart';
 import '../services/enhanced_sync_service.dart';
 import '../services/auth_service.dart';
+import '../services/server_health_service.dart';
 import '../db/database_helper.dart';
 import 'database_provider.dart';
 import 'package:oktoast/oktoast.dart';
@@ -24,11 +25,14 @@ class EnhancedCollaborativeProvider extends ChangeNotifier {
   String? _error;
   bool _isUsingSharedDatabase = false;
   bool _isServerAvailable = false;
-  bool _isServerOnline = false;
   
   // Защита от повторных операций
   bool _isSwitchingDatabase = false;
   bool _isSyncing = false;
+  
+  // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Защита от автоматической синхронизации после переключения базы
+  bool _isJustSwitchedToSharedDatabase = false;
+  DateTime? _lastDatabaseSwitchTime;
   
   // Синхронизация
   SyncStatus _syncStatus = SyncStatus.idle;
@@ -121,34 +125,25 @@ class EnhancedCollaborativeProvider extends ChangeNotifier {
   }
 
   Future<void> _initServerHealthCheck() async {
-    Timer.periodic(Duration(seconds: 30), (timer) async {
-      try {
-        final wasAvailable = _isServerAvailable;
-        _isServerAvailable = await _checkServerHealth();
-        
-        if (wasAvailable != _isServerAvailable) {
-          notifyListeners();
-          if (_isServerAvailable) {
-            showToast('Соединение с сервером восстановлено');
-          } else {
-            showToast('Соединение с сервером потеряно');
-          }
-        }
-      } catch (e) {
-        print('Ошибка проверки состояния сервера: $e');
+    // Используем ServerHealthService вместо собственной реализации
+    final serverHealthService = ServerHealthService();
+    
+    // Добавляем слушатель изменений статуса сервера
+    serverHealthService.addStatusListener((status) {
+      final wasAvailable = _isServerAvailable;
+      _isServerAvailable = status == ServerStatus.online;
+      
+      // Уведомляем об изменении только если статус действительно изменился
+      if (wasAvailable != _isServerAvailable) {
+        notifyListeners();
+        print('🏥 HEALTH: Статус сервера изменен в EnhancedCollaborativeProvider: ${_isServerAvailable ? "Онлайн" : "Офлайн"}');
       }
     });
-  }
-
-  Future<bool> _checkServerHealth() async {
-    try {
-      final response = await _dio.get('/api/Service/status');
-      _isServerOnline = response.statusCode == 200;
-    } catch (e) {
-      _isServerOnline = false;
-      print('Ошибка проверки состояния сервера: $e');
-    }
-    return _isServerOnline;
+    
+    // Устанавливаем начальный статус
+    _isServerAvailable = serverHealthService.isOnline;
+    
+    print('🏥 HEALTH: EnhancedCollaborativeProvider интегрирован с ServerHealthService');
   }
 
   Future<void> loadDatabases() async {
@@ -293,90 +288,143 @@ class EnhancedCollaborativeProvider extends ChangeNotifier {
       _isSwitchingDatabase = true;
       _isLoading = true;
       _error = null;
-      
-      // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Устанавливаем флаги НЕМЕДЛЕННО
-      _currentDatabaseId = databaseId;
-      _isUsingSharedDatabase = true;
-      
-      // Уведомляем об изменении СРАЗУ
       notifyListeners();
 
       print('Переключение на базу данных: $databaseId');
       
-      // ИСПРАВЛЕНИЕ: ВСЕГДА сохраняем личные данные при переключении на совместную базу
-      try {
-        if (_databaseProvider != null) {
-          print('Создание резервной копии личных данных перед переключением...');
-          final personalBackup = await _databaseProvider!.createBackup(null);
-          await _databaseProvider!.savePersonalBackup(personalBackup);
-          print('Личные данные сохранены в резервную копию');
-        }
-      } catch (e) {
-        print('Ошибка сохранения личных данных: $e');
-        // Не прерываем процесс
-      }
+      // ИСПРАВЛЕНИЕ: Выполняем все операции в background
+      await _performDatabaseSwitch(databaseId);
       
-      // ИСПРАВЛЕНИЕ: Быстрое закрытие и переоткрытие базы
-      try {
-        await _dbHelper.closeDatabase();
-        print('База данных закрыта');
-        
-        // УБИРАЕМ длительную задержку
-        await Future.delayed(Duration(milliseconds: 100));
-        
-        // Принудительно очищаем кеш
-        await _dbHelper.clearCache();
-        print('Кеш очищен');
-      } catch (e) {
-        print('Предупреждение при закрытии базы: $e');
-      }
-      
-      // ИСПРАВЛЕНИЕ: Настраиваем синхронизацию ДО инициализации
-      _syncService.setCurrentDatabase(databaseId);
-      
-      // ИСПРАВЛЕНИЕ: Упрощенная инициализация БЕЗ долгих транзакций
-      print('Инициализация совместной базы данных: $databaseId');
-      try {
-        // Инициализируем базу в DatabaseHelper напрямую
-        await _dbHelper.initializeSharedDatabase(databaseId);
-        print('Совместная база данных инициализирована в DatabaseHelper');
-      } catch (e) {
-        print('Ошибка инициализации в DatabaseHelper: $e');
-        // Продолжаем работу даже при ошибке
-      }
-      
-      // ИСПРАВЛЕНИЕ: Устанавливаем базу в DatabaseProvider БЕЗ повторных операций
-      if (_databaseProvider != null) {
-        try {
-          await _databaseProvider!.switchToDatabase(databaseId);
-          print('DatabaseProvider настроен для базы $databaseId');
-        } catch (e) {
-          print('Ошибка настройки DatabaseProvider: $e');
-        }
-      }
-      
-      // ИСПРАВЛЕНИЕ: Проверяем статус сервера БЕЗ блокирующих операций
-      _checkServerHealth().then((available) {
-        _isServerAvailable = available;
-        if (available) {
-          print('Сервер доступен после переключения на совместную базу');
-        } else {
-          print('Предупреждение: Сервер недоступен после переключения на совместную базу');
-        }
-        notifyListeners();
-      }).catchError((e) {
-        print('Ошибка проверки статуса сервера: $e');
-      });
-      
-      print('Переключение на базу данных $databaseId завершено успешно');
+      print('✅ Переключение на совместную базу $databaseId завершено успешно');
       
     } catch (e) {
       _error = e.toString();
-      print('Ошибка при переключении на базу данных: $e');
+      print('❌ Ошибка при переключении на базу данных: $e');
+      
+      // Откатываем флаги при ошибке
+      _currentDatabaseId = null;
+      _isUsingSharedDatabase = false;
+      _syncService.setCurrentDatabase(null);
     } finally {
       _isSwitchingDatabase = false;
       _isLoading = false;
       notifyListeners();
+    }
+  }
+
+  // ИСПРАВЛЕНИЕ: Выносим тяжелые операции в отдельный метод без notifyListeners
+  Future<void> _performDatabaseSwitch(String databaseId) async {
+    // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Блокируем ВСЕ операции с базой данных во время переключения
+    if (_databaseProvider != null) {
+      print('🚫 БЛОКИРОВКА: Блокируем все операции с базой данных на время переключения');
+      _databaseProvider!.setIsBlocked(true);
+    }
+    
+    try {
+      // ШАГ 1: Отправка бэкапа пользовательских данных (БЫСТРО)
+      if (_databaseProvider != null) {
+        print('ШАГ 1: Создание и сохранение резервной копии личных данных...');
+        try {
+          final personalBackup = await _databaseProvider!.createBackup(null);
+          await _databaseProvider!.savePersonalBackup(personalBackup);
+          print('✅ Личные данные успешно сохранены в резервную копию');
+        } catch (e) {
+          print('❌ Ошибка сохранения личных данных: $e');
+          throw Exception('Не удалось сохранить личные данные: $e');
+        }
+      }
+      
+      // ШАГ 2: ИСПРАВЛЕНИЕ - БЫСТРАЯ очистка только кеша, БЕЗ очистки таблиц базы данных
+      print('ШАГ 2: Очистка только кеша локальной базы данных...');
+      try {
+        await _dbHelper.closeDatabase();
+        await _dbHelper.clearCache();
+        print('✅ Кеш базы данных очищен');
+      } catch (e) {
+        print('❌ Ошибка при очистке кеша: $e');
+        // Продолжаем, это не критично
+      }
+      
+      // Устанавливаем флаги
+      _currentDatabaseId = databaseId;
+      _isUsingSharedDatabase = true;
+      _syncService.setCurrentDatabase(databaseId);
+      
+      // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Устанавливаем защиту от автоматической синхронизации
+      _isJustSwitchedToSharedDatabase = true;
+      _lastDatabaseSwitchTime = DateTime.now();
+      print('🛡️ ЗАЩИТА: Синхронизация заблокирована на 30 секунд после переключения на совместную базу');
+      
+      // Инициализируем совместную базу (БЕЗ UI БЛОКИРОВКИ)
+      print('ШАГ 3: Инициализация совместной базы данных: $databaseId');
+      await _dbHelper.initializeSharedDatabase(databaseId);
+      
+      if (_databaseProvider != null) {
+        await _databaseProvider!.switchToDatabase(databaseId);
+      }
+      
+      // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Разблокируем операции ПЕРЕД импортом данных
+      if (_databaseProvider != null) {
+        print('✅ РАЗБЛОКИРОВКА: Разрешаем операции с базой данных перед импортом');
+        _databaseProvider!.setIsBlocked(false);
+      }
+      
+      // ШАГ 4: ЗАГРУЗКА данных совместной базы С сервера (В BACKGROUND, БЕЗ БЛОКИРОВКИ)
+      print('ШАГ 4: Загрузка данных совместной базы с сервера...');
+      await _loadDataFromServerInBackground(databaseId);
+      
+    } catch (e) {
+      // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Разблокируем операции в случае ошибки
+      if (_databaseProvider != null) {
+        print('❌ РАЗБЛОКИРОВКА: Разрешаем операции при ошибке: $e');
+        _databaseProvider!.setIsBlocked(false);
+      }
+      rethrow;
+    }
+  }
+
+  // ИСПРАВЛЕНИЕ: Отдельный метод для загрузки данных без блокировки UI
+  Future<void> _loadDataFromServerInBackground(String databaseId) async {
+    try {
+      final token = await _authService.getToken();
+      if (token != null) {
+        final response = await _dio.get(
+          '/api/collaboration/databases/$databaseId/data',
+          options: Options(
+            headers: {'Authorization': 'Bearer $token'},
+            validateStatus: (status) => status != null && status < 500,
+            receiveTimeout: Duration(seconds: 10), // ИСПРАВЛЕНИЕ: Добавляем timeout
+            sendTimeout: Duration(seconds: 10),
+          ),
+        );
+
+        if (response.statusCode == 200 && response.data != null) {
+          final serverData = response.data;
+          print('✅ Данные получены с сервера: заметок - ${serverData['notes']?.length ?? 0}, ' +
+                'папок - ${serverData['folders']?.length ?? 0}, ' +
+                'записей расписания - ${serverData['scheduleEntries']?.length ?? 0}, ' +
+                'элементов доски - ${serverData['pinboardNotes']?.length ?? 0}');
+          
+          // ИСПРАВЛЕНИЕ: Импортируем данные с улучшенным импортом БЕЗ дополнительной очистки
+          await _dbHelper.importDatabaseOptimized(databaseId, serverData);
+          print('✅ Данные совместной базы успешно загружены с сервера');
+          
+          // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: НЕ ПЕРЕЗАГРУЖАЕМ базы данных после импорта!
+          // Это создает избыточные запросы к серверу и может запустить синхронизацию
+          // ТОЛЬКО уведомляем об изменении данных в текущей базе
+          if (_databaseProvider != null) {
+            _databaseProvider!.setNeedsUpdate(true);
+            _databaseProvider!.notifyUpdate();
+          }
+        } else {
+          print('⚠️ Сервер вернул пустые данные или ошибку: ${response.statusCode}');
+        }
+      } else {
+        throw Exception('Токен авторизации не найден');
+      }
+    } catch (e) {
+      print('❌ Ошибка при загрузке данных с сервера: $e');
+      // НЕ прерываем процесс, база может быть пустой
     }
   }
 
@@ -397,26 +445,38 @@ class EnhancedCollaborativeProvider extends ChangeNotifier {
       _isSwitchingDatabase = true;
       _isLoading = true;
       _error = null;
-      
-      // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Устанавливаем флаги НЕМЕДЛЕННО
-      _currentDatabaseId = null;
-      _isUsingSharedDatabase = false;
-      
-      // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Останавливаем синхронизацию ДО переключения
-      _syncService.setCurrentDatabase(null);
-      print('Сервис синхронизации остановлен для личной базы');
-      
-      // Уведомляем об изменении СРАЗУ один раз
       notifyListeners();
       
       print('Переключение на личную базу данных');
       
+      // ШАГ 1: Синхронизация (отправка данных совместной базы на сервер)
+      if (_currentDatabaseId != null && _isUsingSharedDatabase) {
+        print('ШАГ 1: Синхронизация - отправка данных совместной базы на сервер...');
+        try {
+          await _syncService.forceSync();
+          print('✅ Данные совместной базы отправлены на сервер');
+        } catch (e) {
+          print('❌ Ошибка при синхронизации: $e');
+          // Продолжаем процесс, синхронизация не критична
+        }
+      }
+      
+      // Останавливаем синхронизацию и устанавливаем флаги
+      _syncService.setCurrentDatabase(null);
+      _currentDatabaseId = null;
+      _isUsingSharedDatabase = false;
+      
+      // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Снимаем защиту от синхронизации при переходе на личную базу
+      _isJustSwitchedToSharedDatabase = false;
+      _lastDatabaseSwitchTime = null;
+      print('🛡️ ЗАЩИТА: Блокировка синхронизации снята при переходе на личную базу');
+      
       // Очищаем кеш
       await _dbHelper.clearCache();
-      print('Кеш очищен');
+      print('База данных очищена');
       
       // Инициализируем личную базу
-      await _dbHelper.database; // Просто получаем базу
+      await _dbHelper.database; // Получаем личную базу
       print('Личная база данных инициализирована');
       
       // Уведомляем DatabaseProvider о переключении
@@ -425,17 +485,35 @@ class EnhancedCollaborativeProvider extends ChangeNotifier {
         print('DatabaseProvider переключен на личную базу');
       }
       
-      // ИСПРАВЛЕНИЕ: УБИРАЕМ автоматическое восстановление из резервной копии
-      // Это вызывало вторую синхронизацию с пустыми данными
-      print('Переключение на личную базу завершено без восстановления данных');
+      // ШАГ 2: ЗАГРУЗКА бэкапа пользовательских данных
+      if (_databaseProvider != null) {
+        print('ШАГ 2: Загрузка резервной копии личных данных...');
+        try {
+          final personalBackup = await _databaseProvider!.getPersonalBackup();
+          if (personalBackup != null) {
+            await _databaseProvider!.restoreFromBackup(personalBackup, null);
+            print('✅ Личные данные успешно восстановлены из резервной копии');
+            
+            // ИСПРАВЛЕНИЕ: Немедленно обновляем UI после восстановления бэкапа
+            _databaseProvider!.setNeedsUpdate(true);
+            _databaseProvider!.notifyUpdate();
+          } else {
+            print('⚠️ Резервная копия личных данных не найдена');
+          }
+        } catch (e) {
+          print('❌ Ошибка при восстановлении личных данных: $e');
+          // Не критично, база может быть пустой
+        }
+      }
+      
+      print('✅ Переключение на личную базу завершено успешно');
       
     } catch (e) {
       _error = e.toString();
-      print('Ошибка при переключении на личную базу данных: $e');
+      print('❌ Ошибка при переключении на личную базу данных: $e');
     } finally {
       _isSwitchingDatabase = false;
       _isLoading = false;
-      // ИСПРАВЛЕНИЕ: Финальное уведомление только один раз
       notifyListeners();
     }
   }
@@ -560,6 +638,19 @@ class EnhancedCollaborativeProvider extends ChangeNotifier {
       return;
     }
     
+    // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Защита от синхронизации сразу после переключения базы
+    if (_isJustSwitchedToSharedDatabase && _lastDatabaseSwitchTime != null) {
+      final timeSinceSwitch = DateTime.now().difference(_lastDatabaseSwitchTime!);
+      if (timeSinceSwitch.inSeconds < 30) {
+        print('БЛОКИРОВКА: Синхронизация заблокирована на ${30 - timeSinceSwitch.inSeconds} секунд после переключения базы');
+        return;
+      } else {
+        // Снимаем блокировку после истечения времени
+        _isJustSwitchedToSharedDatabase = false;
+        _lastDatabaseSwitchTime = null;
+      }
+    }
+    
     // Защита от параллельных операций синхронизации
     if (_isSyncing) {
       print('Операция синхронизации уже выполняется, пропускаем');
@@ -568,22 +659,17 @@ class EnhancedCollaborativeProvider extends ChangeNotifier {
     
     try {
       _isSyncing = true;
-      print('Начинаем ручную синхронизацию базы данных: $_currentDatabaseId');
+      print('ШАГ СИНХРОНИЗАЦИЯ: Отправка данных совместной базы $_currentDatabaseId НА сервер...');
       
       await _syncService.forceSync();
       
-      // Уведомляем о необходимости обновления данных
-      if (_databaseProvider != null) {
-        _databaseProvider!.setNeedsUpdate(true);
-      }
-      
       showToast('Синхронизация завершена успешно');
-      print('Ручная синхронизация завершена успешно');
+      print('✅ Данные совместной базы отправлены на сервер');
       
     } catch (e) {
       _error = e.toString();
       showToast('Ошибка синхронизации: $e');
-      print('Ошибка ручной синхронизации: $e');
+      print('❌ Ошибка синхронизации: $e');
     } finally {
       _isSyncing = false;
     }

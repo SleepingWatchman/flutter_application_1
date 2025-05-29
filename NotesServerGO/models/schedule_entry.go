@@ -12,8 +12,8 @@ type ScheduleEntry struct {
 	RecurrenceJson    *string `json:"recurrence_json,omitempty" db:"RecurrenceJson"` // Клиент присылает это поле
 	DatabaseId        int64   `json:"database_id" db:"DatabaseId"`                   // На клиенте String?, здесь int64
 	// OwnerUserId    int64     `json:"owner_user_id,omitempty" db:"OwnerUserId"` // Убрано, т.к. нет в клиентской модели ScheduleEntry
-	CreatedAt time.Time `json:"created_at" db:"CreatedAt"`
-	UpdatedAt time.Time `json:"updated_at" db:"UpdatedAt"`
+	CreatedAt time.Time `json:"-" db:"CreatedAt"`
+	UpdatedAt time.Time `json:"-" db:"UpdatedAt"`
 }
 
 // RecurrenceType определяет тип повторения для пунктов расписания.

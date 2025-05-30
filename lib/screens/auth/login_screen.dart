@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:oktoast/oktoast.dart';
 import '../../providers/auth_provider.dart';
+import '../../utils/toast_utils.dart';
 import 'register_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -33,11 +34,11 @@ class _LoginScreenState extends State<LoginScreen> {
           _passwordController.text.trim(),
           () {
             if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Данные пользователя успешно восстановлены из резервной копии'),
-                  backgroundColor: Colors.green,
-                ),
+              showCustomToastWithIcon(
+                'Данные пользователя успешно восстановлены из резервной копии',
+                accentColor: Colors.green,
+                fontSize: 14.0,
+                icon: const Icon(Icons.check, size: 20, color: Colors.green),
               );
             }
           },
@@ -47,8 +48,11 @@ class _LoginScreenState extends State<LoginScreen> {
         }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(e.toString())),
+          showCustomToastWithIcon(
+            'Ошибка входа: ${e.toString()}',
+            accentColor: Colors.red,
+            fontSize: 14.0,
+            icon: const Icon(Icons.error, size: 20, color: Colors.red),
           );
         }
       }
@@ -69,8 +73,11 @@ class _LoginScreenState extends State<LoginScreen> {
         }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(e.toString())),
+          showCustomToastWithIcon(
+            'Ошибка регистрации: ${e.toString()}',
+            accentColor: Colors.red,
+            fontSize: 14.0,
+            icon: const Icon(Icons.error, size: 20, color: Colors.red),
           );
         }
       }

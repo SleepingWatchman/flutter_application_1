@@ -194,9 +194,17 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
       });
     } catch (e) {
       print('Ошибка загрузки данных: $e');
+      
       if (mounted) {
-        setState(() => _isLoading = false);
-        showToast('Ошибка загрузки данных');
+        setState(() {
+          _isLoading = false;
+        });
+        
+        showToast(
+          'Ошибка загрузки данных',
+          accentColor: Colors.red,
+          icon: const Icon(Icons.error, size: 20, color: Colors.red),
+        );
       }
     }
   }
@@ -219,20 +227,12 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
     return _notesCache[folder.id] ?? [];
   }
 
-  void showToast(String message) {
-    showToastWidget(
-      Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        decoration: BoxDecoration(
-          color: Colors.black87,
-          borderRadius: BorderRadius.circular(4),
-        ),
-        child: Text(
-          message,
-          style: const TextStyle(color: Colors.white),
-        ),
-      ),
-      duration: const Duration(seconds: 2),
+  void showToast(String message, {Color? accentColor, Widget? icon}) {
+    showCustomToastWithIcon(
+      message,
+      accentColor: accentColor ?? Colors.orange,
+      fontSize: 14.0,
+      icon: icon ?? const Icon(Icons.info, size: 20, color: Colors.orange),
     );
   }
 
@@ -578,7 +578,13 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
         // Проверяем, что они из одной базы данных
         if (noteDbId != folderDbId) {
           print('Ошибка: нельзя переместить заметку в папку из другой базы данных');
-          showToast('Нельзя переместить заметку в папку из другой базы данных');
+          if (mounted) {
+            showToast(
+              'Нельзя переместить заметку в папку из другой базы данных',
+              accentColor: Colors.red,
+              icon: const Icon(Icons.error, size: 20, color: Colors.red),
+            );
+          }
           return;
         }
       }
@@ -611,10 +617,22 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
       });
       
       // Показываем уведомление об успешном перемещении
-      showToast('Заметка успешно перемещена');
+      if (mounted) {
+        showToast(
+          'Заметка успешно перемещена',
+          accentColor: Colors.green,
+          icon: const Icon(Icons.check, size: 20, color: Colors.green),
+        );
+      }
     } catch (e) {
       print('Ошибка перемещения заметки: $e');
-      showToast('Ошибка перемещения заметки');
+      if (mounted) {
+        showToast(
+          'Ошибка перемещения заметки',
+          accentColor: Colors.red,
+          icon: const Icon(Icons.error, size: 20, color: Colors.red),
+        );
+      }
     }
   }
 
@@ -931,7 +949,13 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
       });
     } catch (e) {
       print('Ошибка обновления заметки: $e');
-      showToast('Ошибка обновления заметки');
+      if (mounted) {
+        showToast(
+          'Ошибка обновления заметки',
+          accentColor: Colors.red,
+          icon: const Icon(Icons.error, size: 20, color: Colors.red),
+        );
+      }
     }
   }
 
@@ -962,7 +986,13 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
       });
     } catch (e) {
       print('Ошибка обновления заголовка: $e');
-      showToast('Ошибка обновления заголовка');
+      if (mounted) {
+        showToast(
+          'Ошибка обновления заголовка',
+          accentColor: Colors.red,
+          icon: const Icon(Icons.error, size: 20, color: Colors.red),
+        );
+      }
     }
   }
 

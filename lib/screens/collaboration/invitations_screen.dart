@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../providers/enhanced_collaborative_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../models/collaborative_database_role.dart';
+import '../../utils/toast_utils.dart';
 
 class InvitationsScreen extends StatefulWidget {
   const InvitationsScreen({Key? key}) : super(key: key);
@@ -172,22 +173,14 @@ class _InvitationsScreenState extends State<InvitationsScreen> {
                           TextButton(
                             onPressed: () async {
                               try {
-                                await provider.declineInvitation(invitationId);
-                                if (context.mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text('Приглашение отклонено'),
-                                      backgroundColor: Colors.orange,
-                                    ),
-                                  );
-                                }
+                                await _declineInvitation(invitationId);
                               } catch (e) {
                                 if (context.mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text('Ошибка: ${e.toString()}'),
-                                      backgroundColor: Colors.red,
-                                    ),
+                                  showCustomToastWithIcon(
+                                    'Ошибка отклонения приглашения: $e',
+                                    accentColor: Colors.red,
+                                    fontSize: 14.0,
+                                    icon: const Icon(Icons.error, size: 20, color: Colors.red),
                                   );
                                 }
                               }
@@ -198,22 +191,14 @@ class _InvitationsScreenState extends State<InvitationsScreen> {
                           ElevatedButton(
                             onPressed: () async {
                               try {
-                                await provider.acceptInvitation(invitationId);
-                                if (context.mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text('Приглашение принято!'),
-                                      backgroundColor: Colors.green,
-                                    ),
-                                  );
-                                }
+                                await _acceptInvitation(invitationId);
                               } catch (e) {
                                 if (context.mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text('Ошибка: ${e.toString()}'),
-                                      backgroundColor: Colors.red,
-                                    ),
+                                  showCustomToastWithIcon(
+                                    'Ошибка принятия приглашения: $e',
+                                    accentColor: Colors.red,
+                                    fontSize: 14.0,
+                                    icon: const Icon(Icons.error, size: 20, color: Colors.red),
                                   );
                                 }
                               }
@@ -245,6 +230,58 @@ class _InvitationsScreenState extends State<InvitationsScreen> {
       return '${difference.inDays} дн. назад';
     } else {
       return '${date.day.toString().padLeft(2, '0')}.${date.month.toString().padLeft(2, '0')}.${date.year}';
+    }
+  }
+
+  Future<void> _acceptInvitation(String invitationId) async {
+    try {
+      final provider = context.read<EnhancedCollaborativeProvider>();
+      await provider.acceptInvitation(invitationId);
+      
+      if (mounted) {
+        showCustomToastWithIcon(
+          'Приглашение принято',
+          accentColor: Colors.green,
+          fontSize: 14.0,
+          icon: const Icon(Icons.check, size: 20, color: Colors.green),
+        );
+        context.read<EnhancedCollaborativeProvider>().loadDatabases();
+      }
+    } catch (e) {
+      if (mounted) {
+        showCustomToastWithIcon(
+          'Ошибка принятия приглашения: $e',
+          accentColor: Colors.red,
+          fontSize: 14.0,
+          icon: const Icon(Icons.error, size: 20, color: Colors.red),
+        );
+      }
+    }
+  }
+
+  Future<void> _declineInvitation(String invitationId) async {
+    try {
+      final provider = context.read<EnhancedCollaborativeProvider>();
+      await provider.declineInvitation(invitationId);
+      
+      if (mounted) {
+        showCustomToastWithIcon(
+          'Приглашение отклонено',
+          accentColor: Colors.orange,
+          fontSize: 14.0,
+          icon: const Icon(Icons.close, size: 20, color: Colors.orange),
+        );
+        context.read<EnhancedCollaborativeProvider>().loadDatabases();
+      }
+    } catch (e) {
+      if (mounted) {
+        showCustomToastWithIcon(
+          'Ошибка отклонения приглашения: $e',
+          accentColor: Colors.red,
+          fontSize: 14.0,
+          icon: const Icon(Icons.error, size: 20, color: Colors.red),
+        );
+      }
     }
   }
 } 

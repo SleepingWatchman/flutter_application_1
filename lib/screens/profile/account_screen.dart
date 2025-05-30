@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'dart:io' show Platform, exit;
 import '../../providers/auth_provider.dart';
 import '../../providers/backup_provider.dart';
+import '../../utils/toast_utils.dart';
 import 'edit_profile_screen.dart';
 import '../auth/login_screen.dart';
 
@@ -84,15 +85,21 @@ class AccountScreen extends StatelessWidget {
                                     await backup.uploadBackup();
                                     if (context.mounted) {
                                       Navigator.of(context).pop();
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(content: Text('Резервная копия успешно загружена')),
+                                      showCustomToastWithIcon(
+                                        'Резервная копия успешно загружена',
+                                        accentColor: Colors.green,
+                                        fontSize: 14.0,
+                                        icon: const Icon(Icons.check, size: 20, color: Colors.green),
                                       );
                                     }
                                   } catch (e) {
                                     if (context.mounted) {
                                       Navigator.of(context).pop();
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(content: Text('Ошибка загрузки резервной копии: $e')),
+                                      showCustomToastWithIcon(
+                                        'Ошибка загрузки резервной копии: $e',
+                                        accentColor: Colors.red,
+                                        fontSize: 14.0,
+                                        icon: const Icon(Icons.error, size: 20, color: Colors.red),
                                       );
                                     }
                                   }
@@ -106,8 +113,11 @@ class AccountScreen extends StatelessWidget {
                                     await backup.downloadBackup();
                                     if (context.mounted) {
                                       Navigator.of(context).pop();
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(content: Text('Резервная копия успешно восстановлена')),
+                                      showCustomToastWithIcon(
+                                        'Резервная копия успешно восстановлена',
+                                        accentColor: Colors.green,
+                                        fontSize: 14.0,
+                                        icon: const Icon(Icons.check, size: 20, color: Colors.green),
                                       );
                                       
                                       // Если требуется перезагрузка, показываем диалог
@@ -154,8 +164,11 @@ class AccountScreen extends StatelessWidget {
                                   } catch (e) {
                                     if (context.mounted) {
                                       Navigator.of(context).pop();
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(content: Text('Ошибка восстановления резервной копии: $e')),
+                                      showCustomToastWithIcon(
+                                        'Ошибка восстановления резервной копии: $e',
+                                        accentColor: Colors.red,
+                                        fontSize: 14.0,
+                                        icon: const Icon(Icons.error, size: 20, color: Colors.red),
                                       );
                                     }
                                   }
@@ -174,11 +187,11 @@ class AccountScreen extends StatelessWidget {
                     onPressed: () {
                       auth.signOut(() {
                         if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Резервная копия создана перед выходом из аккаунта'),
-                              backgroundColor: Colors.green,
-                            ),
+                          showCustomToastWithIcon(
+                            'Резервная копия создана перед выходом из аккаунта',
+                            accentColor: Colors.green,
+                            fontSize: 14.0,
+                            icon: const Icon(Icons.check, size: 20, color: Colors.green),
                           );
                         }
                       });

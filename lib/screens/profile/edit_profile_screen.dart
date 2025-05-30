@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/file_service.dart';
+import '../../utils/toast_utils.dart';
 
 class EditProfileScreen extends StatefulWidget {
   const EditProfileScreen({Key? key}) : super(key: key);
@@ -78,8 +79,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           photoURL = await _uploadImage();
         } catch (e) {
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Ошибка загрузки изображения: $e')),
+            showCustomToastWithIcon(
+              'Ошибка загрузки изображения: $e',
+              accentColor: Colors.red,
+              fontSize: 14.0,
+              icon: const Icon(Icons.error, size: 20, color: Colors.red),
             );
           }
           return;
@@ -94,14 +98,20 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
       if (mounted) {
         Navigator.of(context).pop();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Профиль успешно обновлен')),
+        showCustomToastWithIcon(
+          'Профиль успешно обновлен',
+          accentColor: Colors.green,
+          fontSize: 14.0,
+          icon: const Icon(Icons.check, size: 20, color: Colors.green),
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Ошибка обновления профиля: $e')),
+        showCustomToastWithIcon(
+          'Ошибка обновления профиля: $e',
+          accentColor: Colors.red,
+          fontSize: 14.0,
+          icon: const Icon(Icons.error, size: 20, color: Colors.red),
         );
       }
     } finally {
@@ -191,11 +201,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                         : () {
                             auth.signOut(() {
                               if (context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Резервная копия создана перед выходом из аккаунта'),
-                                    backgroundColor: Colors.green,
-                                  ),
+                                showCustomToastWithIcon(
+                                  'Резервная копия создана перед выходом из аккаунта',
+                                  accentColor: Colors.green,
+                                  fontSize: 14.0,
+                                  icon: const Icon(Icons.check, size: 20, color: Colors.green),
                                 );
                               }
                             });

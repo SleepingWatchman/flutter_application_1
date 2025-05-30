@@ -813,38 +813,19 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                       timeError = null;
                     });
 
-                    // Собираем динамические поля
-                    Map<String, String> dynamicMap = {};
-                    for (var field in dynamicFields) {
-                      dynamicMap[field.keyController.text] = field.valueController.text;
-                    }
-
-                    // Создаем объект записи
-                    ScheduleEntry entry = ScheduleEntry(
-                      time: timeController.text,
-                      date: DateFormat('yyyy-MM-dd').format(_selectedDate!),
-                      note: shortNoteController.text.trim(),
-                      dynamicFieldsJson: jsonEncode(dynamicMap),
-                      recurrence: recurrence,
-                      databaseId: databaseId, // Добавляем ID базы данных
-                    );
-
-                    print('Создание записи расписания в базе: ${databaseId ?? "локальная"}');
-                    // Сохраняем запись в БД
-                    DatabaseHelper().insertScheduleEntry(entry.toMap()).then((_) {
-                      if (!mounted) return;
-                      // Обновляем список записей
-                      setState(() {
-                        _loadSchedule();
+                    // Проверяем наложение времени
+                    if (_checkTimeOverlap(timeController.text)) {
+                      _showTimeOverlapDialog().then((shouldContinue) {
+                        if (shouldContinue != true) {
+                          return; // Пользователь отменил сохранение
+                        }
+                        // Продолжаем с сохранением
+                        _saveNewScheduleEntry(timeController, shortNoteController, dynamicFields, recurrence, databaseId);
                       });
-                      Navigator.pop(context);
-                      showCustomToastWithIcon(
-                        "Запись успешно добавлена",
-                        accentColor: Colors.green,
-                        fontSize: 14.0,
-                        icon: const Icon(Icons.check, size: 20, color: Colors.green),
-                      );
-                    });
+                    } else {
+                      // Нет наложения времени, сохраняем сразу
+                      _saveNewScheduleEntry(timeController, shortNoteController, dynamicFields, recurrence, databaseId);
+                    }
                   },
                   child: const Text('Сохранить'),
                 ),
@@ -854,6 +835,43 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
         );
       },
     );
+  }
+
+  // Вспомогательный метод для сохранения новой записи расписания
+  void _saveNewScheduleEntry(TextEditingController timeController, TextEditingController shortNoteController, 
+      List<DynamicFieldEntry> dynamicFields, Recurrence recurrence, String? databaseId) {
+    // Собираем динамические поля
+    Map<String, String> dynamicMap = {};
+    for (var field in dynamicFields) {
+      dynamicMap[field.keyController.text] = field.valueController.text;
+    }
+
+    // Создаем объект записи
+    ScheduleEntry entry = ScheduleEntry(
+      time: timeController.text,
+      date: DateFormat('yyyy-MM-dd').format(_selectedDate!),
+      note: shortNoteController.text.trim(),
+      dynamicFieldsJson: jsonEncode(dynamicMap),
+      recurrence: recurrence,
+      databaseId: databaseId, // Добавляем ID базы данных
+    );
+
+    print('Создание записи расписания в базе: ${databaseId ?? "локальная"}');
+    // Сохраняем запись в БД
+    DatabaseHelper().insertScheduleEntry(entry.toMap()).then((_) {
+      if (!mounted) return;
+      // Обновляем список записей
+      setState(() {
+        _loadSchedule();
+      });
+      Navigator.pop(context);
+      showCustomToastWithIcon(
+        "Запись успешно добавлена",
+        accentColor: Colors.green,
+        fontSize: 14.0,
+        icon: const Icon(Icons.check, size: 20, color: Colors.green),
+      );
+    });
   }
 
   // Вспомогательный метод для определения подсказки интервала

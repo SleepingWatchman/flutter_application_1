@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import '../auth/login_screen.dart';
 import 'invitations_screen.dart';
 import 'invite_user_screen.dart';
+import '../../utils/toast_utils.dart';
 
 class SharedDatabasesScreen extends StatefulWidget {
   const SharedDatabasesScreen({Key? key}) : super(key: key);
@@ -33,7 +34,7 @@ class _SharedDatabasesScreenState extends State<SharedDatabasesScreen> {
         );
         return;
       }
-      context.read<EnhancedCollaborativeProvider>().loadDatabases();
+      _loadDatabases();
     });
   }
 
@@ -42,6 +43,11 @@ class _SharedDatabasesScreenState extends State<SharedDatabasesScreen> {
     _importController.dispose();
     _createController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadDatabases() async {
+    final provider = context.read<EnhancedCollaborativeProvider>();
+    await provider.loadDatabases();
   }
 
   void _showCreateDialog() {
@@ -194,7 +200,7 @@ class _SharedDatabasesScreenState extends State<SharedDatabasesScreen> {
                 const SizedBox(height: 16),
                 ElevatedButton(
                   onPressed: () {
-                    provider.loadDatabases();
+                    _loadDatabases();
                   },
                   child: const Text('Повторить'),
                 ),
@@ -274,7 +280,7 @@ class _SharedDatabasesScreenState extends State<SharedDatabasesScreen> {
               IconButton(
                 icon: const Icon(Icons.refresh),
                 onPressed: () {
-                  provider.loadDatabases();
+                  _loadDatabases();
                 },
               ),
               IconButton(
@@ -283,151 +289,123 @@ class _SharedDatabasesScreenState extends State<SharedDatabasesScreen> {
               ),
             ],
           ),
-          body: ListView.builder(
-            itemCount: databases.length,
-            itemBuilder: (context, index) {
-              final database = databases[index];
-              final isOwner = database.isOwner(auth.user!.id);
+          body: Column(
+            children: [
+              Expanded(
+                child: databases.isEmpty
+                    ? const Center(
+                        child: Text('Нет доступных баз данных'),
+                      )
+                    : ListView.builder(
+                        itemCount: databases.length,
+                        itemBuilder: (context, index) {
+                          final database = databases[index];
+                          final isCurrentDatabase = provider.currentDatabaseId == database.id;
+                          final currentUser = auth.user;
+                          final isOwner = currentUser != null && 
+                              database.ownerId == currentUser.id;
 
-              return Card(
-                margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                child: ListTile(
-                  title: Text(database.name),
-                  subtitle: Text(
-                    isOwner ? 'Владелец' : 'Соавтор',
-                  ),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.people),
-                        onPressed: () => _showCollaboratorsDialog(database),
-                      ),
-                      IconButton(
-                        icon: Icon(
-                          provider.isUsingSharedDatabase && 
-                          provider.currentDatabaseId == database.id
-                            ? Icons.check_circle
-                            : Icons.swap_horiz,
-                          color: provider.isUsingSharedDatabase && 
-                                provider.currentDatabaseId == database.id
-                            ? Colors.green
-                            : null,
-                        ),
-                        onPressed: () async {
-                          if (provider.isUsingSharedDatabase && 
-                              provider.currentDatabaseId == database.id) {
-                            // Переключение на личную базу
-                            await provider.switchToPersonalDatabase();
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Переключено на личную базу данных'),
-                                  backgroundColor: Colors.green,
-                                ),
-                              );
-                            }
-                          } else {
-                            // Переключение на совместную базу
-                            try {
-                              await provider.switchToDatabase(database.id);
-                              
-                              // Обновляем UI, чтобы отразить изменения
-                              setState(() {});
-                              
-                              // Перезагружаем данные во всех экранах
-                              final databaseProvider = context.read<DatabaseProvider>();
-                              databaseProvider.setNeedsUpdate(true);
-                              
-                              if (context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Переключено на совместную базу данных'),
-                                    backgroundColor: Colors.green,
+                          return Card(
+                            margin: const EdgeInsets.all(8.0),
+                            color: isCurrentDatabase 
+                                ? Colors.blue.withOpacity(0.2)
+                                : null,
+                            child: ListTile(
+                              title: Text(database.name),
+                              subtitle: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('Создана: ${database.createdAt.toLocal().toString().split(' ')[0]}'),
+                                  Text('Участников: ${database.users.length}'),
+                                  if (isCurrentDatabase)
+                                    const Text(
+                                      'Активная база данных',
+                                      style: TextStyle(
+                                        color: Colors.blue,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (!isCurrentDatabase)
+                                    IconButton(
+                                      icon: const Icon(Icons.login),
+                                      onPressed: () {
+                                        provider.switchToDatabase(database.id);
+                                      },
+                                    ),
+                                  if (isCurrentDatabase)
+                                    IconButton(
+                                      icon: const Icon(Icons.logout),
+                                      onPressed: () {
+                                        provider.switchToPersonalDatabase();
+                                      },
+                                    ),
+                                  IconButton(
+                                    icon: const Icon(Icons.person_add),
+                                    onPressed: () {
+                                      Navigator.of(context).push(
+                                        MaterialPageRoute(
+                                          builder: (_) => InviteUserScreen(
+                                            database: database,
+                                          ),
+                                        ),
+                                      );
+                                    },
                                   ),
-                                );
-                              }
-                            } catch (e) {
-                              if (context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text('Ошибка переключения базы: ${e.toString()}'),
-                                    backgroundColor: Colors.red,
-                                  ),
-                                );
-                              }
-                            }
-                          }
+                                  if (isOwner)
+                                    IconButton(
+                                      icon: const Icon(Icons.delete),
+                                      onPressed: () {
+                                        showDialog(
+                                          context: context,
+                                          builder: (context) => AlertDialog(
+                                            title: const Text('Удалить базу данных'),
+                                            content: const Text(
+                                              'Вы уверены, что хотите удалить эту базу данных? Это действие нельзя отменить.',
+                                            ),
+                                            actions: [
+                                              TextButton(
+                                                onPressed: () => Navigator.of(context).pop(),
+                                                child: const Text('Отмена'),
+                                              ),
+                                              ElevatedButton(
+                                                onPressed: () {
+                                                  provider.deleteDatabase(database.id);
+                                                  Navigator.of(context).pop();
+                                                },
+                                                style: ElevatedButton.styleFrom(
+                                                  backgroundColor: Colors.red,
+                                                ),
+                                                child: const Text('Удалить'),
+                                              ),
+                                            ],
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                ],
+                              ),
+                              onTap: isCurrentDatabase ? null : () {
+                                provider.switchToDatabase(database.id);
+                              },
+                            ),
+                          );
                         },
                       ),
-                      if (isOwner)
-                        IconButton(
-                          icon: const Icon(Icons.delete),
-                          onPressed: () {
-                            showDialog(
-                              context: context,
-                              builder: (context) => AlertDialog(
-                                title: const Text('Удалить базу данных'),
-                                content: const Text(
-                                  'Вы уверены, что хотите удалить эту базу данных? Это действие нельзя отменить.',
-                                ),
-                                actions: [
-                                  TextButton(
-                                    onPressed: () => Navigator.of(context).pop(),
-                                    child: const Text('Отмена'),
-                                  ),
-                                  ElevatedButton(
-                                    onPressed: () {
-                                      provider.deleteDatabase(database.id);
-                                      Navigator.of(context).pop();
-                                    },
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.red,
-                                    ),
-                                    child: const Text('Удалить'),
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
-                        )
-                      else
-                        IconButton(
-                          icon: const Icon(Icons.exit_to_app),
-                          onPressed: () {
-                            showDialog(
-                              context: context,
-                              builder: (context) => AlertDialog(
-                                title: const Text('Покинуть базу данных'),
-                                content: const Text(
-                                  'Вы уверены, что хотите покинуть эту базу данных?',
-                                ),
-                                actions: [
-                                  TextButton(
-                                    onPressed: () => Navigator.of(context).pop(),
-                                    child: const Text('Отмена'),
-                                  ),
-                                  ElevatedButton(
-                                    onPressed: () {
-                                      provider.leaveDatabase(database.id);
-                                      Navigator.of(context).pop();
-                                    },
-                                    child: const Text('Покинуть'),
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
-                        ),
-                    ],
+              ),
+              if (auth.user != null)
+                Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: ElevatedButton(
+                    onPressed: () => _showCreateDialog,
+                    child: const Text('Создать новую базу данных'),
                   ),
                 ),
-              );
-            },
-          ),
-          floatingActionButton: FloatingActionButton(
-            onPressed: _showCreateDialog,
-            child: const Icon(Icons.add),
+            ],
           ),
         );
       },

@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../providers/enhanced_collaborative_provider.dart';
 import '../../models/enhanced_collaborative_database.dart';
 import '../../models/collaborative_database_role.dart';
+import '../../utils/toast_utils.dart';
 
 class InviteUserScreen extends StatefulWidget {
   final EnhancedCollaborativeDatabase database;
@@ -43,22 +44,22 @@ class _InviteUserScreenState extends State<InviteUserScreen> {
         _selectedRole,
       );
 
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Приглашение отправлено!'),
-            backgroundColor: Colors.green,
-          ),
-        );
+      if (mounted) {
         Navigator.of(context).pop();
+        showCustomToastWithIcon(
+          'Приглашение отправлено',
+          accentColor: Colors.green,
+          fontSize: 14.0,
+          icon: const Icon(Icons.check, size: 20, color: Colors.green),
+        );
       }
     } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Ошибка отправки приглашения: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
+      if (mounted) {
+        showCustomToastWithIcon(
+          'Ошибка отправки приглашения: $e',
+          accentColor: Colors.red,
+          fontSize: 14.0,
+          icon: const Icon(Icons.error, size: 20, color: Colors.red),
         );
       }
     } finally {

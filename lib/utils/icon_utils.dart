@@ -8,7 +8,7 @@ IconData getIconData(String iconKey) {
     case 'check':
       return Icons.check;
     case 'tree':
-      return Icons.park; // или Icons.park – по вашему выбору
+      return Icons.park; 
     case 'home':
       return Icons.home;
     case 'car':

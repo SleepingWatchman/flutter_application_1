@@ -7,6 +7,7 @@ import '../services/enhanced_sync_service.dart';
 import '../services/auth_service.dart';
 import '../services/server_health_service.dart';
 import '../db/database_helper.dart';
+import '../utils/toast_utils.dart';
 import 'database_provider.dart';
 import 'package:oktoast/oktoast.dart';
 import 'package:dio/dio.dart';
@@ -107,12 +108,27 @@ class EnhancedCollaborativeProvider extends ChangeNotifier {
       
       if (result.status == SyncStatus.error && result.error != null) {
         _error = result.error;
-        showToast('Ошибка синхронизации: ${result.error}');
+        showCustomToastWithIcon(
+          'Ошибка синхронизации: ${result.error}',
+          accentColor: Colors.red,
+          fontSize: 14.0,
+          icon: const Icon(Icons.error, size: 20, color: Colors.red),
+        );
       } else if (result.status == SyncStatus.success) {
-        showToast('Синхронизация завершена успешно');
+        showCustomToastWithIcon(
+          'Синхронизация завершена успешно',
+          accentColor: Colors.green,
+          fontSize: 14.0,
+          icon: const Icon(Icons.check, size: 20, color: Colors.green),
+        );
         _databaseProvider?.notifyListeners();
       } else if (result.status == SyncStatus.conflict) {
-        showToast('Обнаружены конфликты синхронизации');
+        showCustomToastWithIcon(
+          'Обнаружены конфликты синхронизации',
+          accentColor: Colors.orange,
+          fontSize: 14.0,
+          icon: const Icon(Icons.warning, size: 20, color: Colors.orange),
+        );
       }
       
       notifyListeners();
@@ -523,11 +539,21 @@ class EnhancedCollaborativeProvider extends ChangeNotifier {
     try {
       await _roleService.inviteUser(databaseId, email, role);
       await _loadDatabaseUsers(databaseId);
-      showToast('Приглашение отправлено');
+      showCustomToastWithIcon(
+        'Приглашение отправлено',
+        accentColor: Colors.green,
+        fontSize: 14.0,
+        icon: const Icon(Icons.check, size: 20, color: Colors.green),
+      );
       notifyListeners();
     } catch (e) {
       _error = e.toString();
-      showToast('Ошибка отправки приглашения: $e');
+      showCustomToastWithIcon(
+        'Ошибка отправки приглашения: $e',
+        accentColor: Colors.red,
+        fontSize: 14.0,
+        icon: const Icon(Icons.error, size: 20, color: Colors.red),
+      );
       notifyListeners();
     }
   }
@@ -536,11 +562,21 @@ class EnhancedCollaborativeProvider extends ChangeNotifier {
     try {
       await _roleService.updateUserRole(databaseId, userId, newRole);
       await _loadDatabaseUsers(databaseId);
-      showToast('Роль пользователя обновлена');
+      showCustomToastWithIcon(
+        'Роль пользователя обновлена',
+        accentColor: Colors.green,
+        fontSize: 14.0,
+        icon: const Icon(Icons.check, size: 20, color: Colors.green),
+      );
       notifyListeners();
     } catch (e) {
       _error = e.toString();
-      showToast('Ошибка обновления роли: $e');
+      showCustomToastWithIcon(
+        'Ошибка обновления роли: $e',
+        accentColor: Colors.red,
+        fontSize: 14.0,
+        icon: const Icon(Icons.error, size: 20, color: Colors.red),
+      );
       notifyListeners();
     }
   }
@@ -549,11 +585,21 @@ class EnhancedCollaborativeProvider extends ChangeNotifier {
     try {
       await _roleService.removeUser(databaseId, userId);
       await _loadDatabaseUsers(databaseId);
-      showToast('Пользователь удален из базы данных');
+      showCustomToastWithIcon(
+        'Пользователь удален из базы данных',
+        accentColor: Colors.green,
+        fontSize: 14.0,
+        icon: const Icon(Icons.check, size: 20, color: Colors.green),
+      );
       notifyListeners();
     } catch (e) {
       _error = e.toString();
-      showToast('Ошибка удаления пользователя: $e');
+      showCustomToastWithIcon(
+        'Ошибка удаления пользователя: $e',
+        accentColor: Colors.red,
+        fontSize: 14.0,
+        icon: const Icon(Icons.error, size: 20, color: Colors.red),
+      );
       notifyListeners();
     }
   }
@@ -567,11 +613,21 @@ class EnhancedCollaborativeProvider extends ChangeNotifier {
         await switchToPersonalDatabase();
       }
       
-      showToast('Вы покинули базу данных');
+      showCustomToastWithIcon(
+        'Вы покинули базу данных',
+        accentColor: Colors.green,
+        fontSize: 14.0,
+        icon: const Icon(Icons.check, size: 20, color: Colors.green),
+      );
       notifyListeners();
     } catch (e) {
       _error = e.toString();
-      showToast('Ошибка при выходе из базы данных: $e');
+      showCustomToastWithIcon(
+        'Ошибка при выходе из базы данных: $e',
+        accentColor: Colors.red,
+        fontSize: 14.0,
+        icon: const Icon(Icons.error, size: 20, color: Colors.red),
+      );
       notifyListeners();
     }
   }
@@ -591,13 +647,23 @@ class EnhancedCollaborativeProvider extends ChangeNotifier {
           await switchToPersonalDatabase();
         }
         
-        showToast('База данных удалена');
+        showCustomToastWithIcon(
+          'База данных удалена',
+          accentColor: Colors.green,
+          fontSize: 14.0,
+          icon: const Icon(Icons.check, size: 20, color: Colors.green),
+        );
       } else {
         throw Exception('Ошибка при удалении базы данных: ${response.statusCode}');
       }
     } catch (e) {
       _error = e.toString();
-      showToast('Ошибка удаления базы данных: $e');
+      showCustomToastWithIcon(
+        'Ошибка удаления базы данных: $e',
+        accentColor: Colors.red,
+        fontSize: 14.0,
+        icon: const Icon(Icons.error, size: 20, color: Colors.red),
+      );
       print('Ошибка в deleteDatabase: $e');
     } finally {
       _isLoading = false;
@@ -610,10 +676,20 @@ class EnhancedCollaborativeProvider extends ChangeNotifier {
     try {
       await _roleService.acceptInvitation(invitationId);
       await loadDatabases(); // Перезагружаем все данные
-      showToast('Приглашение принято');
+      showCustomToastWithIcon(
+        'Приглашение принято',
+        accentColor: Colors.green,
+        fontSize: 14.0,
+        icon: const Icon(Icons.check, size: 20, color: Colors.green),
+      );
     } catch (e) {
       _error = e.toString();
-      showToast('Ошибка принятия приглашения: $e');
+      showCustomToastWithIcon(
+        'Ошибка принятия приглашения: $e',
+        accentColor: Colors.red,
+        fontSize: 14.0,
+        icon: const Icon(Icons.error, size: 20, color: Colors.red),
+      );
       notifyListeners();
     }
   }
@@ -622,11 +698,21 @@ class EnhancedCollaborativeProvider extends ChangeNotifier {
     try {
       await _roleService.declineInvitation(invitationId);
       await _loadPendingInvitations();
-      showToast('Приглашение отклонено');
+      showCustomToastWithIcon(
+        'Приглашение отклонено',
+        accentColor: Colors.green,
+        fontSize: 14.0,
+        icon: const Icon(Icons.check, size: 20, color: Colors.green),
+      );
       notifyListeners();
     } catch (e) {
       _error = e.toString();
-      showToast('Ошибка отклонения приглашения: $e');
+      showCustomToastWithIcon(
+        'Ошибка отклонения приглашения: $e',
+        accentColor: Colors.red,
+        fontSize: 14.0,
+        icon: const Icon(Icons.error, size: 20, color: Colors.red),
+      );
       notifyListeners();
     }
   }
@@ -663,12 +749,22 @@ class EnhancedCollaborativeProvider extends ChangeNotifier {
       
       await _syncService.forceSync();
       
-      showToast('Синхронизация завершена успешно');
+      showCustomToastWithIcon(
+        'Синхронизация завершена успешно',
+        accentColor: Colors.green,
+        fontSize: 14.0,
+        icon: const Icon(Icons.check, size: 20, color: Colors.green),
+      );
       print('✅ Данные совместной базы отправлены на сервер');
       
     } catch (e) {
       _error = e.toString();
-      showToast('Ошибка синхронизации: $e');
+      showCustomToastWithIcon(
+        'Ошибка синхронизации: $e',
+        accentColor: Colors.red,
+        fontSize: 14.0,
+        icon: const Icon(Icons.error, size: 20, color: Colors.red),
+      );
       print('❌ Ошибка синхронизации: $e');
     } finally {
       _isSyncing = false;
@@ -679,11 +775,21 @@ class EnhancedCollaborativeProvider extends ChangeNotifier {
     try {
       await _syncService.resolveConflict(conflict, useLocal);
       _pendingConflicts.removeWhere((c) => c.id == conflict.id);
-      showToast('Конфликт разрешен');
+      showCustomToastWithIcon(
+        'Конфликт разрешен',
+        accentColor: Colors.green,
+        fontSize: 14.0,
+        icon: const Icon(Icons.check, size: 20, color: Colors.green),
+      );
       notifyListeners();
     } catch (e) {
       _error = e.toString();
-      showToast('Ошибка разрешения конфликта: $e');
+      showCustomToastWithIcon(
+        'Ошибка разрешения конфликта: $e',
+        accentColor: Colors.red,
+        fontSize: 14.0,
+        icon: const Icon(Icons.error, size: 20, color: Colors.red),
+      );
       notifyListeners();
     }
   }

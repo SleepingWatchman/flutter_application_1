@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
+import '../../utils/toast_utils.dart';
 import 'login_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
@@ -40,8 +41,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
         }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(e.toString())),
+          showCustomToastWithIcon(
+            'Ошибка регистрации: ${e.toString()}',
+            accentColor: Colors.red,
+            fontSize: 14.0,
+            icon: const Icon(Icons.error, size: 20, color: Colors.red),
           );
         }
       }

@@ -172,12 +172,37 @@ class AccountScreen extends StatelessWidget {
                   const SizedBox(height: 8),
                   ElevatedButton(
                     onPressed: () {
-                      auth.signOut();
+                      auth.signOut(() {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Резервная копия создана перед выходом из аккаунта'),
+                              backgroundColor: Colors.green,
+                            ),
+                          );
+                        }
+                      });
                     },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.red,
                     ),
-                    child: const Text('Выйти'),
+                    child: auth.isCreatingBackupOnSignOut
+                        ? Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              const Text('Создание бэкапа...'),
+                            ],
+                          )
+                        : const Text('Выйти'),
                   ),
                 ] else ...[
                   ElevatedButton(

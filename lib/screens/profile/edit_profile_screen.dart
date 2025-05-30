@@ -183,13 +183,41 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     : const Text('Сохранить'),
               ),
               const SizedBox(height: 16),
-              TextButton(
-                onPressed: _isLoading
-                    ? null
-                    : () {
-                        context.read<AuthProvider>().signOut();
-                      },
-                child: const Text('Выйти из аккаунта'),
+              Consumer<AuthProvider>(
+                builder: (context, auth, _) {
+                  return TextButton(
+                    onPressed: _isLoading || auth.isCreatingBackupOnSignOut
+                        ? null
+                        : () {
+                            auth.signOut(() {
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Резервная копия создана перед выходом из аккаунта'),
+                                    backgroundColor: Colors.green,
+                                  ),
+                                );
+                              }
+                            });
+                          },
+                    child: auth.isCreatingBackupOnSignOut
+                        ? Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              const Text('Создание бэкапа...'),
+                            ],
+                          )
+                        : const Text('Выйти из аккаунта'),
+                  );
+                },
               ),
             ],
           ),

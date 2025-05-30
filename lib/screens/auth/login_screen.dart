@@ -31,6 +31,16 @@ class _LoginScreenState extends State<LoginScreen> {
         await auth.signIn(
           _emailController.text.trim(),
           _passwordController.text.trim(),
+          () {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Данные пользователя успешно восстановлены из резервной копии'),
+                  backgroundColor: Colors.green,
+                ),
+              );
+            }
+          },
         );
         if (mounted) {
           Navigator.of(context).pop(true);
@@ -118,7 +128,19 @@ class _LoginScreenState extends State<LoginScreen> {
                   return ElevatedButton(
                     onPressed: auth.isLoading ? null : _login,
                     child: auth.isLoading
-                        ? const CircularProgressIndicator()
+                        ? Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const CircularProgressIndicator(),
+                              const SizedBox(height: 8),
+                              Text(
+                                auth.isRestoringBackup 
+                                    ? 'Восстановление данных...' 
+                                    : 'Вход...',
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                            ],
+                          )
                         : const Text('Войти'),
                   );
                 },

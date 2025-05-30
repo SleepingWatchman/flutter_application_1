@@ -137,9 +137,23 @@ class NotesApp extends StatelessWidget {
           home: Consumer<AuthProvider>(
             builder: (context, auth, _) {
               if (auth.isLoading) {
-                return const Scaffold(
+                return Scaffold(
                   body: Center(
-                    child: CircularProgressIndicator(),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const CircularProgressIndicator(),
+                        const SizedBox(height: 16),
+                        Text(
+                          auth.isRestoringBackup 
+                              ? 'Восстановление пользовательских данных...' 
+                              : auth.isCreatingBackupOnSignOut
+                                  ? 'Создание резервной копии...'
+                                  : 'Загрузка...',
+                          style: Theme.of(context).textTheme.bodyLarge,
+                        ),
+                      ],
+                    ),
                   ),
                 );
               }
@@ -190,6 +204,9 @@ class _MainScreenState extends State<MainScreen> {
       final enhancedCollabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
       enhancedCollabProvider.addListener(_handleCollaborativeDatabaseChanges);
       
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      authProvider.addListener(_handleAuthChanges);
+      
       // Инициализируем сервис проверки состояния сервера
       try {
         final serverHealthService = ServerHealthService();
@@ -204,6 +221,7 @@ class _MainScreenState extends State<MainScreen> {
   // Переменные для хранения провайдеров
   DatabaseProvider? _dbProvider;
   EnhancedCollaborativeProvider? _enhancedCollabProvider;
+  AuthProvider? _authProvider;
   
   @override
   void didChangeDependencies() {
@@ -212,6 +230,7 @@ class _MainScreenState extends State<MainScreen> {
     // Сохраняем ссылки на провайдеры для безопасного удаления слушателей в dispose
     _dbProvider = Provider.of<DatabaseProvider>(context, listen: false);
     _enhancedCollabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
+    _authProvider = Provider.of<AuthProvider>(context, listen: false);
     
     final auth = Provider.of<AuthProvider>(context, listen: false);
     if (auth.wasTokenExpired) {
@@ -234,6 +253,10 @@ class _MainScreenState extends State<MainScreen> {
       if (_enhancedCollabProvider != null) {
         _enhancedCollabProvider!.removeListener(_handleCollaborativeDatabaseChanges);
       }
+      
+      if (_authProvider != null) {
+        _authProvider!.removeListener(_handleAuthChanges);
+      }
     } catch (e) {
       print('Ошибка при удалении слушателей: $e');
     }
@@ -254,6 +277,18 @@ class _MainScreenState extends State<MainScreen> {
     if (mounted) {
       // Consumer виджеты обновятся автоматически через Provider
       // Дополнительные действия не требуются
+    }
+  }
+  
+  void _handleAuthChanges() {
+    if (mounted) {
+      final auth = Provider.of<AuthProvider>(context, listen: false);
+      // Если восстановление данных завершено, обновляем интерфейс
+      if (!auth.isRestoringBackup && auth.isAuthenticated) {
+        final dbProvider = Provider.of<DatabaseProvider>(context, listen: false);
+        dbProvider.setNeedsUpdate(true);
+        print('🔄 UI: Обновление интерфейса после восстановления данных из бэкапа');
+      }
     }
   }
 

@@ -63,6 +63,12 @@ class AuthProvider with ChangeNotifier {
       notifyListeners();
 
       _user = await _authService.register(email, password, displayName);
+      
+      // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Отключаем гостевой режим при успешной регистрации
+      if (_user != null) {
+        _isGuestMode = false;
+        print('✅ AUTH: Гостевой режим отключен после успешной регистрации');
+      }
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -76,6 +82,12 @@ class AuthProvider with ChangeNotifier {
 
       // Выполняем вход
       _user = await _authService.login(email, password);
+      
+      // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Отключаем гостевой режим при успешной авторизации
+      if (_user != null) {
+        _isGuestMode = false;
+        print('✅ AUTH: Гостевой режим отключен после успешной авторизации');
+      }
       
       // После успешного входа пытаемся восстановить данные из бэкапа
       await _attemptBackupRestore(onBackupRestored);

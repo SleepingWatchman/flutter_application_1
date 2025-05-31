@@ -1,23 +1,24 @@
+import 'package:sqflite/sqflite.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+import 'dart:async';
+import 'dart:math' as math;
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../models/note.dart';
 import '../models/folder.dart';
 import '../models/schedule_entry.dart';
 import '../models/pinboard_note.dart';
 import '../models/connection.dart';
-import 'dart:convert';
-import 'dart:io';
-import 'dart:math' as math;
-import 'package:sqflite/sqflite.dart';
-import 'dart:typed_data';
-import 'package:flutter_application_1/models/note_image.dart';
-import 'package:flutter_application_1/models/backup_data.dart';
-import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../providers/database_provider.dart';
+import '../models/note_image.dart';
+import '../models/backup_data.dart';
 import '../models/shared_database.dart';
-import 'dart:async';
+import '../models/collaborative_database.dart';
+import '../providers/database_provider.dart';
 
 /*
  * ⚠️ КРИТИЧЕСКИ ВАЖНО: ЛОКАЛЬНЫЕ МОДЕЛИ ИЗМЕНЯТЬ ЗАПРЕЩЕНО! ⚠️
@@ -1165,13 +1166,67 @@ class DatabaseHelper {
   }
 
   // Методы для работы с изображениями
-  Future<List<Map<String, dynamic>>> getImagesForNote(int id) async {
+  Future<List<Map<String, dynamic>>> getImagesForNote(int id, [String? databaseId]) async {
     final db = await database;
-    return await db.query(
-      'note_images',
-      where: 'note_id = ?',
-      whereArgs: [id],
-    );
+    
+    // ✅ ИСПРАВЛЕНИЕ: Правильный поиск изображений с учетом текущей базы данных
+    try {
+      // Для совместных баз данных используем правильную таблицу
+      if (databaseId != null) {
+        // Проверяем, есть ли заметка в указанной базе данных
+        final noteCheck = await db.query(
+          'notes',
+          where: 'id = ? AND database_id = ?',
+          whereArgs: [id, databaseId],
+          limit: 1,
+        );
+        
+        if (noteCheck.isEmpty) {
+          print('Заметка $id не найдена в базе данных $databaseId');
+          return [];
+        }
+        
+        print('Поиск изображений для заметки $id в совместной базе $databaseId');
+        
+        // ✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Ищем изображения по note_id И database_id
+        final images = await db.query(
+          'note_images',
+          where: 'note_id = ? AND (database_id = ? OR database_id IS NULL)',
+          whereArgs: [id, databaseId],
+        );
+        
+        print('Загружено изображений для заметки $id: ${images.length}');
+        return images;
+      } else {
+        // Для личной базы данных (databaseId == null)
+        // Проверяем, что заметка принадлежит личной базе
+        final noteCheck = await db.query(
+          'notes',
+          where: 'id = ? AND database_id IS NULL',
+          whereArgs: [id],
+          limit: 1,
+        );
+        
+        if (noteCheck.isEmpty) {
+          print('Заметка $id не найдена в личной базе данных');
+          return [];
+        }
+        
+        print('Поиск изображений для заметки $id в личной базе данных');
+        
+        final images = await db.query(
+          'note_images',
+          where: 'note_id = ? AND database_id IS NULL',
+          whereArgs: [id],
+        );
+        
+        print('Загружено изображений для заметки $id: ${images.length}');
+        return images;
+      }
+    } catch (e) {
+      print('Ошибка при поиске изображений для заметки $id в базе $databaseId: $e');
+      return [];
+    }
   }
 
   Future<void> deleteImage(int id) async {
@@ -1356,7 +1411,22 @@ class DatabaseHelper {
   }
 
   Future<void> insertNoteForBackup(Map<String, dynamic> note, [Transaction? txn]) async {
-    final preparedNote = BackupData.prepareForSqlite(note);
+    // ✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Добавляем обязательные поля created_at и updated_at если их нет
+    final noteWithDefaults = Map<String, dynamic>.from(note);
+    
+    // Проверяем и добавляем created_at если отсутствует
+    if (!noteWithDefaults.containsKey('created_at') || noteWithDefaults['created_at'] == null) {
+      noteWithDefaults['created_at'] = DateTime.now().toIso8601String();
+      print('✅ ИСПРАВЛЕНИЕ: Добавлен created_at для заметки ${noteWithDefaults['title']}');
+    }
+    
+    // Проверяем и добавляем updated_at если отсутствует
+    if (!noteWithDefaults.containsKey('updated_at') || noteWithDefaults['updated_at'] == null) {
+      noteWithDefaults['updated_at'] = DateTime.now().toIso8601String();
+      print('✅ ИСПРАВЛЕНИЕ: Добавлен updated_at для заметки ${noteWithDefaults['title']}');
+    }
+    
+    final preparedNote = BackupData.prepareForSqlite(noteWithDefaults);
     
     try {
       if (txn != null) {
@@ -1655,23 +1725,24 @@ class DatabaseHelper {
     }
   }
 
-  Future<void> insertImageForBackup(int noteId, String fileName, Uint8List imageData, [Transaction? txn]) async {
+  Future<void> insertImageForBackup(int noteId, String fileName, Uint8List imageData, [Transaction? txn, String? databaseId]) async {
     try {
       if (txn != null) {
-        // Используем INSERT OR REPLACE для автоматической замены дубликатов
+        // ✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Добавляем database_id при вставке изображения
         await txn.rawInsert('''
-          INSERT OR REPLACE INTO note_images (note_id, file_name, image_data)
-          VALUES (?, ?, ?)
-        ''', [noteId, fileName, imageData]);
+          INSERT OR REPLACE INTO note_images (note_id, file_name, image_data, database_id)
+          VALUES (?, ?, ?, ?)
+        ''', [noteId, fileName, imageData, databaseId]);
       } else {
         final db = await database;
         await db.rawInsert('''
-          INSERT OR REPLACE INTO note_images (note_id, file_name, image_data)
-          VALUES (?, ?, ?)
-        ''', [noteId, fileName, imageData]);
+          INSERT OR REPLACE INTO note_images (note_id, file_name, image_data, database_id)
+          VALUES (?, ?, ?, ?)
+        ''', [noteId, fileName, imageData, databaseId]);
       }
+      print('✅ ИЗОБРАЖЕНИЕ: Вставлено изображение $fileName для заметки $noteId в базу $databaseId');
     } catch (e) {
-      print('Ошибка при вставке изображения $fileName для заметки $noteId при восстановлении: $e');
+      print('❌ ИЗОБРАЖЕНИЕ: Ошибка при вставке изображения $fileName для заметки $noteId: $e');
       rethrow;
     }
   }
@@ -1731,7 +1802,8 @@ class DatabaseHelper {
           image['note_id'],
           image['file_name'],
           imageData,
-          txn
+          txn,
+          image['database_id']
         );
       }
     });
@@ -2016,7 +2088,8 @@ class DatabaseHelper {
                     image['note_id'], 
                     image['file_name'], 
                     imageData, 
-                    txn
+                    txn,
+                    databaseId  // ✅ ИСПРАВЛЕНИЕ: передаем databaseId, а не image['database_id']
                   );
                   restoredImages++;
                 }
@@ -2320,27 +2393,66 @@ class DatabaseHelper {
         
         // ШАГ 6: Импортируем изображения (может быть самое медленное)
         print('📦 ОПТИМИЗИРОВАННЫЙ ИМПОРТ: ШАГ 6 - Импорт изображений...');
-        if (data['note_images'] != null && data['note_images'] is List) {
-          print('📦 ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Обработка изображений: ${data['note_images'].length}');
+        
+        // ✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Поддержка как 'note_images' так и 'images' от сервера
+        List? imagesList;
+        if (data['images'] != null && data['images'] is List) {
+          imagesList = data['images'] as List;
+          print('📦 ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Найдены изображения в поле "images": ${imagesList.length}');
+        } else if (data['note_images'] != null && data['note_images'] is List) {
+          imagesList = data['note_images'] as List;
+          print('📦 ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Найдены изображения в поле "note_images": ${imagesList.length}');
+        }
+        
+        if (imagesList != null && imagesList.isNotEmpty) {
+          print('📦 ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Обработка изображений: ${imagesList.length}');
+          
           // Импортируем изображения небольшими пакетами
-          final images = data['note_images'] as List;
-          for (int i = 0; i < images.length; i += 3) { // По 3 изображения за раз для скорости
-            final batch = images.skip(i).take(3).toList();
-            print('📦 ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Обработка пакета изображений ${i + 1}-${i + batch.length} из ${images.length}');
+          for (int i = 0; i < imagesList.length; i += 3) { // По 3 изображения за раз для скорости
+            final batch = imagesList.skip(i).take(3).toList();
+            print('📦 ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Обработка пакета изображений ${i + 1}-${i + batch.length} из ${imagesList.length}');
+            
             await db.transaction((txn) async {
               for (var image in batch) {
                 try {
-                  await insertImageForBackup(
-                    image['note_id'],
-                    image['file_name'],
-                    image['image_data'] is Uint8List 
-                      ? image['image_data'] 
-                      : Uint8List.fromList(List<int>.from(image['image_data'])),
-                    txn
-                  );
-                  imagesCount++;
+                  // ✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Правильная обработка base64 данных от сервера
+                  String? imageDataBase64;
+                  Uint8List? imageBytes;
+                  
+                  if (image['image_data'] != null && image['image_data'] is String) {
+                    // Данные от сервера в base64
+                    imageDataBase64 = image['image_data'] as String;
+                    try {
+                      imageBytes = base64Decode(imageDataBase64);
+                      print('✅ ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Декодированы base64 данные изображения ${image['file_name']}, размер: ${imageBytes.length} байт');
+                    } catch (e) {
+                      print('❌ ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Ошибка декодирования base64 для ${image['file_name']}: $e');
+                      continue;
+                    }
+                  } else if (image['image_data'] != null && image['image_data'] is Uint8List) {
+                    // Данные уже в виде Uint8List
+                    imageBytes = image['image_data'] as Uint8List;
+                  } else if (image['image_data'] != null && image['image_data'] is List<int>) {
+                    // Данные в виде List<int>
+                    imageBytes = Uint8List.fromList(List<int>.from(image['image_data']));
+                  } else {
+                    print('❌ ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Нет данных изображения для ${image['file_name']}');
+                    continue;
+                  }
+                  
+                  if (imageBytes != null) {
+                    await insertImageForBackup(
+                      image['note_id'],
+                      image['file_name'],
+                      imageBytes,
+                      txn,
+                      databaseId  // ✅ ИСПРАВЛЕНИЕ: передаем databaseId, а не image['database_id']
+                    );
+                    imagesCount++;
+                    print('✅ ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Импортировано изображение ${image['file_name']} для заметки ${image['note_id']}');
+                  }
                 } catch (e) {
-                  print('❌ ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Ошибка при импорте изображения: $e');
+                  print('❌ ОПТИМИЗИРОВАННЫЙ ИМПОРТ: Ошибка при импорте изображения ${image['file_name']}: $e');
                 }
               }
             });
@@ -2591,7 +2703,8 @@ class DatabaseHelper {
                     image['image_data'] is Uint8List 
                       ? image['image_data'] 
                       : Uint8List.fromList(List<int>.from(image['image_data'])),
-                    txn
+                    txn,
+                    image['database_id']
                   );
                   imagesCount++;
                 } catch (e) {
@@ -3140,8 +3253,20 @@ class DatabaseHelper {
   Future<void> clearCache() async {
     try {
       print('Очистка кешированных данных DatabaseHelper');
-      // В текущей реализации кеширование данных минимально
-      // Этот метод может быть расширен, если добавится кеширование
+      
+      // ИСПРАВЛЕНИЕ: Реальная очистка кешированных данных
+      // Закрываем текущее соединение с базой данных
+      if (_database != null && !_isClosed) {
+        await _database!.close();
+        _database = null;
+        _isClosed = true;
+        print('Соединение с базой данных закрыто для очистки кеша');
+      }
+      
+      // Сбрасываем флаги состояния
+      _isChangingDatabase = false;
+      _isClosed = false;
+      
       print('Кеш успешно очищен');
     } catch (e) {
       print('Ошибка при очистке кеша: $e');

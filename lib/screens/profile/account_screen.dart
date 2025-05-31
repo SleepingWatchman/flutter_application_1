@@ -42,10 +42,10 @@ class AccountScreen extends StatelessWidget {
                   tag: 'profile_button',
                   child: CircleAvatar(
                     radius: 50,
-                    backgroundImage: user?.photoURL != null
+                    backgroundImage: user?.photoURL != null && user!.photoURL!.isNotEmpty
                         ? NetworkImage('${user!.photoURL!}?t=${DateTime.now().millisecondsSinceEpoch}')
                         : null,
-                    child: user?.photoURL == null
+                    child: user?.photoURL == null || user!.photoURL!.isEmpty
                         ? const Icon(Icons.person, size: 50)
                         : null,
                   ),

@@ -483,6 +483,33 @@ func ExportSharedDatabase(dbID int64, userID int64) (*models.BackupData, error) 
 			log.Printf("ExportSharedDatabase: ошибка получения изображений для заметок БД %d: %v", dbID, err)
 			return nil, fmt.Errorf("ошибка получения изображений для заметок БД %d: %w", dbID, err)
 		}
+
+		// ✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Загружаем ImageData с диска для каждого изображения
+		for i := range images {
+			if images[i].ImagePath != "" {
+				fullServerPath := images[i].ImagePath
+				// Если ImagePath хранится как относительный от корня проекта
+				if !filepath.IsAbs(fullServerPath) {
+					wd, _ := os.Getwd()
+					fullServerPath = filepath.Join(wd, fullServerPath)
+				}
+
+				if _, statErr := os.Stat(fullServerPath); statErr == nil {
+					imgBytes, readErr := ioutil.ReadFile(fullServerPath)
+					if readErr != nil {
+						log.Printf("ExportSharedDatabase Warning: Не удалось прочитать файл изображения %s: %v", fullServerPath, readErr)
+						images[i].ImageData = "" // Очищаем, если не удалось прочитать
+					} else {
+						images[i].ImageData = base64.StdEncoding.EncodeToString(imgBytes)
+						log.Printf("ExportSharedDatabase: Загружены данные изображения %s, размер: %d байт", images[i].FileName, len(imgBytes))
+					}
+				} else {
+					log.Printf("ExportSharedDatabase Warning: Файл изображения %s не найден на сервере.", fullServerPath)
+					images[i].ImageData = ""
+				}
+			}
+		}
+
 		allNoteImages = images
 		log.Printf("ExportSharedDatabase: получено %d изображений для БД %d", len(allNoteImages), dbID)
 	} else {

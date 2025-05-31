@@ -264,3 +264,19 @@ func GetImagesForNoteIDs(noteIDs []int64) ([]models.NoteImage, error) {
 	}
 	return images, nil
 }
+
+// GetNoteImageByFileNameAndNoteIDWithTx ищет изображение по имени файла и ID заметки в рамках транзакции.
+// Это более надежный способ поиска существующих изображений при синхронизации.
+func GetNoteImageByFileNameAndNoteIDWithTx(tx *sqlx.Tx, fileName string, noteId int64, sharedDbID int64) (*models.NoteImage, error) {
+	image := &models.NoteImage{}
+	query := `SELECT Id, DatabaseId, NoteId, ImagePath, FileName, CreatedAt, UpdatedAt
+	          FROM NoteImages WHERE FileName = ? AND NoteId = ? AND DatabaseId = ? LIMIT 1`
+	err := tx.Get(image, query, fileName, noteId, sharedDbID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil // Не найдено
+		}
+		return nil, fmt.Errorf("GetNoteImageByFileNameAndNoteIDWithTx: ошибка поиска FileName %s, NoteID %d, SharedDBID %d: %w", fileName, noteId, sharedDbID, err)
+	}
+	return image, nil
+}

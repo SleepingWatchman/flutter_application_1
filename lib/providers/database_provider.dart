@@ -337,7 +337,16 @@ class DatabaseProvider extends ChangeNotifier {
   void notifyUpdate() {
     try {
       print('DatabaseProvider: Принудительное обновление UI');
-      notifyListeners();
+      
+      // ИСПРАВЛЕНИЕ: Добавляем небольшую задержку для завершения всех операций с БД
+      Future.delayed(Duration(milliseconds: 100), () {
+        if (!_isBlocked) {  // Проверяем что операции не заблокированы
+          notifyListeners();
+          print('✅ DatabaseProvider: UI обновлен с задержкой');
+        } else {
+          print('⚠️ DatabaseProvider: Обновление пропущено - операции заблокированы');
+        }
+      });
     } catch (e) {
       _lastError = 'Ошибка при обновлении UI: $e';
       print(_lastError);

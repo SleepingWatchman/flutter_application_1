@@ -1,16 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/enhanced_collaborative_provider.dart';
-import '../../providers/database_provider.dart';
 import '../../providers/auth_provider.dart';
-import '../../models/enhanced_collaborative_database.dart';
-import '../../models/collaborative_database_role.dart';
-import 'package:flutter/rendering.dart';
-import 'package:flutter/services.dart';
 import '../auth/login_screen.dart';
 import 'invitations_screen.dart';
-import 'invite_user_screen.dart';
-import '../../utils/toast_utils.dart';
+import 'database_users_screen.dart';
 
 class SharedDatabasesScreen extends StatefulWidget {
   const SharedDatabasesScreen({Key? key}) : super(key: key);
@@ -22,18 +16,28 @@ class SharedDatabasesScreen extends StatefulWidget {
 class _SharedDatabasesScreenState extends State<SharedDatabasesScreen> {
   final TextEditingController _importController = TextEditingController();
   final TextEditingController _createController = TextEditingController();
+  bool _wasInGuestMode = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final authProvider = context.read<AuthProvider>();
+      
+      _wasInGuestMode = authProvider.isGuestMode;
+      
       if (!authProvider.isAuthenticated) {
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (_) => const LoginScreen()),
         );
         return;
       }
+      
+      if (authProvider.isGuestMode) {
+        print('🚫 ИНИЦИАЛИЗАЦИЯ: Гостевой режим - загрузка баз данных пропущена');
+        return;
+      }
+      
       _loadDatabases();
     });
   }
@@ -46,11 +50,23 @@ class _SharedDatabasesScreenState extends State<SharedDatabasesScreen> {
   }
 
   Future<void> _loadDatabases() async {
+    final authProvider = context.read<AuthProvider>();
+    if (authProvider.isGuestMode) {
+      print('🚫 ЗАГРУЗКА: Загрузка баз данных заблокирована в гостевом режиме');
+      return;
+    }
+    
     final provider = context.read<EnhancedCollaborativeProvider>();
     await provider.loadDatabases();
   }
 
   void _showCreateDialog() {
+    final authProvider = context.read<AuthProvider>();
+    if (authProvider.isGuestMode) {
+      print('🚫 СОЗДАНИЕ: Создание баз данных заблокировано в гостевом режиме');
+      return;
+    }
+    
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -82,6 +98,12 @@ class _SharedDatabasesScreenState extends State<SharedDatabasesScreen> {
   }
 
   void _showImportDialog() {
+    final authProvider = context.read<AuthProvider>();
+    if (authProvider.isGuestMode) {
+      print('🚫 ИМПОРТ: Импорт баз данных заблокирован в гостевом режиме');
+      return;
+    }
+    
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -97,87 +119,62 @@ class _SharedDatabasesScreenState extends State<SharedDatabasesScreen> {
     );
   }
 
-  void _showCollaboratorsDialog(EnhancedCollaborativeDatabase database) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Участники'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: database.users.length,
-            itemBuilder: (context, index) {
-              final user = database.users[index];
-              final isOwner = user.role == CollaborativeDatabaseRole.owner;
-              final canManage = database.isOwner(context.read<AuthProvider>().user?.id ?? '');
-              
-              return ListTile(
-                leading: CircleAvatar(
-                  backgroundImage: user.photoURL != null 
-                      ? NetworkImage(user.photoURL!) 
-                      : null,
-                  child: user.photoURL == null 
-                      ? Text(user.displayName?.substring(0, 1).toUpperCase() ?? user.email.substring(0, 1).toUpperCase())
-                      : null,
-                ),
-                title: Text(user.displayName ?? user.email),
-                subtitle: Text(user.email),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Chip(
-                      label: Text(isOwner ? 'Владелец' : 'Участник'),
-                      backgroundColor: isOwner ? Colors.orange : Colors.blue,
-                    ),
-                    if (canManage && !isOwner) ...[
-                      const SizedBox(width: 8),
-                      IconButton(
-                        icon: const Icon(Icons.delete),
-                        onPressed: () {
-                          context.read<EnhancedCollaborativeProvider>().removeUser(
-                                database.id,
-                                user.userId,
-                              );
-                          Navigator.of(context).pop();
-                        },
-                      ),
-                    ],
-                  ],
-                ),
-              );
-            },
-          ),
-        ),
-        actions: [
-          if (database.isOwner(context.read<AuthProvider>().user?.id ?? '')) ...[
-            ElevatedButton.icon(
-              onPressed: () {
-                Navigator.of(context).pop();
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => InviteUserScreen(database: database),
-                  ),
-                );
-              },
-              icon: const Icon(Icons.person_add),
-              label: const Text('Пригласить'),
-            ),
-            const SizedBox(width: 8),
-          ],
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Закрыть'),
-          ),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Consumer2<EnhancedCollaborativeProvider, AuthProvider>(
       builder: (context, provider, auth, _) {
+        if (_wasInGuestMode && !auth.isGuestMode && auth.isAuthenticated) {
+          print('🔄 ПЕРЕХОД: Обнаружен переход из гостевого режима в авторизованный - загружаем базы данных');
+          _wasInGuestMode = false;
+          
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _loadDatabases();
+          });
+        }
+        
+        if (!_wasInGuestMode && auth.isGuestMode) {
+          _wasInGuestMode = true;
+        }
+        
+        if (auth.isGuestMode) {
+          return Scaffold(
+            appBar: AppBar(
+              title: const Text('Совместные базы данных'),
+            ),
+            body: const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.account_circle_outlined,
+                    size: 64,
+                    color: Colors.grey,
+                  ),
+                  SizedBox(height: 16),
+                  Text(
+                    'Совместные базы недоступны в гостевом режиме',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    'Пожалуйста, создайте аккаунт или авторизуйтесь',
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: Colors.grey,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+        
         if (provider.isLoading) {
           return const Center(child: CircularProgressIndicator());
         }
@@ -211,25 +208,6 @@ class _SharedDatabasesScreenState extends State<SharedDatabasesScreen> {
 
         final databases = provider.databases;
         
-        if (databases.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  'Нет доступных баз данных',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 16),
-                ElevatedButton(
-                  onPressed: _showCreateDialog,
-                  child: const Text('Создать базу данных'),
-                ),
-              ],
-            ),
-          );
-        }
-
         return Scaffold(
           appBar: AppBar(
             title: const Text('Совместные базы данных'),
@@ -294,7 +272,32 @@ class _SharedDatabasesScreenState extends State<SharedDatabasesScreen> {
               Expanded(
                 child: databases.isEmpty
                     ? const Center(
-                        child: Text('Нет доступных баз данных'),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.storage,
+                              size: 64,
+                              color: Colors.grey,
+                            ),
+                            SizedBox(height: 16),
+                            Text(
+                              'У вас пока нет совместных баз данных',
+                              style: TextStyle(
+                                fontSize: 18,
+                                color: Colors.grey,
+                              ),
+                            ),
+                            SizedBox(height: 8),
+                            Text(
+                              'Создайте новую или примите приглашение',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ],
+                        ),
                       )
                     : ListView.builder(
                         itemCount: databases.length,
@@ -330,9 +333,23 @@ class _SharedDatabasesScreenState extends State<SharedDatabasesScreen> {
                               trailing: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
+                                  IconButton(
+                                    icon: const Icon(Icons.people),
+                                    tooltip: 'Участники базы данных',
+                                    onPressed: () {
+                                      Navigator.of(context).push(
+                                        MaterialPageRoute(
+                                          builder: (_) => DatabaseUsersScreen(database: database),
+                                        ),
+                                      ).then((_) {
+                                        _loadDatabases();
+                                      });
+                                    },
+                                  ),
                                   if (!isCurrentDatabase)
                                     IconButton(
                                       icon: const Icon(Icons.login),
+                                      tooltip: 'Переключиться на эту базу',
                                       onPressed: () {
                                         provider.switchToDatabase(database.id);
                                       },
@@ -340,25 +357,47 @@ class _SharedDatabasesScreenState extends State<SharedDatabasesScreen> {
                                   if (isCurrentDatabase)
                                     IconButton(
                                       icon: const Icon(Icons.logout),
+                                      tooltip: 'Переключиться на личную базу',
                                       onPressed: () {
                                         provider.switchToPersonalDatabase();
                                       },
                                     ),
-                                  IconButton(
-                                    icon: const Icon(Icons.person_add),
-                                    onPressed: () {
-                                      Navigator.of(context).push(
-                                        MaterialPageRoute(
-                                          builder: (_) => InviteUserScreen(
-                                            database: database,
+                                  if (!isOwner)
+                                    IconButton(
+                                      icon: const Icon(Icons.exit_to_app),
+                                      tooltip: 'Покинуть совместную базу',
+                                      onPressed: () {
+                                        showDialog(
+                                          context: context,
+                                          builder: (context) => AlertDialog(
+                                            title: const Text('Покинуть базу данных'),
+                                            content: const Text(
+                                              'Вы уверены, что хотите покинуть эту совместную базу данных? Вы потеряете доступ к ней.',
+                                            ),
+                                            actions: [
+                                              TextButton(
+                                                onPressed: () => Navigator.of(context).pop(),
+                                                child: const Text('Отмена'),
+                                              ),
+                                              ElevatedButton(
+                                                onPressed: () {
+                                                  provider.leaveDatabase(database.id);
+                                                  Navigator.of(context).pop();
+                                                },
+                                                style: ElevatedButton.styleFrom(
+                                                  backgroundColor: Colors.orange,
+                                                ),
+                                                child: const Text('Покинуть'),
+                                              ),
+                                            ],
                                           ),
-                                        ),
-                                      );
-                                    },
-                                  ),
+                                        );
+                                      },
+                                    ),
                                   if (isOwner)
                                     IconButton(
                                       icon: const Icon(Icons.delete),
+                                      tooltip: 'Удалить базу данных',
                                       onPressed: () {
                                         showDialog(
                                           context: context,
@@ -397,12 +436,19 @@ class _SharedDatabasesScreenState extends State<SharedDatabasesScreen> {
                         },
                       ),
               ),
-              if (auth.user != null)
+              if (databases.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.all(16.0),
-                  child: ElevatedButton(
-                    onPressed: () => _showCreateDialog,
-                    child: const Text('Создать новую базу данных'),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: _showCreateDialog,
+                      icon: const Icon(Icons.add),
+                      label: const Text('Создать новую базу данных'),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.all(16.0),
+                      ),
+                    ),
                   ),
                 ),
             ],

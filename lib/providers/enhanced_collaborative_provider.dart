@@ -11,6 +11,7 @@ import '../utils/toast_utils.dart';
 import 'database_provider.dart';
 import 'package:oktoast/oktoast.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter/rendering.dart';
 
 class EnhancedCollaborativeProvider extends ChangeNotifier {
   final CollaborativeRoleService _roleService;
@@ -172,11 +173,17 @@ class EnhancedCollaborativeProvider extends ChangeNotifier {
       final databases = await _loadDatabasesFromServer();
       _databases = databases;
       
-      // Загружаем пользователей для каждой базы
-      for (final db in _databases) {
+      // ✅ ИСПРАВЛЕНИЕ: Загружаем пользователей для каждой базы и обновляем модели
+      for (int i = 0; i < _databases.length; i++) {
+        final db = _databases[i];
         await _loadDatabaseUsers(db.id);
         await _loadUserRole(db.id);
         await _loadPermissions(db.id);
+        
+        // Обновляем модель базы данных с загруженными пользователями
+        final users = _databaseUsers[db.id] ?? [];
+        _databases[i] = db.copyWith(users: users);
+        print('✅ Загружено ${users.length} пользователей для базы ${db.name} (${db.id})');
       }
       
       // Загружаем приглашения
@@ -313,6 +320,15 @@ class EnhancedCollaborativeProvider extends ChangeNotifier {
       
       print('✅ Переключение на совместную базу $databaseId завершено успешно');
       
+      // ✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Принудительное обновление UI в самом конце
+      print('ШАГ 5: Принудительное обновление экрана заметок...');
+      if (_databaseProvider != null) {
+        // Устанавливаем флаг принудительного обновления
+        _databaseProvider!.setNeedsUpdate(true);
+        _databaseProvider!.notifyUpdate();
+        print('✅ Экран заметок принудительно обновлен');
+      }
+      
     } catch (e) {
       _error = e.toString();
       print('❌ Ошибка при переключении на базу данных: $e');
@@ -355,6 +371,17 @@ class EnhancedCollaborativeProvider extends ChangeNotifier {
       try {
         await _dbHelper.closeDatabase();
         await _dbHelper.clearCache();
+        
+        // ✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Очищаем кеш изображений Flutter
+        print('ШАГ 2.1: Очистка кеша изображений Flutter...');
+        try {
+          PaintingBinding.instance.imageCache.clear();
+          PaintingBinding.instance.imageCache.clearLiveImages();
+          print('✅ Кеш изображений Flutter очищен');
+        } catch (e) {
+          print('⚠️ Ошибка при очистке кеша изображений Flutter: $e');
+        }
+        
         print('✅ Кеш базы данных очищен');
       } catch (e) {
         print('❌ Ошибка при очистке кеша: $e');
@@ -378,7 +405,7 @@ class EnhancedCollaborativeProvider extends ChangeNotifier {
       if (_databaseProvider != null) {
         await _databaseProvider!.switchToDatabase(databaseId);
       }
-      
+         
       // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Разблокируем операции ПЕРЕД импортом данных
       if (_databaseProvider != null) {
         print('✅ РАЗБЛОКИРОВКА: Разрешаем операции с базой данных перед импортом');
@@ -402,6 +429,12 @@ class EnhancedCollaborativeProvider extends ChangeNotifier {
   // ИСПРАВЛЕНИЕ: Отдельный метод для загрузки данных без блокировки UI
   Future<void> _loadDataFromServerInBackground(String databaseId) async {
     try {
+      // ИСПРАВЛЕНИЕ: Устанавливаем блокировку загрузки данных экранами
+      if (_databaseProvider != null) {
+        _databaseProvider!.setIsBlocked(true);
+        print('🚫 БЛОКИРОВКА: Экраны заблокированы на время загрузки данных с сервера');
+      }
+      
       final token = await _authService.getToken();
       if (token != null) {
         final response = await _dio.get(
@@ -425,21 +458,39 @@ class EnhancedCollaborativeProvider extends ChangeNotifier {
           await _dbHelper.importDatabaseOptimized(databaseId, serverData);
           print('✅ Данные совместной базы успешно загружены с сервера');
           
-          // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: НЕ ПЕРЕЗАГРУЖАЕМ базы данных после импорта!
-          // Это создает избыточные запросы к серверу и может запустить синхронизацию
-          // ТОЛЬКО уведомляем об изменении данных в текущей базе
+          // ИСПРАВЛЕНИЕ: Разблокируем ДО уведомления об обновлении
           if (_databaseProvider != null) {
+            _databaseProvider!.setIsBlocked(false);
+            print('✅ РАЗБЛОКИРОВКА: Экраны разблокированы после загрузки данных');
+            
+            // Теперь безопасно уведомляем об обновлении
             _databaseProvider!.setNeedsUpdate(true);
             _databaseProvider!.notifyUpdate();
+            print('🔄 ОБНОВЛЕНИЕ: UI обновлен после импорта данных');
           }
         } else {
           print('⚠️ Сервер вернул пустые данные или ошибку: ${response.statusCode}');
+          // ИСПРАВЛЕНИЕ: Разблокируем в случае ошибки
+          if (_databaseProvider != null) {
+            _databaseProvider!.setIsBlocked(false);
+            print('🚫 РАЗБЛОКИРОВКА: Экраны разблокированы после ошибки сервера');
+          }
         }
       } else {
+        // ИСПРАВЛЕНИЕ: Разблокируем в случае ошибки
+        if (_databaseProvider != null) {
+          _databaseProvider!.setIsBlocked(false);
+          print('🚫 РАЗБЛОКИРОВКА: Экраны разблокированы - токен не найден');
+        }
         throw Exception('Токен авторизации не найден');
       }
     } catch (e) {
       print('❌ Ошибка при загрузке данных с сервера: $e');
+      // ИСПРАВЛЕНИЕ: ОБЯЗАТЕЛЬНО разблокируем в случае ошибки
+      if (_databaseProvider != null) {
+        _databaseProvider!.setIsBlocked(false);
+        print('🚫 РАЗБЛОКИРОВКА: Экраны разблокированы после ошибки: $e');
+      }
       // НЕ прерываем процесс, база может быть пустой
     }
   }
@@ -465,6 +516,33 @@ class EnhancedCollaborativeProvider extends ChangeNotifier {
       
       print('Переключение на личную базу данных');
       
+      // ИСПРАВЛЕНИЕ: Выносим тяжелые операции в отдельный метод без notifyListeners
+      await _performPersonalSwitch();
+      
+      print('✅ Переключение на личную базу завершено успешно');
+      
+      // ✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Принудительное обновление UI в самом конце
+      print('ШАГ 3: Принудительное обновление экрана заметок...');
+      if (_databaseProvider != null) {
+        // Устанавливаем флаг принудительного обновления
+        _databaseProvider!.setNeedsUpdate(true);
+        _databaseProvider!.notifyUpdate();
+        print('✅ Экран заметок принудительно обновлен после переключения на личную базу');
+      }
+      
+    } catch (e) {
+      _error = e.toString();
+      print('❌ Ошибка при переключении на личную базу данных: $e');
+    } finally {
+      _isSwitchingDatabase = false;
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  // ИСПРАВЛЕНИЕ: Выносим тяжелые операции в отдельный метод без notifyListeners
+  Future<void> _performPersonalSwitch() async {
+    try {
       // ШАГ 1: Синхронизация (отправка данных совместной базы на сервер)
       if (_currentDatabaseId != null && _isUsingSharedDatabase) {
         print('ШАГ 1: Синхронизация - отправка данных совместной базы на сервер...');
@@ -489,6 +567,17 @@ class EnhancedCollaborativeProvider extends ChangeNotifier {
       
       // Очищаем кеш
       await _dbHelper.clearCache();
+      
+      // ✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Очищаем кеш изображений Flutter
+      print('ШАГ 2.1: Очистка кеша изображений Flutter...');
+      try {
+        PaintingBinding.instance.imageCache.clear();
+        PaintingBinding.instance.imageCache.clearLiveImages();
+        print('✅ Кеш изображений Flutter очищен');
+      } catch (e) {
+        print('⚠️ Ошибка при очистке кеша изображений Flutter: $e');
+      }
+      
       print('База данных очищена');
       
       // Инициализируем личную базу
@@ -525,12 +614,8 @@ class EnhancedCollaborativeProvider extends ChangeNotifier {
       print('✅ Переключение на личную базу завершено успешно');
       
     } catch (e) {
-      _error = e.toString();
-      print('❌ Ошибка при переключении на личную базу данных: $e');
-    } finally {
-      _isSwitchingDatabase = false;
-      _isLoading = false;
-      notifyListeners();
+      print('❌ Ошибка в _performPersonalSwitch: $e');
+      rethrow;
     }
   }
 

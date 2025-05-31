@@ -145,10 +145,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                       radius: 50,
                       backgroundImage: _imageFile != null
                           ? FileImage(_imageFile!)
-                          : (user?.photoURL != null
+                          : (user?.photoURL != null && user!.photoURL!.isNotEmpty
                               ? NetworkImage('${user!.photoURL!}?t=${DateTime.now().millisecondsSinceEpoch}')
                               : null) as ImageProvider?,
-                      child: (_imageFile == null && user?.photoURL == null)
+                      child: (_imageFile == null && (user?.photoURL == null || user!.photoURL!.isEmpty))
                           ? const Icon(Icons.person, size: 50)
                           : null,
                     ),

@@ -58,11 +58,67 @@ class Note {
       folderId: map['folder_id'] as int?,
       createdAt: DateTime.parse(map['created_at'] as String),
       updatedAt: DateTime.parse(map['updated_at'] as String),
-      images: map['images'] != null ? List<String>.from(jsonDecode(map['images'])) : null,
-      metadata: map['metadata'],
+      images: _parseImages(map['images']),
+      metadata: _parseMetadata(map['metadata']),
       content_json: map['content_json'] as String?,
       database_id: map['database_id'] as String?,
     );
+  }
+
+  // Безопасная десериализация списка изображений
+  static List<String>? _parseImages(dynamic imagesData) {
+    if (imagesData == null) {
+      return null;
+    }
+    
+    try {
+      if (imagesData is String) {
+        if (imagesData.isEmpty) {
+          return null;
+        }
+        final decoded = jsonDecode(imagesData);
+        if (decoded == null) {
+          return null;
+        }
+        if (decoded is List) {
+          return List<String>.from(decoded);
+        }
+      } else if (imagesData is List) {
+        return List<String>.from(imagesData);
+      }
+    } catch (e) {
+      print('Ошибка при парсинге изображений: $e');
+    }
+    
+    return null;
+  }
+
+  // Безопасная десериализация метаданных
+  static Map<String, dynamic>? _parseMetadata(dynamic metadataData) {
+    if (metadataData == null) {
+      return null;
+    }
+    
+    try {
+      if (metadataData is String) {
+        if (metadataData.isEmpty) {
+          return null;
+        }
+        final decoded = jsonDecode(metadataData);
+        if (decoded == null) {
+          return null;
+        }
+        if (decoded is Map) {
+          return Map<String, dynamic>.from(decoded);
+        }
+      } else if (metadataData is Map) {
+        return Map<String, dynamic>.from(metadataData);
+      }
+    } catch (e) {
+      print('Ошибка при парсинге метаданных: $e');
+    }
+    
+    return null;
   }
 
   // Преобразование в JSON строку

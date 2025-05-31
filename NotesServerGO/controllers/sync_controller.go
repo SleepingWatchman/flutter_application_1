@@ -737,27 +737,25 @@ func SyncSharedDatabaseHandler(w http.ResponseWriter, r *http.Request) {
 			serverImageID = createdID
 			log.Printf("Sync: Успешно создана NoteImage с ID %d для БД %d", serverImageID, sharedDbID)
 		} else {
-			log.Printf("Sync: Попытка обновления/создания NoteImage с клиентским ID %d для БД %d", clientImage.Id, sharedDbID)
-			existingImage, getErr := data.GetNoteImageByIDWithTx(tx, clientImage.Id, sharedDbID)
-			if getErr != nil && getErr != sql.ErrNoRows {
-				err = fmt.Errorf("ошибка при поиске NoteImage (ID %d, DB %d): %w", clientImage.Id, sharedDbID, getErr)
+			// ✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Ищем изображение по FileName + NoteId, а не только по клиентскому ID
+			log.Printf("Sync: Поиск NoteImage для БД %d, FileName: %s, NoteId: %d", sharedDbID, clientImage.FileName, clientImage.NoteId)
+			existingImage, getErr := data.GetNoteImageByFileNameAndNoteIDWithTx(tx, clientImage.FileName, clientImage.NoteId, sharedDbID)
+			if getErr != nil {
+				err = fmt.Errorf("ошибка при поиске NoteImage (FileName %s, NoteId %d, DB %d): %w", clientImage.FileName, clientImage.NoteId, sharedDbID, getErr)
 				log.Printf("Sync Error (DB %d, User %d): %v", sharedDbID, currentUserID, err)
 				respondError(w, http.StatusInternalServerError, err.Error())
 				return
 			}
 
 			if existingImage != nil {
-				log.Printf("Sync: Обновление NoteImage ID %d для БД %d", clientImage.Id, sharedDbID)
+				log.Printf("Sync: Найдено существующее изображение с серверным ID %d для FileName %s, NoteId %d в БД %d", existingImage.Id, clientImage.FileName, clientImage.NoteId, sharedDbID)
+
+				// Используем серверный ID для обновления
+				clientImage.Id = existingImage.Id
+
 				// Если ImageData не пришел, но ImagePath есть у клиента, используем его.
 				// Иначе, ImagePath уже установлен выше из сохраненного файла.
 				if clientImage.ImageData == "" && clientImage.ImagePath != "" {
-					// Это условие может быть опасным, если клиент присылает произвольный ImagePath
-					// Для безопасности, если ImageData нет, ImagePath не должен меняться или должен быть очищен,
-					// если только это не специальный случай (например, перемещение файла на клиенте).
-					// Пока что, если ImageData нет, мы НЕ будем обновлять ImagePath из clientImage,
-					// он обновится только если был новый ImageData.
-					// Если ImagePath изменился на клиенте БЕЗ ImageData, это не будет отражено.
-					// Чтобы это поддержать, нужна более сложная логика.
 					// Оставляем старый ImagePath, если не было новой загрузки.
 					clientImage.ImagePath = existingImage.ImagePath
 				} else if clientImage.ImagePath == "" && clientImage.ImageData != "" {
@@ -775,11 +773,11 @@ func SyncSharedDatabaseHandler(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				serverImageID = clientImage.Id
-				log.Printf("Sync: Успешно обновлена NoteImage с ID %d для БД %d", serverImageID, sharedDbID)
+				log.Printf("Sync: Успешно обновлена NoteImage с серверным ID %d для БД %d", serverImageID, sharedDbID)
 			} else {
-				log.Printf("Sync: NoteImage с клиентским ID %d не найдена для БД %d. Создание новой.", clientImage.Id, sharedDbID)
+				log.Printf("Sync: NoteImage с FileName %s, NoteId %d не найдена в БД %d. Создание новой.", clientImage.FileName, clientImage.NoteId, sharedDbID)
 				if clientImage.ImagePath == "" { // Если это новая запись и файл не был загружен (что странно, но возможно)
-					err = fmt.Errorf("попытка создать новую NoteImage без ImageData или ImagePath (клиентский ID %d)", clientImage.Id)
+					err = fmt.Errorf("попытка создать новую NoteImage без ImageData или ImagePath (FileName %s, NoteId %d)", clientImage.FileName, clientImage.NoteId)
 					log.Printf("Sync Error (DB %d, User %d): %v", sharedDbID, currentUserID, err)
 					respondError(w, http.StatusBadRequest, err.Error())
 					return
@@ -788,13 +786,13 @@ func SyncSharedDatabaseHandler(w http.ResponseWriter, r *http.Request) {
 				newImageToCreate.Id = 0
 				createdID, createErr := data.CreateNoteImageWithTx(tx, &newImageToCreate)
 				if createErr != nil {
-					err = fmt.Errorf("ошибка при создании NoteImage (клиентский ID %d, БД %d): %w", clientImage.Id, sharedDbID, createErr)
+					err = fmt.Errorf("ошибка при создании NoteImage (FileName %s, NoteId %d, БД %d): %w", clientImage.FileName, clientImage.NoteId, sharedDbID, createErr)
 					log.Printf("Sync Error (DB %d, User %d): %v", sharedDbID, currentUserID, err)
 					respondError(w, http.StatusInternalServerError, err.Error())
 					return
 				}
 				serverImageID = createdID
-				log.Printf("Sync: Успешно создана NoteImage с серверным ID %d (клиентский ID %d) для БД %d", serverImageID, clientImage.Id, sharedDbID)
+				log.Printf("Sync: Успешно создана NoteImage с серверным ID %d (FileName %s, NoteId %d) для БД %d", serverImageID, clientImage.FileName, clientImage.NoteId, sharedDbID)
 			}
 		}
 		processedNoteImageIDs[serverImageID] = true

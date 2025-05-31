@@ -149,9 +149,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
   // Обработчик изменений базы данных
   void _handleDatabaseChanges() {
     if (mounted) {
-      // ОПТИМИЗИРОВАНО: Убираем избыточное логирование
-      // print('Обновление экрана расписания из-за изменений в базе данных');
-      
       final databaseProvider = Provider.of<DatabaseProvider>(context, listen: false);
       final enhancedCollabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
       final currentDatabaseId = enhancedCollabProvider.isUsingSharedDatabase 
@@ -160,10 +157,11 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
       
       // ИСПРАВЛЕНИЕ: Проверяем как изменение базы, так и флаг обновления
       if ((_lastLoadedDatabaseId != currentDatabaseId || databaseProvider.needsUpdate) && _selectedDate != null) {
-        // ЗАЩИТА ОТ ЦИКЛОВ: Сбрасываем флаг ДО перезагрузки, чтобы избежать повторных вызовов
+        // ЗАЩИТА ОТ ЦИКЛОВ: Сбрасываем флаг ПОСЛЕ начала обработки
         final wasUpdateNeeded = databaseProvider.needsUpdate;
         if (wasUpdateNeeded) {
           databaseProvider.resetUpdateFlag();
+          print('🔄 ОБНОВЛЕНИЕ: Флаг needsUpdate сброшен для экрана расписания');
         }
         _forceReloadSchedule();
       }
@@ -173,9 +171,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
   // Обработчик изменений совместной базы данных
   void _handleCollaborativeDatabaseChanges() {
     if (mounted) {
-      // ОПТИМИЗИРОВАНО: Убираем избыточное логирование
-      // print('Обновление экрана расписания из-за изменений в совместной базе данных');
-      
       final databaseProvider = Provider.of<DatabaseProvider>(context, listen: false);
       final enhancedCollabProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
       final currentDatabaseId = enhancedCollabProvider.isUsingSharedDatabase 
@@ -184,10 +179,11 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
       
       // ИСПРАВЛЕНИЕ: Проверяем как изменение базы, так и флаг обновления
       if ((_lastLoadedDatabaseId != currentDatabaseId || databaseProvider.needsUpdate) && _selectedDate != null) {
-        // ЗАЩИТА ОТ ЦИКЛОВ: Сбрасываем флаг ДО перезагрузки, чтобы избежать повторных вызовов
+        // ЗАЩИТА ОТ ЦИКЛОВ: Сбрасываем флаг ПОСЛЕ начала обработки
         final wasUpdateNeeded = databaseProvider.needsUpdate;
         if (wasUpdateNeeded) {
           databaseProvider.resetUpdateFlag();
+          print('🤝 КОЛЛАБОРАЦИЯ: Флаг needsUpdate сброшен для экрана расписания');
         }
         _forceReloadSchedule();
       }

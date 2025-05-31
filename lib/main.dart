@@ -14,7 +14,6 @@ import 'providers/enhanced_collaborative_provider.dart';
 import 'providers/database_provider.dart';
 import 'db/database_helper.dart';
 import 'screens/auth/login_screen.dart';
-import 'services/collaborative_database_service.dart';
 import 'services/collaborative_role_service.dart';
 import 'services/enhanced_sync_service.dart';
 import 'services/server_health_service.dart';
@@ -557,10 +556,10 @@ class _MainScreenState extends State<MainScreen> {
                                     children: [
                                       CircleAvatar(
                                         radius: 20,
-                                        backgroundImage: user?.photoURL != null
+                                        backgroundImage: user?.photoURL != null && user!.photoURL!.isNotEmpty
                                             ? NetworkImage('${user!.photoURL!}?t=${DateTime.now().millisecondsSinceEpoch}')
                                             : null,
-                                        child: user?.photoURL == null
+                                        child: user?.photoURL == null || user!.photoURL!.isEmpty
                                             ? const Icon(Icons.person)
                                             : null,
                                       ),
@@ -580,10 +579,10 @@ class _MainScreenState extends State<MainScreen> {
                                 )
                               : CircleAvatar(
                                   radius: 20,
-                                  backgroundImage: user?.photoURL != null
+                                  backgroundImage: user?.photoURL != null && user!.photoURL!.isNotEmpty
                                       ? NetworkImage('${user!.photoURL!}?t=${DateTime.now().millisecondsSinceEpoch}')
                                       : null,
-                                  child: user?.photoURL == null
+                                  child: user?.photoURL == null || user!.photoURL!.isEmpty
                                       ? const Icon(Icons.person)
                                       : null,
                                 ),

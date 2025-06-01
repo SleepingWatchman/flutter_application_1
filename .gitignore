@@ -41,3 +41,12 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Test coverage
+coverage/
+*.lcov
+test_coverage_report.html
+
+# Test artifacts
+test/.test_coverage.dart
+test/coverage_helper_test.dart

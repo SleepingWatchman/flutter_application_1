@@ -1,0 +1,48 @@
+# Конфигурация для измерения покрытия тестами
+# Запуск: flutter test --coverage
+
+# Минимальное покрытие для пропуска тестов
+coverage:
+  min_coverage: 70  # Минимальное покрытие 70%
+  
+# Исключения из покрытия
+exclude:
+  # Генерируемые файлы
+  - "**/*.g.dart"
+  - "**/*.freezed.dart"
+  - "**/*.chopper.dart"
+  
+  # Файлы конфигурации и запуска
+  - "lib/main.dart"
+  - "lib/firebase_options.dart"
+  
+  # Тестовые файлы и моки
+  - "test/**"
+  - "**/test_*.dart"
+  - "**/mock_*.dart"
+  
+  # Модели без логики (только данные)
+  - "lib/models/**.dart"
+  
+  # Файлы с внешними зависимостями
+  - "lib/services/notification_service.dart"
+  
+  # Экраны с минимальной логикой
+  - "lib/screens/splash_screen.dart"
+
+# Включить определенные директории
+include:
+  - "lib/providers/**"
+  - "lib/services/**"
+  - "lib/utils/**"
+  - "lib/database/**"
+  - "lib/screens/**"
+
+# Настройки отчетов
+reports:
+  - html
+  - lcov
+  - json
+
+# Директория для отчетов
+output_directory: "coverage" 

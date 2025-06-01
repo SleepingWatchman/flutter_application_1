@@ -1,6 +1,6 @@
 enum CollaborativeDatabaseRole {
   owner('owner', 'Владелец'),
-  collaborator('collaborator', 'Соавтор');
+  collaborator('collaborator', 'Участник');
 
   const CollaborativeDatabaseRole(this.value, this.displayName);
 
@@ -12,7 +12,8 @@ enum CollaborativeDatabaseRole {
       case 'owner':
         return CollaborativeDatabaseRole.owner;
       case 'collaborator':
-      case 'editor':
+      case 'editor': // Для обратной совместимости, если в данных остались старые роли
+      case 'viewer':
         return CollaborativeDatabaseRole.collaborator;
       default:
         return CollaborativeDatabaseRole.collaborator;
@@ -23,7 +24,46 @@ enum CollaborativeDatabaseRole {
   bool get canDelete => this == owner;
   bool get canManageUsers => this == owner;
   bool get canInviteUsers => this == owner;
-  bool get canLeave => this == collaborator; // Владелец не может покинуть базу, только удалить её
+  bool get canLeave => this != owner; // Только владелец не может покинуть базу, остальные могут
+
+  bool canManageUser(CollaborativeDatabaseRole targetUserRole, bool isTargetOwner, bool isCurrentUserOriginalOwner) {
+    if (this == owner) {
+      if (isCurrentUserOriginalOwner) {
+        // Создатель базы может управлять всеми пользователями
+        return true;
+      } else {
+        // Приглашенный владелец может управлять только участниками (не другими владельцами)
+        return targetUserRole != owner || !isTargetOwner;
+      }
+    }
+    return false; // Участники не могут управлять другими пользователями
+  }
+  
+  bool canRemoveUser(CollaborativeDatabaseRole targetUserRole, bool isTargetOwner, bool isCurrentUserOriginalOwner) {
+    if (this == owner) {
+      if (isCurrentUserOriginalOwner) {
+        // Создатель базы может удалять всех, кроме себя
+        return !isTargetOwner || targetUserRole != owner;
+      } else {
+        // Приглашенный владелец может удалять только участников
+        return targetUserRole != owner || !isTargetOwner;
+      }
+    }
+    return false; // Участники не могут удалять других пользователей
+  }
+  
+  bool canChangeRoleOf(CollaborativeDatabaseRole targetUserRole, bool isTargetOwner, bool isCurrentUserOriginalOwner) {
+    if (this == owner) {
+      if (isCurrentUserOriginalOwner) {
+        // Создатель базы может изменять роли всех пользователей, кроме своей
+        return !isTargetOwner;
+      } else {
+        // Приглашенный владелец может изменять роли только участников
+        return targetUserRole != owner || !isTargetOwner;
+      }
+    }
+    return false; // Участники не могут изменять роли
+  }
 }
 
 class CollaborativeDatabaseUser {

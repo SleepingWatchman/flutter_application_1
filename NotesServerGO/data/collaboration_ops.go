@@ -140,23 +140,44 @@ func GetUserRoleInSharedDatabase(sdbID int64, userID int64) (*models.SharedDatab
 }
 
 // RemoveUserFromSharedDatabase удаляет пользователя из совместной БД.
-// Владелец не может удалить сам себя этим методом, он должен удалить БД.
-// Владелец может удалять других. Участники не могут удалять других.
+// ИСПРАВЛЕНИЕ: Обновлена логика согласно новым требованиям разрешений
 func RemoveUserFromSharedDatabase(sdbID int64, userIDToRemove int64, currentUserID int64) error {
 	// 1. Получить информацию о БД, чтобы узнать владельца
-	sdb, err := GetSharedDatabaseDetails(sdbID) // Нужна функция, которая просто вернет детали БД без проверки доступа пользователя
+	sdb, err := GetSharedDatabaseDetails(sdbID)
 	if err != nil || sdb == nil {
 		return fmt.Errorf("shared database with ID %d not found or error fetching: %w", sdbID, err)
 	}
 
-	// 2. Проверить права currentUserID
-	if currentUserID != sdb.OwnerUserId {
-		return fmt.Errorf("user %d is not the owner of shared DB ID %d and cannot remove users", currentUserID, sdbID)
+	// 2. Получить роли пользователей
+	currentUserRole, err := GetUserRoleInSharedDatabase(sdbID, currentUserID)
+	if err != nil || currentUserRole == nil {
+		return fmt.Errorf("user %d is not a member of shared DB ID %d and cannot remove users", currentUserID, sdbID)
 	}
 
-	// 3. Владелец не может удалить сам себя этим методом (он должен удалить БД целиком)
-	if userIDToRemove == sdb.OwnerUserId {
-		return fmt.Errorf("owner %d cannot remove themselves from shared DB ID %d using this method. Delete the database instead.", userIDToRemove, sdbID)
+	targetUserRole, err := GetUserRoleInSharedDatabase(sdbID, userIDToRemove)
+	if err != nil || targetUserRole == nil {
+		return fmt.Errorf("target user %d not found in shared DB ID %d", userIDToRemove, sdbID)
+	}
+
+	// 3. Проверить права согласно новой логике
+	isCurrentUserOriginalOwner := sdb.OwnerUserId == currentUserID
+	isTargetUserOriginalOwner := sdb.OwnerUserId == userIDToRemove
+
+	if *currentUserRole == models.RoleOwner {
+		if isCurrentUserOriginalOwner {
+			// Создатель базы может удалять всех, кроме себя
+			if userIDToRemove == currentUserID {
+				return fmt.Errorf("owner %d cannot remove themselves from shared DB ID %d using this method. Delete the database instead.", userIDToRemove, sdbID)
+			}
+		} else {
+			// Приглашенный владелец может удалять только участников (не других владельцев и не создателя)
+			if *targetUserRole == models.RoleOwner || isTargetUserOriginalOwner {
+				return fmt.Errorf("invited owner %d cannot remove another owner or the original owner from shared DB ID %d", currentUserID, sdbID)
+			}
+		}
+	} else {
+		// Участники не могут удалять других пользователей
+		return fmt.Errorf("user %d does not have permission to remove users from shared DB ID %d", currentUserID, sdbID)
 	}
 
 	// 4. Удалить пользователя
@@ -173,36 +194,65 @@ func RemoveUserFromSharedDatabase(sdbID int64, userIDToRemove int64, currentUser
 }
 
 // UpdateUserRoleInSharedDatabase обновляет роль пользователя в совместной БД.
-// Только владелец может изменять роли.
-// Владелец не может изменить свою роль этим методом.
+// ИСПРАВЛЕНИЕ: Обновлена логика согласно новым требованиям разрешений
 func UpdateUserRoleInSharedDatabase(sdbID int64, userIDToUpdate int64, newRole models.SharedDatabaseUserRole, currentUserID int64) error {
 	// 1. Получить информацию о БД, чтобы узнать владельца
-	sdb, err := GetSharedDatabaseDetails(sdbID) // Нужна функция, которая просто вернет детали БД без проверки доступа пользователя
+	sdb, err := GetSharedDatabaseDetails(sdbID)
 	if err != nil || sdb == nil {
 		return fmt.Errorf("shared database with ID %d not found or error fetching: %w", sdbID, err)
 	}
 
-	// 2. Проверить, является ли currentUserID владельцем
-	if currentUserID != sdb.OwnerUserId {
-		return fmt.Errorf("user %d is not the owner of shared DB ID %d and cannot update roles", currentUserID, sdbID)
+	// 2. Получить роли пользователей
+	currentUserRole, err := GetUserRoleInSharedDatabase(sdbID, currentUserID)
+	if err != nil || currentUserRole == nil {
+		return fmt.Errorf("user %d is not a member of shared DB ID %d and cannot update roles", currentUserID, sdbID)
 	}
 
-	// 3. Владелец не может изменить свою роль (она всегда RoleOwner)
-	if userIDToUpdate == sdb.OwnerUserId && newRole != models.RoleOwner {
-		return fmt.Errorf("owner's role cannot be changed from 'owner' for shared DB ID %d", sdbID)
-	}
-	if userIDToUpdate == sdb.OwnerUserId && newRole == models.RoleOwner {
-		return nil // Нет изменений для роли владельца
+	targetUserRole, err := GetUserRoleInSharedDatabase(sdbID, userIDToUpdate)
+	if err != nil || targetUserRole == nil {
+		return fmt.Errorf("target user %d not found in shared DB ID %d", userIDToUpdate, sdbID)
 	}
 
-	// 4. Нельзя назначить роль RoleOwner другому пользователю
-	if newRole == models.RoleOwner && userIDToUpdate != sdb.OwnerUserId {
-		return fmt.Errorf("cannot assign 'owner' role to user %d. Ownership transfer is not supported via this method.", userIDToUpdate)
+	// 3. Проверить права согласно новой логике
+	isCurrentUserOriginalOwner := sdb.OwnerUserId == currentUserID
+	isTargetUserOriginalOwner := sdb.OwnerUserId == userIDToUpdate
+
+	// Нельзя изменить роль создателя базы данных
+	if isTargetUserOriginalOwner {
+		return fmt.Errorf("cannot change role of the original owner %d in shared DB ID %d", userIDToUpdate, sdbID)
+	}
+
+	// Нельзя изменить свою собственную роль
+	if userIDToUpdate == currentUserID {
+		return fmt.Errorf("user %d cannot change their own role in shared DB ID %d", currentUserID, sdbID)
+	}
+
+	if *currentUserRole == models.RoleOwner {
+		if isCurrentUserOriginalOwner {
+			// Создатель базы может изменять роли всех пользователей, кроме своей
+			// Все проверки уже пройдены выше
+		} else {
+			// Приглашенный владелец может изменять роли только участников (не других владельцев)
+			if *targetUserRole == models.RoleOwner {
+				return fmt.Errorf("invited owner %d cannot change role of another owner %d in shared DB ID %d", currentUserID, userIDToUpdate, sdbID)
+			}
+		}
+	} else {
+		// Участники не могут изменять роли
+		return fmt.Errorf("user %d does not have permission to update roles in shared DB ID %d", currentUserID, sdbID)
+	}
+
+	// 4. Проверить допустимость новой роли
+	if newRole == models.RoleOwner {
+		// Только создатель базы может назначить роль владельца другому пользователю
+		if !isCurrentUserOriginalOwner {
+			return fmt.Errorf("only the original owner %d can assign 'owner' role to user %d in shared DB ID %d", sdb.OwnerUserId, userIDToUpdate, sdbID)
+		}
+		// Создатель может назначить роль owner - продолжаем
 	}
 
 	// 5. Обновить роль
 	query := `UPDATE SharedDatabaseUsers SET Role = ?, JoinedAt = ? WHERE SharedDatabaseId = ? AND UserId = ?`
-	// JoinedAt обновляется, чтобы отразить "последнее изменение" участия/роли
 	result, err := MainDB.Exec(query, newRole, time.Now(), sdbID, userIDToUpdate)
 	if err != nil {
 		return fmt.Errorf("failed to update role for user %d in shared DB ID %d: %w", userIDToUpdate, sdbID, err)
@@ -531,7 +581,7 @@ func RestoreSharedDatabaseFromBackup(dbID int64, userID int64, backup *models.Ba
 	if err != nil {
 		return fmt.Errorf("ошибка проверки доступа пользователя %d к БД %d: %w", userID, dbID, err)
 	}
-	if role == nil || (*role != models.RoleOwner && *role != models.RoleEditor) {
+	if role == nil || (*role != models.RoleOwner && *role != models.RoleCollaborator) {
 		return fmt.Errorf("пользователь %d не имеет прав на запись в БД %d", userID, dbID)
 	}
 

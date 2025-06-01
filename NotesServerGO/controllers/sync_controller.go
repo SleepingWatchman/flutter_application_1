@@ -77,11 +77,7 @@ func SyncSharedDatabaseHandler(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusForbidden, "Доступ к указанной совместной базе данных запрещен.")
 		return
 	}
-	// Роли 'owner' и 'editor' могут синхронизировать. 'viewer' - нет.
-	if *role == models.RoleViewer {
-		respondError(w, http.StatusForbidden, "Пользователи с ролью 'viewer' не могут синхронизировать данные.")
-		return
-	}
+	// Теперь у нас только две роли: owner и collaborator, обе имеют права на синхронизацию
 
 	var syncData SyncDataRequest
 	if err := json.NewDecoder(r.Body).Decode(&syncData); err != nil {

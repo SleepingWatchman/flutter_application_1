@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'dart:async';
 import '../models/enhanced_collaborative_database.dart';
 import '../models/collaborative_database_role.dart';
@@ -167,7 +168,10 @@ class EnhancedCollaborativeProvider extends ChangeNotifier {
     try {
       _isLoading = true;
       _error = null;
-      notifyListeners();
+      // ИСПРАВЛЕНИЕ: Используем асинхронный notifyListeners для предотвращения ошибки во время build
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        notifyListeners();
+      });
 
       // Загружаем базы данных
       final databases = await _loadDatabasesFromServer();
@@ -194,7 +198,10 @@ class EnhancedCollaborativeProvider extends ChangeNotifier {
       print('Ошибка при загрузке баз данных: $e');
     } finally {
       _isLoading = false;
-      notifyListeners();
+      // ИСПРАВЛЕНИЕ: Используем асинхронный notifyListeners для предотвращения ошибки во время build
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        notifyListeners();
+      });
     }
   }
 

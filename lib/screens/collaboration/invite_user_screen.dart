@@ -4,6 +4,7 @@ import '../../providers/enhanced_collaborative_provider.dart';
 import '../../models/enhanced_collaborative_database.dart';
 import '../../models/collaborative_database_role.dart';
 import '../../utils/toast_utils.dart';
+import '../../providers/auth_provider.dart';
 
 class InviteUserScreen extends StatefulWidget {
   final EnhancedCollaborativeDatabase database;
@@ -135,34 +136,43 @@ class _InviteUserScreenState extends State<InviteUserScreen> {
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               const SizedBox(height: 8),
-              Card(
-                child: Column(
-                  children: [
-                    RadioListTile<CollaborativeDatabaseRole>(
-                      title: const Text('Участник'),
-                      subtitle: const Text('Может просматривать и редактировать данные'),
-                      value: CollaborativeDatabaseRole.collaborator,
-                      groupValue: _selectedRole,
-                      onChanged: (value) {
-                        setState(() {
-                          _selectedRole = value!;
-                        });
-                      },
+              Consumer<AuthProvider>(
+                builder: (context, authProvider, child) {
+                  final currentUser = authProvider.user;
+                  final isOriginalOwner = currentUser != null && widget.database.isOriginalOwner(currentUser.id);
+                  
+                  return Card(
+                    child: Column(
+                      children: [
+                        RadioListTile<CollaborativeDatabaseRole>(
+                          title: const Text('Участник'),
+                          subtitle: const Text('Может просматривать и редактировать данные'),
+                          value: CollaborativeDatabaseRole.collaborator,
+                          groupValue: _selectedRole,
+                          onChanged: (value) {
+                            setState(() {
+                              _selectedRole = value!;
+                            });
+                          },
+                        ),
+                        if (isOriginalOwner) ...[
+                          const Divider(height: 1),
+                          RadioListTile<CollaborativeDatabaseRole>(
+                            title: const Text('Владелец'),
+                            subtitle: const Text('Полный доступ, включая управление пользователями'),
+                            value: CollaborativeDatabaseRole.owner,
+                            groupValue: _selectedRole,
+                            onChanged: (value) {
+                              setState(() {
+                                _selectedRole = value!;
+                              });
+                            },
+                          ),
+                        ],
+                      ],
                     ),
-                    const Divider(height: 1),
-                    RadioListTile<CollaborativeDatabaseRole>(
-                      title: const Text('Владелец'),
-                      subtitle: const Text('Полный доступ, включая управление пользователями'),
-                      value: CollaborativeDatabaseRole.owner,
-                      groupValue: _selectedRole,
-                      onChanged: (value) {
-                        setState(() {
-                          _selectedRole = value!;
-                        });
-                      },
-                    ),
-                  ],
-                ),
+                  );
+                },
               ),
               const SizedBox(height: 32),
               SizedBox(
@@ -203,12 +213,26 @@ class _InviteUserScreenState extends State<InviteUserScreen> {
                         ],
                       ),
                       const SizedBox(height: 8),
-                      const Text(
-                        '• Пользователь получит приглашение по email\n'
-                        '• Он сможет принять или отклонить приглашение\n'
-                        '• После принятия получит доступ к совместной базе данных\n'
-                        '• Роль можно изменить позже в настройках базы данных',
-                        style: TextStyle(fontSize: 14),
+                      Consumer<AuthProvider>(
+                        builder: (context, authProvider, child) {
+                          final currentUser = authProvider.user;
+                          final isOriginalOwner = currentUser != null && widget.database.isOriginalOwner(currentUser.id);
+                          
+                          return Text(
+                            isOriginalOwner 
+                              ? '• Пользователь получит приглашение по email\n'
+                                '• Он сможет принять или отклонить приглашение\n'
+                                '• После принятия получит доступ к совместной базе данных\n'
+                                '• Роль можно изменить позже в настройках базы данных\n'
+                                '• Только создатель базы может назначать роль владельца'
+                              : '• Пользователь получит приглашение по email\n'
+                                '• Он сможет принять или отклонить приглашение\n'
+                                '• После принятия получит доступ к совместной базе данных\n'
+                                '• Роль можно изменить позже в настройках базы данных\n'
+                                '• Приглашенные владельцы могут приглашать только участников',
+                            style: const TextStyle(fontSize: 14),
+                          );
+                        },
                       ),
                     ],
                   ),

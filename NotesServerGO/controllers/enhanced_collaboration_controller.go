@@ -86,11 +86,33 @@ func InviteUserHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Проверяем права на приглашение
+	// Проверяем допустимость роли
+	if req.Role != models.RoleOwner && req.Role != models.RoleCollaborator {
+		respondError(w, http.StatusBadRequest, "Недопустимая роль. Возможные роли: owner, collaborator.")
+		return
+	}
+
+	// ИСПРАВЛЕНИЕ: Проверяем права на приглашение - любой владелец может приглашать
 	role, err := data.GetUserRoleInSharedDatabase(dbID, currentUserID)
 	if err != nil || role == nil || *role != models.RoleOwner {
-		respondError(w, http.StatusForbidden, "Только владелец может приглашать пользователей.")
+		respondError(w, http.StatusForbidden, "Только владельцы могут приглашать пользователей.")
 		return
+	}
+
+	// Если приглашается пользователь с ролью owner, проверяем что это делает создатель базы
+	if req.Role == models.RoleOwner {
+		// Получаем информацию о базе данных
+		sdb, err := data.GetSharedDatabaseDetails(dbID)
+		if err != nil || sdb == nil {
+			respondError(w, http.StatusInternalServerError, "Ошибка получения информации о базе данных.")
+			return
+		}
+
+		// Проверяем, что текущий пользователь является создателем базы
+		if sdb.OwnerUserId != currentUserID {
+			respondError(w, http.StatusForbidden, "Только создатель базы данных может приглашать пользователей с ролью владельца.")
+			return
+		}
 	}
 
 	err = data.CreateInvitation(dbID, currentUserID, req.Email, req.Role)
@@ -156,10 +178,18 @@ func CheckPermissionsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Получаем роль пользователя
 	role, err := data.GetUserRoleInSharedDatabase(dbID, currentUserID)
 	if err != nil {
 		log.Printf("Ошибка при получении роли пользователя %d в БД %d: %v", currentUserID, dbID, err)
 		respondError(w, http.StatusInternalServerError, "Ошибка сервера.")
+		return
+	}
+
+	// Получаем информацию о базе данных для проверки владельца
+	dbInfo, err := data.GetSharedDatabaseDetails(dbID)
+	if err != nil || dbInfo == nil {
+		respondError(w, http.StatusNotFound, "База данных не найдена.")
 		return
 	}
 
@@ -172,21 +202,18 @@ func CheckPermissionsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if role != nil {
+		// Проверяем, является ли пользователь создателем базы данных
+		isOriginalOwner := dbInfo.OwnerUserId == currentUserID
+
 		switch *role {
 		case models.RoleOwner:
 			permissions["can_edit"] = true
-			permissions["can_delete"] = true
+			permissions["can_delete"] = isOriginalOwner // Только создатель может удалить базу
 			permissions["can_manage_users"] = true
 			permissions["can_invite_users"] = true
-			permissions["can_leave"] = false // Владелец не может покинуть базу
-		case models.RoleCollaborator, models.RoleEditor:
+			permissions["can_leave"] = !isOriginalOwner // Создатель не может покинуть базу
+		case models.RoleCollaborator:
 			permissions["can_edit"] = true
-			permissions["can_delete"] = false
-			permissions["can_manage_users"] = false
-			permissions["can_invite_users"] = false
-			permissions["can_leave"] = true
-		case models.RoleViewer:
-			permissions["can_edit"] = false
 			permissions["can_delete"] = false
 			permissions["can_manage_users"] = false
 			permissions["can_invite_users"] = false

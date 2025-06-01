@@ -73,10 +73,9 @@ class _DatabaseUsersScreenState extends State<DatabaseUsersScreen> {
     final authProvider = context.read<AuthProvider>();
     final currentUser = authProvider.user;
     
-    // Проверяем права доступа
-    if (currentUser == null || !_database.isOwner(currentUser.id)) {
+    if (currentUser == null || !_database.canRemoveUser(currentUser.id, userId)) {
       showCustomToastWithIcon(
-        'У вас нет прав на удаление пользователей',
+        'У вас нет прав на удаление этого пользователя',
         accentColor: Colors.red,
         fontSize: 14.0,
         icon: const Icon(Icons.error, size: 20, color: Colors.red),
@@ -84,7 +83,6 @@ class _DatabaseUsersScreenState extends State<DatabaseUsersScreen> {
       return;
     }
 
-    // Подтверждение удаления
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -151,10 +149,9 @@ class _DatabaseUsersScreenState extends State<DatabaseUsersScreen> {
     final authProvider = context.read<AuthProvider>();
     final currentUser = authProvider.user;
     
-    // Проверяем права доступа
-    if (currentUser == null || !_database.isOwner(currentUser.id)) {
+    if (currentUser == null || !_database.canChangeRoleOf(currentUser.id, userId)) {
       showCustomToastWithIcon(
-        'У вас нет прав на изменение ролей пользователей',
+        'У вас нет прав на изменение роли этого пользователя',
         accentColor: Colors.red,
         fontSize: 14.0,
         icon: const Icon(Icons.error, size: 20, color: Colors.red),
@@ -200,6 +197,10 @@ class _DatabaseUsersScreenState extends State<DatabaseUsersScreen> {
   }
 
   void _showRoleChangeDialog(String userId, String userEmail, CollaborativeDatabaseRole currentRole) {
+    final authProvider = context.read<AuthProvider>();
+    final currentUser = authProvider.user;
+    final isOriginalOwner = currentUser != null && _database.isOriginalOwner(currentUser.id);
+    
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -224,18 +225,43 @@ class _DatabaseUsersScreenState extends State<DatabaseUsersScreen> {
                 }
               },
             ),
-            RadioListTile<CollaborativeDatabaseRole>(
-              title: const Text('Владелец'),
-              subtitle: const Text('Полные права на управление базой данных'),
-              value: CollaborativeDatabaseRole.owner,
-              groupValue: currentRole,
-              onChanged: (value) {
-                if (value != null) {
-                  Navigator.of(context).pop();
-                  _changeUserRole(userId, userEmail, value);
-                }
-              },
-            ),
+            if (isOriginalOwner) 
+              RadioListTile<CollaborativeDatabaseRole>(
+                title: const Text('Владелец'),
+                subtitle: const Text('Полные права на управление базой данных'),
+                value: CollaborativeDatabaseRole.owner,
+                groupValue: currentRole,
+                onChanged: (value) {
+                  if (value != null) {
+                    Navigator.of(context).pop();
+                    _changeUserRole(userId, userEmail, value);
+                  }
+                },
+              ),
+            if (!isOriginalOwner && currentRole == CollaborativeDatabaseRole.owner)
+              Container(
+                margin: const EdgeInsets.only(top: 16),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.info_outline, color: Colors.orange[700], size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Только создатель базы может изменять роли владельцев',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.orange[700],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
           ],
         ),
         actions: [
@@ -252,7 +278,7 @@ class _DatabaseUsersScreenState extends State<DatabaseUsersScreen> {
   Widget build(BuildContext context) {
     final authProvider = context.watch<AuthProvider>();
     final currentUser = authProvider.user;
-    final isOwner = currentUser != null && _database.isOwner(currentUser.id);
+    final canInvite = currentUser != null && _database.canInviteUsers(currentUser.id);
 
     return Scaffold(
       appBar: AppBar(
@@ -270,7 +296,7 @@ class _DatabaseUsersScreenState extends State<DatabaseUsersScreen> {
           ],
         ),
         actions: [
-          if (isOwner) ...[
+          if (canInvite) ...[
             IconButton(
               icon: const Icon(Icons.person_add),
               tooltip: 'Пригласить пользователя',
@@ -322,6 +348,13 @@ class _DatabaseUsersScreenState extends State<DatabaseUsersScreen> {
                     final user = _database.users[index];
                     final isUserOwner = user.role == CollaborativeDatabaseRole.owner;
                     final isCurrentUser = currentUser?.id == user.userId;
+                    
+                    final canManageThisUser = currentUser != null && 
+                        _database.canManageUser(currentUser.id, user.userId);
+                    final canRemoveThisUser = currentUser != null && 
+                        _database.canRemoveUser(currentUser.id, user.userId);
+                    final canChangeRoleOfThisUser = currentUser != null && 
+                        _database.canChangeRoleOf(currentUser.id, user.userId);
 
                     return Card(
                       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -369,11 +402,22 @@ class _DatabaseUsersScreenState extends State<DatabaseUsersScreen> {
                                     labelStyle: TextStyle(color: Colors.white),
                                   ),
                                 ],
+                                if (_database.isOriginalOwner(user.userId)) ...[
+                                  const SizedBox(width: 8),
+                                  const Chip(
+                                    label: Text(
+                                      'Создатель',
+                                      style: TextStyle(fontSize: 12),
+                                    ),
+                                    backgroundColor: Colors.purple,
+                                    labelStyle: TextStyle(color: Colors.white),
+                                  ),
+                                ],
                               ],
                             ),
                           ],
                         ),
-                        trailing: isOwner && !isCurrentUser
+                        trailing: canManageThisUser && !isCurrentUser
                             ? PopupMenuButton<String>(
                                 onSelected: (value) {
                                   switch (value) {
@@ -386,17 +430,18 @@ class _DatabaseUsersScreenState extends State<DatabaseUsersScreen> {
                                   }
                                 },
                                 itemBuilder: (context) => [
-                                  const PopupMenuItem(
-                                    value: 'change_role',
-                                    child: Row(
-                                      children: [
-                                        Icon(Icons.admin_panel_settings),
-                                        SizedBox(width: 8),
-                                        Text('Изменить роль'),
-                                      ],
+                                  if (canChangeRoleOfThisUser)
+                                    const PopupMenuItem(
+                                      value: 'change_role',
+                                      child: Row(
+                                        children: [
+                                          Icon(Icons.admin_panel_settings),
+                                          SizedBox(width: 8),
+                                          Text('Изменить роль'),
+                                        ],
+                                      ),
                                     ),
-                                  ),
-                                  if (!isUserOwner) // Нельзя удалить владельца
+                                  if (canRemoveThisUser)
                                     const PopupMenuItem(
                                       value: 'remove',
                                       child: Row(

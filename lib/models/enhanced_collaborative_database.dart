@@ -141,6 +141,8 @@ class EnhancedCollaborativeDatabase {
   // Методы для работы с ролями
   bool isOwner(String userId) => ownerId == userId;
   
+  bool isOriginalOwner(String userId) => ownerId == userId;
+  
   CollaborativeDatabaseUser? getUser(String userId) {
     try {
       return users.firstWhere((user) => user.userId == userId);
@@ -161,19 +163,59 @@ class EnhancedCollaborativeDatabase {
   }
 
   bool canDelete(String userId) {
-    return isOwner(userId);
+    return isOriginalOwner(userId);
   }
 
   bool canManageUsers(String userId) {
-    return isOwner(userId);
+    final role = getUserRole(userId);
+    return role == CollaborativeDatabaseRole.owner;
   }
 
   bool canInviteUsers(String userId) {
-    return isOwner(userId);
+    final role = getUserRole(userId);
+    return role == CollaborativeDatabaseRole.owner;
+  }
+  
+  bool canManageUser(String currentUserId, String targetUserId) {
+    final currentUserRole = getUserRole(currentUserId);
+    final targetUserRole = getUserRole(targetUserId);
+    
+    if (currentUserRole == null || targetUserRole == null) return false;
+    
+    final isTargetOwner = isOriginalOwner(targetUserId);
+    final isCurrentUserOriginalOwner = isOriginalOwner(currentUserId);
+    
+    return currentUserRole.canManageUser(targetUserRole, isTargetOwner, isCurrentUserOriginalOwner);
+  }
+  
+  bool canRemoveUser(String currentUserId, String targetUserId) {
+    final currentUserRole = getUserRole(currentUserId);
+    final targetUserRole = getUserRole(targetUserId);
+    
+    if (currentUserRole == null || targetUserRole == null) return false;
+    if (currentUserId == targetUserId) return false;
+    
+    final isTargetOwner = isOriginalOwner(targetUserId);
+    final isCurrentUserOriginalOwner = isOriginalOwner(currentUserId);
+    
+    return currentUserRole.canRemoveUser(targetUserRole, isTargetOwner, isCurrentUserOriginalOwner);
+  }
+  
+  bool canChangeRoleOf(String currentUserId, String targetUserId) {
+    final currentUserRole = getUserRole(currentUserId);
+    final targetUserRole = getUserRole(targetUserId);
+    
+    if (currentUserRole == null || targetUserRole == null) return false;
+    if (currentUserId == targetUserId) return false;
+    
+    final isTargetOwner = isOriginalOwner(targetUserId);
+    final isCurrentUserOriginalOwner = isOriginalOwner(currentUserId);
+    
+    return currentUserRole.canChangeRoleOf(targetUserRole, isTargetOwner, isCurrentUserOriginalOwner);
   }
 
   bool canLeave(String userId) {
-    if (isOwner(userId)) return false; // Владелец не может покинуть базу
+    if (isOriginalOwner(userId)) return false;
     return getUser(userId) != null;
   }
 

@@ -20,8 +20,8 @@ type SharedDatabaseUserRole string
 const (
 	RoleOwner        SharedDatabaseUserRole = "owner"
 	RoleCollaborator SharedDatabaseUserRole = "collaborator"
-	RoleEditor       SharedDatabaseUserRole = "editor" // Для совместимости
-	RoleViewer       SharedDatabaseUserRole = "viewer" // Для совместимости
+	// RoleEditor и RoleViewer удалены - теперь все участники имеют одинаковые права (collaborator)
+	// Эти роли могут встречаться в старых данных и автоматически конвертируются в collaborator
 )
 
 // SharedDatabaseUser представляет связь пользователя с совместной базой данных и его роль.

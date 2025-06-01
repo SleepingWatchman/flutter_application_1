@@ -176,8 +176,8 @@ func AddUserToSharedDatabaseHandler(w http.ResponseWriter, r *http.Request) { //
 		return
 	}
 
-	if req.Role != models.RoleEditor && req.Role != models.RoleViewer {
-		respondError(w, http.StatusBadRequest, "Недопустимая роль. Возможные роли: editor, viewer.")
+	if req.Role != models.RoleCollaborator && req.Role != models.RoleOwner {
+		respondError(w, http.StatusBadRequest, "Недопустимая роль. Возможные роли: owner, collaborator.")
 		return
 	}
 
@@ -233,9 +233,26 @@ func UpdateUserRoleHandler(w http.ResponseWriter, r *http.Request) { // Удал
 		return
 	}
 
-	if req.Role != models.RoleEditor && req.Role != models.RoleViewer {
-		respondError(w, http.StatusBadRequest, "Недопустимая роль. Возможные роли: editor, viewer.")
+	// Проверяем допустимость роли - создатель базы может назначать любую роль
+	if req.Role != models.RoleOwner && req.Role != models.RoleCollaborator {
+		respondError(w, http.StatusBadRequest, "Недопустимая роль. Возможные роли: owner, collaborator.")
 		return
+	}
+
+	// Если назначается роль owner, проверяем что это делает создатель базы
+	if req.Role == models.RoleOwner {
+		// Получаем информацию о базе данных
+		sdb, err := data.GetSharedDatabaseDetails(dbID)
+		if err != nil || sdb == nil {
+			respondError(w, http.StatusInternalServerError, "Ошибка получения информации о базе данных.")
+			return
+		}
+
+		// Проверяем, что текущий пользователь является создателем базы
+		if sdb.OwnerUserId != currentUserID {
+			respondError(w, http.StatusForbidden, "Только создатель базы данных может назначать роль владельца.")
+			return
+		}
 	}
 
 	err = data.UpdateUserRoleInSharedDatabase(dbID, userIDToManage, req.Role, currentUserID)

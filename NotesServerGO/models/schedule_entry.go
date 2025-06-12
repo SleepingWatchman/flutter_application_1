@@ -10,6 +10,7 @@ type ScheduleEntry struct {
 	Note              *string `json:"note,omitempty" db:"Note"`
 	DynamicFieldsJson *string `json:"dynamic_fields_json,omitempty" db:"DynamicFieldsJson"`
 	RecurrenceJson    *string `json:"recurrence_json,omitempty" db:"RecurrenceJson"` // Клиент присылает это поле
+	TagsJson          *string `json:"tags_json,omitempty" db:"TagsJson"`             // Теги для записи расписания
 	DatabaseId        int64   `json:"database_id" db:"DatabaseId"`                   // На клиенте String?, здесь int64
 	// OwnerUserId    int64     `json:"owner_user_id,omitempty" db:"OwnerUserId"` // Убрано, т.к. нет в клиентской модели ScheduleEntry
 	CreatedAt time.Time `json:"-" db:"CreatedAt"`

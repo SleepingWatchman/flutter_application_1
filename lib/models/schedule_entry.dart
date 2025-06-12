@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:convert';
+import 'schedule_tag.dart';
 
 /// Тип повторения для пунктов расписания
 enum RecurrenceType {
@@ -78,6 +79,7 @@ class ScheduleEntry {
   String? dynamicFieldsJson;
   Recurrence recurrence;
   String? databaseId;
+  List<String> tags; // Список тегов для записи расписания
   
   ScheduleEntry({
     this.id,
@@ -87,7 +89,9 @@ class ScheduleEntry {
     this.dynamicFieldsJson,
     Recurrence? recurrence,
     this.databaseId,
-  }) : recurrence = recurrence ?? Recurrence();
+    List<String>? tags,
+  }) : recurrence = recurrence ?? Recurrence(),
+       tags = tags ?? [];
   
   Map<String, dynamic> toMap() {
     return {
@@ -98,6 +102,7 @@ class ScheduleEntry {
       'dynamic_fields_json': dynamicFieldsJson,
       'recurrence_json': jsonEncode(recurrence.toMap()),
       'database_id': databaseId,
+      'tags_json': jsonEncode(tags), // Сохраняем теги как JSON строку
     };
   }
 
@@ -113,6 +118,19 @@ class ScheduleEntry {
       }
     }
     
+    // Парсим теги
+    List<String> tags = [];
+    if (map['tags_json'] != null) {
+      try {
+        final tagsList = jsonDecode(map['tags_json']);
+        if (tagsList is List) {
+          tags = tagsList.map((tag) => tag.toString()).toList();
+        }
+      } catch (e) {
+        print('Ошибка при разборе tags_json: $e');
+      }
+    }
+    
     return ScheduleEntry(
       id: map['id'],
       time: map['time'],
@@ -121,6 +139,7 @@ class ScheduleEntry {
       dynamicFieldsJson: map['dynamic_fields_json'],
       recurrence: recurrence,
       databaseId: map['database_id'],
+      tags: tags,
     );
   }
 } 

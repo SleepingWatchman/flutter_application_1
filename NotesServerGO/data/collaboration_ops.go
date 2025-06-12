@@ -692,9 +692,9 @@ func RestoreSharedDatabaseFromBackup(dbID int64, userID int64, backup *models.Ba
 		if entry.UpdatedAt.IsZero() {
 			entry.UpdatedAt = time.Now()
 		}
-		query := `INSERT INTO ScheduleEntries (Time, Date, Note, DynamicFieldsJson, RecurrenceJson, CreatedAt, UpdatedAt, DatabaseId)
-		          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-		_, err = tx.Exec(query, entry.Time, entry.Date, entry.Note, entry.DynamicFieldsJson, entry.RecurrenceJson, entry.CreatedAt, entry.UpdatedAt, entry.DatabaseId)
+		query := `INSERT INTO ScheduleEntries (Time, Date, Note, DynamicFieldsJson, RecurrenceJson, TagsJson, CreatedAt, UpdatedAt, DatabaseId)
+		          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		_, err = tx.Exec(query, entry.Time, entry.Date, entry.Note, entry.DynamicFieldsJson, entry.RecurrenceJson, entry.TagsJson, entry.CreatedAt, entry.UpdatedAt, entry.DatabaseId)
 		if err != nil {
 			log.Printf("Ошибка вставки записи расписания: %+v\n", entry)
 			return fmt.Errorf("ошибка вставки записи расписания (ID: %d): %w", entry.Id, err)

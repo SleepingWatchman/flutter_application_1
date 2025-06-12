@@ -10,8 +10,21 @@ import '../models/dynamic_field_entry.dart';
 import '../utils/toast_utils.dart';
 import '../providers/database_provider.dart';
 import '../providers/enhanced_collaborative_provider.dart';
-import '../widgets/calendar_grid.dart';
-import 'package:flutter/services.dart';
+import '../widgets/tag_input_widget.dart';
+import 'dart:math' as math;
+
+/// Вспомогательный класс для работы с событиями и их временными диапазонами
+class EventWithTime {
+  final ScheduleEntry entry;
+  final int startMinute;
+  final int endMinute;
+  
+  EventWithTime({
+    required this.entry,
+    required this.startMinute,
+    required this.endMinute,
+  });
+}
 
 /// Экран расписания. Если день не выбран (_selectedDate == null), показывается календарная сетка.
 /// Если выбран день, отображается детальный режим с интервалами и предпросмотром заметки.
@@ -457,6 +470,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
     List<DynamicFieldEntry> dynamicFields = [
       DynamicFieldEntry(key: 'Предмет', value: '')
     ];
+    List<String> tags = []; // Добавляем список тегов
     String? timeError;
 
     // Параметры повторяемости
@@ -478,251 +492,116 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
 
     showDialog(
       context: context,
-      builder: (BuildContext context) {
-        return StatefulBuilder(
+      builder: (context) => StatefulBuilder(
           builder: (BuildContext context, StateSetter setState) {
             return AlertDialog(
-              title: const Text('Новая запись в расписании'),
+            title: const Text('Добавить в расписание'),
               content: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                  // Поле времени
                     TextField(
                       controller: timeController,
                       inputFormatters: [timeMaskFormatter],
                       decoration: InputDecoration(
-                        labelText: 'Время (чч:мм - чч:мм)',
-                        hintText: '12:00 - 13:30',
+                      labelText: 'Время (ЧЧ:ММ - ЧЧ:ММ)',
                         errorText: timeError,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    
-                    // Секция повторяемости
-                    const Divider(),
-                    const Text(
-                      'Повторяемость',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    
-                    // Выбор типа повторения
-                    DropdownButtonFormField<RecurrenceType>(
-                      value: recurrence.type,
-                      decoration: const InputDecoration(
-                        labelText: 'Тип повторения',
-                      ),
-                      items: RecurrenceType.values.map((type) {
-                        String label;
-                        switch (type) {
-                          case RecurrenceType.none:
-                            label = 'Без повторения';
-                            break;
-                          case RecurrenceType.daily:
-                            label = 'Ежедневно';
-                            break;
-                          case RecurrenceType.weekly:
-                            label = 'Еженедельно';
-                            break;
-                          case RecurrenceType.monthly:
-                            label = 'Ежемесячно';
-                            break;
-                          case RecurrenceType.yearly:
-                            label = 'Ежегодно';
-                            break;
-                        }
-                        return DropdownMenuItem<RecurrenceType>(
-                          value: type,
-                          child: Text(label),
-                        );
-                      }).toList(),
-                      onChanged: (value) {
-                        setState(() {
-                          recurrence.type = value!;
-                        });
-                      },
-                    ),
-                    
-                    // Показываем дополнительные настройки только если тип не "Без повторения"
-                    if (recurrence.type != RecurrenceType.none) ...[
-                      const SizedBox(height: 10),
-                      
-                      // Интервал
-                      TextField(
-                        controller: intervalController,
-                        keyboardType: TextInputType.number,
-                        decoration: InputDecoration(
-                          labelText: 'Интервал',
-                          helperText: _getIntervalHelperText(recurrence.type),
-                        ),
-                        onChanged: (value) {
-                          int? interval = int.tryParse(value);
-                          if (interval != null && interval > 0) {
-                            recurrence.interval = interval;
-                          }
-                        },
-                      ),
-                      
-                      const SizedBox(height: 10),
-                      
-                      // Тип ограничения (по дате или количеству)
-                      Row(
-                        children: [
-                          const Text('Ограничение: '),
-                          Radio<String>(
-                            value: 'none',
-                            groupValue: selectedEndDate != null 
-                                ? 'date' 
-                                : (recurrence.count != null ? 'count' : 'none'),
-                            onChanged: (value) {
-                              setState(() {
-                                selectedEndDate = null;
-                                recurrence.endDate = null;
-                                recurrence.count = null;
-                                countController.text = '';
-                              });
-                            },
-                          ),
-                          const Text('Без ограничения'),
-                          
-                          Radio<String>(
-                            value: 'date',
-                            groupValue: selectedEndDate != null 
-                                ? 'date' 
-                                : (recurrence.count != null ? 'count' : 'none'),
-                            onChanged: (value) {
-                              setState(() {
-                                selectedEndDate = DateTime.now().add(const Duration(days: 30));
-                                recurrence.endDate = selectedEndDate;
-                                recurrence.count = null;
-                                countController.text = '';
-                              });
-                            },
-                          ),
-                          const Text('По дате'),
-                          
-                          Radio<String>(
-                            value: 'count',
-                            groupValue: selectedEndDate != null 
-                                ? 'date' 
-                                : (recurrence.count != null ? 'count' : 'none'),
-                            onChanged: (value) {
-                              setState(() {
-                                selectedEndDate = null;
-                                recurrence.endDate = null;
-                                recurrence.count = 10;
-                                countController.text = '10';
-                              });
-                            },
-                          ),
-                          const Text('По количеству'),
-                        ],
-                      ),
-                      
-                      const SizedBox(height: 10),
-                      
-                      // Ввод даты окончания
-                      if (selectedEndDate != null)
-                        Row(
-                          children: [
-                            const Text('Дата окончания: '),
-                            TextButton(
-                              onPressed: () async {
-                                final DateTime? picked = await showDatePicker(
-                                  context: context,
-                                  initialDate: selectedEndDate!,
-                                  firstDate: DateTime.now(),
-                                  lastDate: DateTime(2100),
-                                  locale: const Locale('ru', 'RU'),
-                                );
-                                if (picked != null && picked != selectedEndDate) {
-                                  setState(() {
-                                    selectedEndDate = picked;
-                                    recurrence.endDate = picked;
-                                  });
+                      suffixIcon: IconButton(
+                        icon: const Icon(Icons.schedule),
+                        onPressed: () {
+                          showTimePicker(
+                            context: context,
+                            initialTime: TimeOfDay.now(),
+                          ).then((startTime) {
+                            if (startTime != null) {
+                              showTimePicker(
+                                context: context,
+                                initialTime: TimeOfDay(
+                                  hour: (startTime.hour + 1) % 24,
+                                  minute: startTime.minute,
+                                ),
+                              ).then((endTime) {
+                                if (endTime != null) {
+                                  timeController.text = 
+                                    '${startTime.hour.toString().padLeft(2, '0')}:${startTime.minute.toString().padLeft(2, '0')} - ${endTime.hour.toString().padLeft(2, '0')}:${endTime.minute.toString().padLeft(2, '0')}';
                                 }
-                              },
-                              child: Text(
-                                DateFormat('dd.MM.yyyy').format(selectedEndDate!),
-                              ),
-                            ),
-                          ],
-                        ),
-                      
-                      // Ввод количества повторений
-                      if (recurrence.count != null)
-                        TextField(
-                          controller: countController,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Количество повторений',
-                          ),
-                          onChanged: (value) {
-                            int? count = int.tryParse(value);
-                            if (count != null && count > 0) {
-                              recurrence.count = count;
+                              });
                             }
-                          },
-                        ),
-                    ],
-                    
-                    const Divider(),
+                              });
+                            },
+                          ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  
+                  // Поле краткой заметки
+                        TextField(
+                    controller: shortNoteController,
+                          decoration: const InputDecoration(
+                      labelText: 'Краткая заметка',
+                    ),
+                    maxLines: 3,
+                  ),
+                  const SizedBox(height: 16),
                     
                     // Динамические поля
-                    Column(
-                      children: dynamicFields.map((field) {
-                        int fieldIndex = dynamicFields.indexOf(field);
+                  ...dynamicFields.asMap().entries.map((entry) {
+                    int index = entry.key;
+                    DynamicFieldEntry field = entry.value;
                         return Row(
                           children: [
                             Expanded(
-                              flex: 3,
                               child: TextField(
                                 controller: field.keyController,
-                                decoration:
-                                    const InputDecoration(labelText: 'Поле'),
+                            decoration: const InputDecoration(labelText: 'Название поля'),
                               ),
                             ),
                             const SizedBox(width: 8),
                             Expanded(
-                              flex: 4,
                               child: TextField(
                                 controller: field.valueController,
-                                decoration: const InputDecoration(
-                                    labelText: 'Значение'),
+                            decoration: const InputDecoration(labelText: 'Значение'),
                               ),
                             ),
                             IconButton(
+                          icon: const Icon(Icons.delete),
                               onPressed: () {
                                 setState(() {
-                                  dynamicFields.removeAt(fieldIndex);
+                              dynamicFields.removeAt(index);
                                 });
                               },
-                              icon: const Icon(Icons.delete),
                             ),
                           ],
                         );
                       }).toList(),
-                    ),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: TextButton(
+                  
+                  // Кнопка добавления нового поля
+                  TextButton.icon(
+                    icon: const Icon(Icons.add),
+                    label: const Text('Добавить поле'),
                         onPressed: () {
                           setState(() {
-                            dynamicFields.add(DynamicFieldEntry(
-                                key: 'Новое поле', value: ''));
+                        dynamicFields.add(DynamicFieldEntry(key: '', value: ''));
                           });
                         },
-                        child: const Text('Добавить поле'),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    // Многострочное поле для краткой заметки
-                    TextField(
-                      controller: shortNoteController,
-                      decoration:
-                          const InputDecoration(labelText: 'Краткая заметка'),
-                      maxLines: null,
-                      keyboardType: TextInputType.multiline,
-                    ),
+                  ),
+                  
+                  const SizedBox(height: 16),
+                  
+                  // Виджет для работы с тегами
+                  const Text('Теги:', style: TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  TagInputWidget(
+                    initialTags: tags,
+                    onTagsChanged: (newTags) {
+                      tags = newTags;
+                    },
+                    hintText: 'Добавить тег...',
+                    maxTags: 10,
+                  ),
+                  
+                  const SizedBox(height: 16),
                   ],
                 ),
               ),
@@ -816,11 +695,11 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                           return; // Пользователь отменил сохранение
                         }
                         // Продолжаем с сохранением
-                        _saveNewScheduleEntry(timeController, shortNoteController, dynamicFields, recurrence, databaseId);
+                      _saveNewScheduleEntry(timeController, shortNoteController, dynamicFields, recurrence, databaseId, tags);
                       });
                     } else {
                       // Нет наложения времени, сохраняем сразу
-                      _saveNewScheduleEntry(timeController, shortNoteController, dynamicFields, recurrence, databaseId);
+                    _saveNewScheduleEntry(timeController, shortNoteController, dynamicFields, recurrence, databaseId, tags);
                     }
                   },
                   child: const Text('Сохранить'),
@@ -828,14 +707,13 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
               ],
             );
           },
-        );
-      },
+      ),
     );
   }
 
   // Вспомогательный метод для сохранения новой записи расписания
   void _saveNewScheduleEntry(TextEditingController timeController, TextEditingController shortNoteController, 
-      List<DynamicFieldEntry> dynamicFields, Recurrence recurrence, String? databaseId) {
+      List<DynamicFieldEntry> dynamicFields, Recurrence recurrence, String? databaseId, List<String> tags) {
     // Собираем динамические поля
     Map<String, String> dynamicMap = {};
     for (var field in dynamicFields) {
@@ -850,6 +728,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
       dynamicFieldsJson: jsonEncode(dynamicMap),
       recurrence: recurrence,
       databaseId: databaseId, // Добавляем ID базы данных
+      tags: tags, // Добавляем теги
     );
 
     print('Создание записи расписания в базе: ${databaseId ?? "локальная"}');
@@ -887,6 +766,376 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
   }
 
   // Метод редактирования интервала с использованием маски для поля времени.
+  void _editScheduleEntry(ScheduleEntry entry) {
+    // Находим индекс записи
+    final index = _scheduleEntries.indexOf(entry);
+    if (index != -1) {
+      _editSchedule(index);
+    }
+  }
+
+  // Метод удаления интервала
+  void _deleteScheduleEntryByEntry(ScheduleEntry entry) {
+    // Находим индекс записи
+    final index = _scheduleEntries.indexOf(entry);
+    if (index != -1) {
+      _deleteScheduleEntry(index);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Если дата не выбрана, показываем календарь
+    if (_selectedDate == null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text("Расписание")),
+        body: CalendarGrid(
+          selectedDate: _currentMonth,
+          onDateSelected: (date) {
+            if (date.month != _currentMonth.month) {
+              setState(() {
+                _currentMonth = date;
+              });
+            } else {
+              _onDateSelected(date);
+            }
+          },
+          highlightedDate: _highlightedDate,
+          onDateHighlighted: _onDateHighlighted,
+          onMonthChanged: (date) {
+            setState(() {
+              _currentMonth = date;
+            });
+          },
+        ),
+      );
+    }
+    
+    // Если выбран день, отображаем новую сетку расписания
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+            "Расписание на ${DateFormat('dd MMMM yyyy', 'ru').format(_selectedDate!)}"),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: _goBackToCalendar,
+        ),
+        actions: [
+          IconButton(
+            onPressed: _addScheduleEntry,
+            icon: const Icon(Icons.add),
+            tooltip: 'Добавить запись',
+          ),
+        ],
+      ),
+      body: _buildDayScheduleView(),
+    );
+  }
+
+  Widget _buildDayScheduleView() {
+    if (_scheduleEntries.isEmpty) {
+      return Center(
+                    child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+            Icon(
+              Icons.schedule,
+              size: 64,
+              color: Theme.of(context).colorScheme.outline,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'На ${DateFormat('d MMMM yyyy', 'ru').format(_selectedDate!)} нет записей',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                color: Theme.of(context).colorScheme.outline,
+              ),
+            ),
+            const SizedBox(height: 32),
+            ElevatedButton.icon(
+                            onPressed: _addScheduleEntry,
+                            icon: const Icon(Icons.add),
+              label: const Text('Добавить запись'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Сетка расписания с правильной структурой
+    return Column(
+      children: [
+                        Expanded(
+          child: _buildScheduleGrid(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildScheduleGrid() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return SingleChildScrollView(
+          child: SizedBox(
+            height: 24 * 60.0, // 24 часа по 60 пикселей на час
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Временная шкала (часы)
+                _buildTimeScale(),
+                
+                // Разделитель
+                Container(
+                  width: 1,
+                  height: 24 * 60.0,
+                  color: Theme.of(context).dividerColor,
+                ),
+                
+                // Область событий
+                Expanded(
+                  child: _buildEventsArea(constraints.maxWidth - 61), // Учитываем ширину временной шкалы
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildEventsArea(double availableWidth) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: SizedBox(
+        width: math.max(availableWidth, 6 * 182.0), // Минимум 6 столбцов
+        height: 24 * 60.0,
+        child: Stack(
+          children: [
+            // Постоянная сетка разделителей
+            _buildGridLines(),
+            
+            // События
+            ..._buildEventWidgets(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGridLines() {
+    const double columnWidth = 180.0;
+    const double leftPadding = 8.0;
+    const double columnSpacing = 2.0;
+    const int maxVisibleColumns = 6; // Показываем сетку для 6 столбцов
+    
+    return SizedBox(
+      width: 6 * 182.0, // Фиксированная ширина для 6 столбцов
+      height: 24 * 60.0, // Фиксированная высота
+      child: Stack(
+                                      children: [
+          // Горизонтальные линии (часы) - постоянно видимые
+          Column(
+            children: List.generate(24, (hour) {
+              return Container(
+                height: 60,
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  border: Border(
+                    bottom: BorderSide(
+                      color: Theme.of(context).dividerColor.withOpacity(0.5),
+                      width: 1.0,
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ),
+          
+          // Вертикальные линии (столбцы) - постоянно видимые
+          Positioned(
+            left: leftPadding, // Сдвигаем все столбцы на leftPadding вправо
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: List.generate(maxVisibleColumns, (columnIndex) {
+                return Container(
+                  width: columnIndex == 0 
+                      ? columnWidth + columnSpacing // Первый столбец: ширина бокса + отступ до следующего
+                      : columnWidth + columnSpacing, // Остальные столбцы: ширина бокса + отступ
+                  height: 24 * 60.0,
+                  decoration: BoxDecoration(
+                    border: Border(
+                      right: BorderSide(
+                        color: Theme.of(context).dividerColor.withOpacity(0.4),
+                        width: 1.0,
+                      ),
+                    ),
+                  ),
+                );
+              }),
+            ),
+          ),
+                                      ],
+                                    ),
+    );
+  }
+
+  Widget _buildTimeScale() {
+    return SizedBox(
+      width: 60,
+      height: 24 * 60.0,
+      child: Column(
+        children: List.generate(24, (hour) {
+          return Container(
+            height: 60,
+            width: 60,
+            alignment: Alignment.topCenter,
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              '${hour.toString().padLeft(2, '0')}:00',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.outline,
+                                  ),
+                                ),
+                              );
+        }),
+      ),
+    );
+  }
+
+  List<Widget> _buildEventWidgets() {
+    List<Widget> eventWidgets = [];
+    
+    // Создаем список событий с их временными диапазонами
+    List<EventWithTime> eventsWithTime = [];
+    for (var entry in _scheduleEntries) {
+      final timeRange = _parseTimeRange(entry.time);
+      if (timeRange != null) {
+        eventsWithTime.add(EventWithTime(
+          entry: entry,
+          startMinute: timeRange['startTotalMinutes'] as int,
+          endMinute: timeRange['endTotalMinutes'] as int,
+        ));
+      }
+    }
+    
+    // Сортируем события по времени начала
+    eventsWithTime.sort((a, b) => a.startMinute.compareTo(b.startMinute));
+    
+    // Алгоритм размещения событий в колонках
+    List<List<EventWithTime>> columns = [];
+    
+    for (var event in eventsWithTime) {
+      bool placed = false;
+      
+      // Пытаемся разместить событие в существующей колонке
+      for (var column in columns) {
+        // Проверяем, что новое событие не пересекается с последним в колонке
+        bool canPlaceInColumn = true;
+        for (var existingEvent in column) {
+          if (!(event.endMinute <= existingEvent.startMinute || 
+                event.startMinute >= existingEvent.endMinute)) {
+            canPlaceInColumn = false;
+            break;
+          }
+        }
+        
+        if (canPlaceInColumn) {
+          column.add(event);
+          placed = true;
+          break;
+        }
+      }
+      
+      // Если не удалось разместить, создаем новую колонку
+      if (!placed) {
+        columns.add([event]);
+      }
+    }
+    
+    // Создаем виджеты для каждого события с новой шириной
+    for (int columnIndex = 0; columnIndex < columns.length; columnIndex++) {
+      for (var event in columns[columnIndex]) {
+        final widget = _buildSingleEventWidget(
+          event.entry, 
+          event.startMinute, 
+          event.endMinute,
+          columnIndex,
+          columns.length,
+        );
+        if (widget != null) {
+          eventWidgets.add(widget);
+        }
+      }
+    }
+    
+    return eventWidgets;
+  }
+
+  Widget? _buildSingleEventWidget(
+    ScheduleEntry entry, 
+    int startMinute, 
+    int endMinute,
+    int columnIndex,
+    int totalColumns,
+  ) {
+    final duration = endMinute - startMinute;
+    if (duration <= 0) return null;
+    
+    final topPosition = startMinute.toDouble();
+    final height = duration.toDouble();
+    
+    // Фиксированная ширина каждого столбца для плотной компоновки
+    const double columnWidth = 180.0; // Увеличиваем ширину до 180px
+    const double leftPadding = 8.0;
+    const double columnSpacing = 2.0;
+    
+    final leftPosition = leftPadding + (columnIndex * (columnWidth + columnSpacing));
+    
+    return Positioned(
+      left: leftPosition,
+      top: topPosition,
+      width: columnWidth, // Фиксированная ширина 180px
+      height: height,
+      child: _ScheduleEventCard(
+        entry: entry,
+        onTap: () => _editScheduleEntry(entry),
+        onDelete: () => _deleteScheduleEntryByEntry(entry),
+      ),
+    );
+  }
+
+  Map<String, dynamic>? _parseTimeRange(String timeString) {
+    // Парсим строку времени типа "09:00 - 10:30"
+    final parts = timeString.split(' - ');
+    if (parts.length != 2) return null;
+    
+    try {
+      final startParts = parts[0].trim().split(':');
+      final endParts = parts[1].trim().split(':');
+      
+      if (startParts.length != 2 || endParts.length != 2) return null;
+      
+      final startHour = int.parse(startParts[0]);
+      final startMinute = int.parse(startParts[1]);
+      final endHour = int.parse(endParts[0]);
+      final endMinute = int.parse(endParts[1]);
+      
+      final startTotalMinutes = startHour * 60 + startMinute;
+      final endTotalMinutes = endHour * 60 + endMinute;
+      
+      return {
+        'startHour': startHour,
+        'startMinute': startMinute,
+        'endHour': endHour,
+        'endMinute': endMinute,
+        'startTotalMinutes': startTotalMinutes,
+        'endTotalMinutes': endTotalMinutes,
+      };
+    } catch (e) {
+      print('Ошибка парсинга времени: $e');
+      return null;
+    }
+  }
+
   void _editSchedule(int index) {
     ScheduleEntry entry = _scheduleEntries[index];
     TextEditingController timeController =
@@ -905,11 +1154,15 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
     List<DynamicFieldEntry> dynamicFields = [];
     if (entry.dynamicFieldsJson != null &&
         entry.dynamicFieldsJson!.isNotEmpty) {
-      Map<String, dynamic> decoded = jsonDecode(entry.dynamicFieldsJson!);
+      Map<String, dynamic> decoded = jsonDecode(entry.dynamicFieldsJson!) as Map<String, dynamic>;
       decoded.forEach((key, value) {
         dynamicFields.add(DynamicFieldEntry(key: key, value: value.toString()));
       });
     }
+    
+    // Инициализируем теги
+    List<String> tags = List<String>.from(entry.tags);
+    
     String? timeError;
     
     // Параметры повторяемости
@@ -1060,7 +1313,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                               });
                             },
                           ),
-                          const Text('По количеству'),
                         ],
                       ),
                       
@@ -1167,6 +1419,20 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                       maxLines: null,
                       keyboardType: TextInputType.multiline,
                     ),
+                    
+                    const SizedBox(height: 16),
+                    
+                    // Виджет для работы с тегами
+                    const Text('Теги:', style: TextStyle(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    TagInputWidget(
+                      initialTags: tags,
+                      onTagsChanged: (newTags) {
+                        tags = newTags;
+                      },
+                      hintText: 'Добавить тег...',
+                      maxTags: 10,
+                    ),
                   ],
                 ),
               ),
@@ -1270,6 +1536,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                         entry.note = shortNoteController.text.trim();
                         entry.dynamicFieldsJson = jsonEncode(dynamicMap);
                         entry.recurrence = recurrence;
+                        entry.tags = tags; // Сохраняем теги
                         
                         // Сохраняем существующий databaseId или устанавливаем новый если нужно
                         if (entry.databaseId == null) {
@@ -1333,6 +1600,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                     entry.note = shortNoteController.text.trim();
                     entry.dynamicFieldsJson = jsonEncode(dynamicMap);
                     entry.recurrence = recurrence;
+                    entry.tags = tags; // Сохраняем теги
                     
                     // Сохраняем существующий databaseId или устанавливаем новый если нужно
                     if (entry.databaseId == null) {
@@ -1495,206 +1763,389 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
         return Colors.grey;
     }
   }
+}
+
+// Виджет для отображения события в расписании
+class _ScheduleEventCard extends StatefulWidget {
+  final ScheduleEntry entry;
+  final VoidCallback onTap;
+  final VoidCallback onDelete;
+
+  const _ScheduleEventCard({
+    Key? key,
+    required this.entry,
+    required this.onTap,
+    required this.onDelete,
+  }) : super(key: key);
 
   @override
-  Widget build(BuildContext context) {
-    // Если дата не выбрана, показываем календарь
-    if (_selectedDate == null) {
-      return Scaffold(
-        appBar: AppBar(title: const Text("Расписание")),
-        body: CalendarGrid(
-          selectedDate: _currentMonth,
-          onDateSelected: (date) {
-            if (date.month != _currentMonth.month) {
-              setState(() {
-                _currentMonth = date;
-              });
-            } else {
-              _onDateSelected(date);
-            }
-          },
-          highlightedDate: _highlightedDate,
-          onDateHighlighted: _onDateHighlighted,
-          onMonthChanged: (date) {
-            setState(() {
-              _currentMonth = date;
-            });
-          },
-        ),
-      );
+  _ScheduleEventCardState createState() => _ScheduleEventCardState();
+}
+
+class _ScheduleEventCardState extends State<_ScheduleEventCard> {
+  bool _isHovered = false;
+  OverlayEntry? _overlayEntry;
+  final GlobalKey _cardKey = GlobalKey();
+
+  void _showTooltip() {
+    if (widget.entry.note == null || widget.entry.note!.isEmpty) {
+      // Для коротких событий показываем подсказку даже без заметки
+      final eventHeight = _calculateEventDuration();
+      final isShortEvent = eventHeight < 80;
+      if (!isShortEvent) return;
     }
-    // Если выбран день, отображаем детальный режим расписания
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(
-            "Расписание на ${DateFormat('dd MMMM yyyy', 'ru').format(_selectedDate!)}"),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: _goBackToCalendar,
-        ),
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: Row(
-              children: [
-                // Список интервалов
-                Expanded(
-                  flex: 2,
+    
+    // Получаем позицию карточки
+    final RenderBox? renderBox = _cardKey.currentContext?.findRenderObject() as RenderBox?;
+    if (renderBox == null) return;
+    
+    final Offset position = renderBox.localToGlobal(Offset.zero);
+    final Size size = renderBox.size;
+    
+    _overlayEntry = OverlayEntry(
+      builder: (context) => Positioned(
+        left: position.dx + size.width + 4, // Справа от карточки
+        top: position.dy, // На уровне карточки
+        child: Material(
+          elevation: 100, // Максимальный elevation
+          borderRadius: BorderRadius.circular(8),
+          color: Colors.transparent,
                   child: Container(
+            width: 250,
+            constraints: const BoxConstraints(maxHeight: 300),
+            padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.grey[900],
-                      border: Border.all(color: Colors.cyan.withOpacity(0.3)),
-                    ),
-                    child: Column(
-                      children: [
-                        // Кнопка добавления интервала в верхней части списка
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          child: ElevatedButton.icon(
-                            onPressed: _addScheduleEntry,
-                            icon: const Icon(Icons.add),
-                            label: const Text('Добавить интервал'),
-                          ),
-                        ),
-                        Expanded(
-                          child: ListView.separated(
-                            padding: const EdgeInsets.all(8),
-                            itemCount: _scheduleEntries.length,
-                            separatorBuilder: (context, index) =>
-                                const Divider(color: Colors.cyan),
-                            itemBuilder: (context, index) {
-                              ScheduleEntry entry = _scheduleEntries[index];
-                              String dynamicFieldsDisplay = '';
-                              if (entry.dynamicFieldsJson != null &&
-                                  entry.dynamicFieldsJson!.isNotEmpty) {
-                                Map<String, dynamic> decoded =
-                                    jsonDecode(entry.dynamicFieldsJson!);
-                                dynamicFieldsDisplay = decoded.entries
-                                    .map((e) => "${e.key}: ${e.value}")
-                                    .join(", ");
-                              }
-                              return GestureDetector(
-                                onSecondaryTapDown: (details) {
-                                  _showScheduleContextMenu(
-                                      context, index, details.globalPosition);
-                                },
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    color: _selectedIndex == index
-                                        ? Colors.cyan.withOpacity(0.2)
-                                        : null,
-                                    border: Border.all(
-                                      color: _selectedIndex == index
-                                          ? Colors.cyan
-                                          : Colors.transparent,
-                                      width: 2,
-                                    ),
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                  child: ListTile(
-                                    title: Row(
-                                      children: [
-                                        Expanded(
-                                          flex: 2,
-                                          child: Row(
-                                            children: [
-                                              Text(
-                                                entry.time,
-                                                style: const TextStyle(
-                                                  color: Colors.white,
-                                                  fontWeight: FontWeight.bold,
-                                                ),
-                                              ),
-                                              if (entry.recurrence.type != RecurrenceType.none)
-                                                Padding(
-                                                  padding: const EdgeInsets.only(left: 4.0),
-                                                  child: Tooltip(
-                                                    message: entry.recurrence.toString(),
-                                                    child: Icon(
-                                                      Icons.repeat,
-                                                      size: 16,
-                                                      color: _getRecurrenceColor(entry.recurrence.type),
-                                                    ),
-                                                  ),
-                                                ),
-                                            ],
-                                          ),
-                                        ),
-                                        const VerticalDivider(
-                                            color: Colors.cyan, thickness: 2),
-                                        Expanded(
-                                          flex: 5,
-                                          child: Text(
-                                            dynamicFieldsDisplay,
-                                            style: const TextStyle(color: Colors.white70),
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    onTap: () {
-                                      setState(() {
-                                        _selectedIndex = index;
-                                      });
-                                    },
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                // Окно предпросмотра заметки с возможностью изменения размера
-                Expanded(
-                  flex: 1,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Colors.grey[850],
-                      border: Border.all(color: Colors.cyan.withOpacity(0.3)),
-                    ),
-                    child: Column(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          child: const Text(
-                            'Предпросмотр заметки',
-                            style: TextStyle(
-                              color: Colors.cyan,
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                        Expanded(
-                          child: Container(
-                            padding: const EdgeInsets.all(8),
-                            child: (_selectedIndex == null ||
-                                    _selectedIndex! >= _scheduleEntries.length)
-                                ? const Center(
-                                    child: Text('Выберите интервал',
-                                        style: TextStyle(color: Colors.white)),
-                                  )
-                                : SingleChildScrollView(
-                                    child: Text(
-                                      _scheduleEntries[_selectedIndex!].note ?? '',
-                                      style: const TextStyle(color: Colors.white70),
-                                    ),
-                                  ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+              color: Theme.of(context).colorScheme.surface,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: Theme.of(context).colorScheme.outline.withOpacity(0.3),
+                width: 1.5,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.8),
+                  blurRadius: 25,
+                  offset: const Offset(0, 15),
+                  spreadRadius: 8,
                 ),
               ],
             ),
+            child: _buildTooltipContent(),
           ),
-        ],
+        ),
       ),
     );
+    
+    Overlay.of(context).insert(_overlayEntry!);
+  }
+
+  Widget _buildTooltipContent() {
+    final eventHeight = _calculateEventDuration();
+    final isShortEvent = eventHeight < 80;
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+                                      children: [
+        // Время события
+                                              Text(
+          'Время: ${widget.entry.time}',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                                  fontWeight: FontWeight.bold,
+            color: Theme.of(context).colorScheme.primary,
+          ),
+        ),
+        const SizedBox(height: 8),
+        
+        // Динамические поля (для коротких событий)
+        if (isShortEvent && widget.entry.dynamicFieldsJson != null) ...[
+          _buildTooltipDynamicFields(),
+          const SizedBox(height: 8),
+        ],
+        
+        // Теги (для коротких событий)
+        if (isShortEvent && widget.entry.tags.isNotEmpty) ...[
+          Text(
+            'Теги:',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              fontWeight: FontWeight.bold,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Wrap(
+            spacing: 4,
+            runSpacing: 2,
+            children: widget.entry.tags.map((tag) {
+              return Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
+                    width: 0.5,
+                  ),
+                ),
+                                          child: Text(
+                  tag,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.primary,
+                    fontSize: 10,
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 8),
+        ],
+        
+        // Заметка (если есть)
+        if (widget.entry.note != null && widget.entry.note!.isNotEmpty) ...[
+          Text(
+            'Заметка:',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              fontWeight: FontWeight.bold,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Flexible(
+            child: SingleChildScrollView(
+              child: Text(
+                widget.entry.note!,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
+              ),
+                          ),
+                        ),
+                      ],
+      ],
+    );
+  }
+
+  Widget _buildTooltipDynamicFields() {
+    try {
+      final fieldsMap = jsonDecode(widget.entry.dynamicFieldsJson!) as Map<String, dynamic>;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Детали:',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              fontWeight: FontWeight.bold,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+          ),
+          const SizedBox(height: 4),
+          ...fieldsMap.entries.where((entry) => entry.value.toString().isNotEmpty).map((entry) {
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 2),
+              child: Text(
+                '${entry.key}: ${entry.value}',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
+              ),
+            );
+          }).toList(),
+        ],
+      );
+    } catch (e) {
+      return const SizedBox.shrink();
+    }
+  }
+
+  @override
+  void dispose() {
+    _hideTooltip();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Вычисляем высоту события в пикселях из поля time
+    final eventHeight = _calculateEventDuration();
+    final isShortEvent = eventHeight < 80; // Событие короче 80 пикселей считается коротким
+    
+    return MouseRegion(
+      onEnter: (_) {
+        if (mounted) {
+          setState(() => _isHovered = true);
+          // Показываем подсказку для коротких событий или если есть заметка
+          if (isShortEvent || (widget.entry.note != null && widget.entry.note!.isNotEmpty)) {
+            _showTooltip();
+          }
+        }
+      },
+      onExit: (_) {
+        if (mounted) {
+          setState(() => _isHovered = false);
+          _hideTooltip();
+        }
+      },
+      child: GestureDetector(
+        onTap: widget.onTap,
+                  child: Container(
+          key: _cardKey,
+          width: 180, // Строго фиксированная ширина
+          height: double.infinity, // ИСПРАВЛЕНИЕ: Растягиваем на всю доступную высоту
+          margin: const EdgeInsets.only(right: 2, bottom: 2),
+                    decoration: BoxDecoration(
+            color: const Color(0xFF22a6b3), // Цвет cyan #22a6b3
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: const Color(0xFF22a6b3).withOpacity(0.7),
+              width: 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.1),
+                blurRadius: 4,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+                            padding: const EdgeInsets.all(8),
+          child: isShortEvent ? _buildShortEventContent() : _buildFullEventContent(),
+        ),
+      ),
+    );
+  }
+
+  // Вычисляем длительность события в минутах из поля time
+  double _calculateEventDuration() {
+    try {
+      final timeParts = widget.entry.time.split(' - ');
+      if (timeParts.length != 2) return 60.0; // По умолчанию 60 минут
+      
+      final startParts = timeParts[0].split(':');
+      final endParts = timeParts[1].split(':');
+      
+      if (startParts.length != 2 || endParts.length != 2) return 60.0;
+      
+      final startMinutes = int.parse(startParts[0]) * 60 + int.parse(startParts[1]);
+      final endMinutes = int.parse(endParts[0]) * 60 + int.parse(endParts[1]);
+      
+      return (endMinutes - startMinutes).toDouble();
+    } catch (e) {
+      return 60.0; // По умолчанию 60 минут при ошибке парсинга
+    }
+  }
+
+  // Содержимое для коротких событий (только время)
+  Widget _buildShortEventContent() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.max,
+      children: [
+        // Только временной интервал для коротких событий
+        Flexible(
+                                    child: Text(
+            widget.entry.time,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: 12,
+            ),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        const Spacer(),
+      ],
+    );
+  }
+
+  // Полное содержимое для обычных событий
+  Widget _buildFullEventContent() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.max,
+      children: [
+        // Временной интервал (левый верхний угол)
+        Text(
+          widget.entry.time,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+            fontSize: 12,
+          ),
+        ),
+        const SizedBox(height: 4),
+        
+        // Динамические поля
+        if (widget.entry.dynamicFieldsJson != null) ...[
+          Flexible(child: _buildDynamicFields()),
+          const SizedBox(height: 4),
+        ],
+        
+        // Теги
+        if (widget.entry.tags.isNotEmpty) ...[
+          Flexible(child: _buildTags()),
+        ],
+        
+        // Заполнитель для растягивания на всю высоту
+        const Spacer(),
+      ],
+    );
+  }
+
+  Widget _buildDynamicFields() {
+    try {
+      final fieldsMap = jsonDecode(widget.entry.dynamicFieldsJson!) as Map<String, dynamic>;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: fieldsMap.entries.where((entry) => entry.value.toString().isNotEmpty).map((entry) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 2),
+            child: Text(
+              '${entry.key}: ${entry.value}',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 11,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          );
+        }).toList(),
+      );
+    } catch (e) {
+      return const SizedBox.shrink();
+    }
+  }
+
+  Widget _buildTags() {
+    return Wrap(
+      spacing: 4,
+      runSpacing: 2,
+      children: widget.entry.tags.take(3).map((tag) {
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.2),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: Colors.white.withOpacity(0.3),
+              width: 0.5,
+            ),
+          ),
+          child: Text(
+            tag,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 9,
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  void _hideTooltip() {
+    _overlayEntry?.remove();
+    _overlayEntry = null;
   }
 } 

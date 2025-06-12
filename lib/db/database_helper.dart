@@ -67,7 +67,7 @@ class DatabaseHelper {
 
   static Database? _database;
   static const String _dbName = 'notes.db';
-  static const int _dbVersion = 5;
+  static const int _dbVersion = 6;
   static final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
   
   // Флаг для отслеживания состояния переключения между базами
@@ -211,7 +211,7 @@ class DatabaseHelper {
       )
     ''');
 
-    // Таблица расписания с колонками created_at и updated_at
+    // Таблица расписания с колонками created_at и updated_at и tags_json
     await db.execute('''
       CREATE TABLE schedule_entries(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -222,7 +222,8 @@ class DatabaseHelper {
         recurrence_json TEXT,
         database_id TEXT,
         created_at TEXT,
-        updated_at TEXT
+        updated_at TEXT,
+        tags_json TEXT
       )
     ''');
 
@@ -277,12 +278,38 @@ class DatabaseHelper {
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
-      // Создаем таблицу для изображений, если её нет
+      // Добавляем колонки для заметок
+      await db.execute('ALTER TABLE notes ADD COLUMN images TEXT');
+      await db.execute('ALTER TABLE notes ADD COLUMN metadata TEXT');
+    }
+    
+    if (oldVersion < 3) {
+      // Добавляем колонку content_json
+      await db.execute('ALTER TABLE notes ADD COLUMN content_json TEXT');
+    }
+    
+    if (oldVersion < 4) {
+      // Добавляем колонку database_id для всех таблиц
+      await db.execute('ALTER TABLE notes ADD COLUMN database_id TEXT');
+      await db.execute('ALTER TABLE folders ADD COLUMN database_id TEXT');
+      await db.execute('ALTER TABLE schedule_entries ADD COLUMN database_id TEXT');
+      await db.execute('ALTER TABLE pinboard_notes ADD COLUMN database_id TEXT');
+      await db.execute('ALTER TABLE connections ADD COLUMN database_id TEXT');
+      
+      // Добавляем временные колонки для расписания
+      await db.execute('ALTER TABLE schedule_entries ADD COLUMN created_at TEXT');
+      await db.execute('ALTER TABLE schedule_entries ADD COLUMN updated_at TEXT');
+      
+      // Добавляем колонки для папок
+      await db.execute('ALTER TABLE folders ADD COLUMN created_at TEXT');
+      await db.execute('ALTER TABLE folders ADD COLUMN updated_at TEXT');
+      
+      // Создаем таблицу изображений
       await _createImagesTable(db);
       
       // Создаем таблицу для совместных баз данных
       await db.execute('''
-        CREATE TABLE IF NOT EXISTS shared_databases (
+        CREATE TABLE shared_databases (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           server_id TEXT NOT NULL UNIQUE,
           name TEXT NOT NULL,
@@ -296,77 +323,19 @@ class DatabaseHelper {
       ''');
     }
     
-    if (oldVersion < 3) {
-      // Добавляем колонку recurrence_json в таблицу schedule_entries
-      try {
-        await db.execute('ALTER TABLE schedule_entries ADD COLUMN recurrence_json TEXT');
-        print('Успешно добавлена колонка recurrence_json в таблицу schedule_entries');
-      } catch (e) {
-        print('Ошибка при добавлении колонки recurrence_json: $e');
-      }
-    }
-    
-    // Добавляем отсутствующие колонки для версии 4
-    if (oldVersion < 4) {
-      // Добавляем created_at и updated_at в schedule_entries
-      try {
-        await db.execute('ALTER TABLE schedule_entries ADD COLUMN created_at TEXT');
-        print('Успешно добавлена колонка created_at в таблицу schedule_entries');
-      } catch (e) {
-        print('Колонка created_at уже существует или ошибка: $e');
-      }
-      
-      try {
-        await db.execute('ALTER TABLE schedule_entries ADD COLUMN updated_at TEXT');
-        print('Успешно добавлена колонка updated_at в таблицу schedule_entries');
-      } catch (e) {
-        print('Колонка updated_at уже существует или ошибка: $e');
-      }
-      
-      // Добавляем database_id в note_images
-      try {
-        await db.execute('ALTER TABLE note_images ADD COLUMN database_id TEXT');
-        print('Успешно добавлена колонка database_id в таблицу note_images');
-      } catch (e) {
-        print('Колонка database_id уже существует или ошибка: $e');
-      }
-    }
-    
-    // Новая миграция для версии 5 - добавление уникального ограничения
     if (oldVersion < 5) {
-      // Миграция для добавления уникального ограничения к таблице note_images
-      print('Применение миграции базы данных: очистка дублирующихся изображений');
-      
-      // Сначала очищаем дублирующиеся изображения
-      await _cleanupDuplicateImages(db);
-      
-      // Создаем новую таблицу с уникальным ограничением
-      await db.execute('''
-        CREATE TABLE note_images_new (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          note_id INTEGER NOT NULL,
-          file_name TEXT NOT NULL,
-          image_data BLOB NOT NULL,
-          database_id TEXT,
-          FOREIGN KEY (note_id) REFERENCES notes (id) ON DELETE CASCADE,
-          UNIQUE(note_id, file_name)
-        )
-      ''');
-      
-      // Копируем уникальные данные в новую таблицу
-      await db.execute('''
-        INSERT INTO note_images_new (note_id, file_name, image_data, database_id)
-        SELECT note_id, file_name, image_data, database_id
-        FROM note_images
-        GROUP BY note_id, file_name
-        HAVING MIN(id)
-      ''');
-      
-      // Удаляем старую таблицу и переименовываем новую
-      await db.execute('DROP TABLE note_images');
-      await db.execute('ALTER TABLE note_images_new RENAME TO note_images');
-      
-      print('Миграция завершена: добавлено уникальное ограничение для изображений');
+      // Добавляем поддержку тегов для расписания
+      await db.execute('ALTER TABLE schedule_entries ADD COLUMN tags_json TEXT');
+    }
+    
+    if (oldVersion < 6) {
+      // Убеждаемся, что все нужные изменения применены для поддержки тегов
+      try {
+        await db.execute('ALTER TABLE schedule_entries ADD COLUMN tags_json TEXT');
+      } catch (e) {
+        // Колонка уже существует, это нормально
+        print('Колонка tags_json уже существует: $e');
+      }
     }
   }
 
@@ -1535,6 +1504,7 @@ class DatabaseHelper {
       'dynamic_fields_json': entry['dynamic_fields_json'],
       'recurrence_json': entry['recurrence_json'],
       'database_id': entry['database_id'],
+      'tags_json': entry['tags_json'], // ИСПРАВЛЕНИЕ: Добавляем поле tags_json
     };
     
     final preparedEntry = BackupData.prepareForSqlite(filteredEntry);
@@ -1551,8 +1521,8 @@ class DatabaseHelper {
         // Используем INSERT OR REPLACE для автоматической замены дубликатов
         await txn.rawInsert('''
           INSERT OR REPLACE INTO schedule_entries 
-          (id, time, date, note, dynamic_fields_json, recurrence_json, database_id)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
+          (id, time, date, note, dynamic_fields_json, recurrence_json, database_id, tags_json)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ''', [
           preparedEntry['id'],
           preparedEntry['time'],
@@ -1561,13 +1531,14 @@ class DatabaseHelper {
           preparedEntry['dynamic_fields_json'],
           preparedEntry['recurrence_json'],
           preparedEntry['database_id'],
+          preparedEntry['tags_json'],
         ]);
       } else {
         final db = await database;
         await db.rawInsert('''
           INSERT OR REPLACE INTO schedule_entries 
-          (id, time, date, note, dynamic_fields_json, recurrence_json, database_id)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
+          (id, time, date, note, dynamic_fields_json, recurrence_json, database_id, tags_json)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ''', [
           preparedEntry['id'],
           preparedEntry['time'],
@@ -1576,6 +1547,7 @@ class DatabaseHelper {
           preparedEntry['dynamic_fields_json'],
           preparedEntry['recurrence_json'],
           preparedEntry['database_id'],
+          preparedEntry['tags_json'],
         ]);
       }
     } catch (e) {
@@ -1895,6 +1867,7 @@ class DatabaseHelper {
           'note': s.note,
           'dynamic_fields_json': s.dynamicFieldsJson,  // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: добавляю отсутствующие поля
           'recurrence_json': s.recurrence != null ? jsonEncode(s.recurrence!.toMap()) : null,
+          'tags_json': s.tags.isNotEmpty ? jsonEncode(s.tags) : null, // ИСПРАВЛЕНИЕ: Добавляю поле tags_json
           'database_id': databaseId,
         }).toList(),
         pinboardNotes: pinboardNotes.map((p) => {  // ИСПРАВЛЕНО: используем правильные имена полей
@@ -2815,7 +2788,8 @@ class DatabaseHelper {
         recurrence_json TEXT,
         database_id TEXT,
         created_at TEXT,
-        updated_at TEXT
+        updated_at TEXT,
+        tags_json TEXT
       )
     ''');
 

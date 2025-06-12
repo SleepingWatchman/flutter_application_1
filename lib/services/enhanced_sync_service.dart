@@ -705,6 +705,11 @@ class EnhancedSyncService {
         if (serverData.containsKey('updated_at') && serverData['updated_at'] is String) {
           serverData['updated_at'] = _formatDateTimeForServer(serverData['updated_at']);
         }
+        // ИСПРАВЛЕНИЕ: Обрабатываем поле tags_json для записей расписания
+        if (serverData.containsKey('tags_json')) {
+          // Убеждаемся, что tags_json передается корректно
+          print('Обработка tags_json для записи расписания: ${serverData['tags_json']}');
+        }
         break;
         
       case 'pinboard_note':

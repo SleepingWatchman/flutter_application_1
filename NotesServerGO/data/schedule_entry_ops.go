@@ -19,8 +19,8 @@ func CreateScheduleEntry(entry *models.ScheduleEntry) (int64, error) {
 	entry.CreatedAt = now
 	entry.UpdatedAt = now
 
-	query := `INSERT INTO ScheduleEntries (DatabaseId, Time, Date, Note, DynamicFieldsJson, RecurrenceJson, CreatedAt, UpdatedAt)
-	          VALUES (:DatabaseId, :Time, :Date, :Note, :DynamicFieldsJson, :RecurrenceJson, :CreatedAt, :UpdatedAt)`
+	query := `INSERT INTO ScheduleEntries (DatabaseId, Time, Date, Note, DynamicFieldsJson, RecurrenceJson, TagsJson, CreatedAt, UpdatedAt)
+	          VALUES (:DatabaseId, :Time, :Date, :Note, :DynamicFieldsJson, :RecurrenceJson, :TagsJson, :CreatedAt, :UpdatedAt)`
 
 	result, err := MainDB.NamedExec(query, entry)
 	if err != nil {
@@ -38,7 +38,7 @@ func CreateScheduleEntry(entry *models.ScheduleEntry) (int64, error) {
 // GetScheduleEntryByID извлекает запись расписания по ее ID и ID совместной БД.
 func GetScheduleEntryByID(id int64, sharedDbID int64) (*models.ScheduleEntry, error) {
 	entry := &models.ScheduleEntry{}
-	query := `SELECT Id, DatabaseId, Time, Date, Note, DynamicFieldsJson, RecurrenceJson, CreatedAt, UpdatedAt
+	query := `SELECT Id, DatabaseId, Time, Date, Note, DynamicFieldsJson, RecurrenceJson, TagsJson, CreatedAt, UpdatedAt
 	          FROM ScheduleEntries WHERE Id = ? AND DatabaseId = ?`
 	err := MainDB.Get(entry, query, id, sharedDbID)
 	if err != nil {
@@ -57,7 +57,7 @@ func UpdateScheduleEntry(entry *models.ScheduleEntry) error {
 
 	query := `UPDATE ScheduleEntries SET 
 			  Time = :Time, Date = :Date, Note = :Note, DynamicFieldsJson = :DynamicFieldsJson, 
-			  RecurrenceJson = :RecurrenceJson, UpdatedAt = :UpdatedAt
+			  RecurrenceJson = :RecurrenceJson, TagsJson = :TagsJson, UpdatedAt = :UpdatedAt
 	          WHERE Id = :Id AND DatabaseId = :DatabaseId`
 
 	result, err := MainDB.NamedExec(query, entry)
@@ -76,7 +76,7 @@ func UpdateScheduleEntry(entry *models.ScheduleEntry) error {
 // GetScheduleEntriesByDBID извлекает все записи расписания для указанной совместной БД.
 func GetScheduleEntriesByDBID(sharedDbID int64) ([]models.ScheduleEntry, error) {
 	var entries []models.ScheduleEntry
-	query := `SELECT Id, DatabaseId, Time, Date, Note, DynamicFieldsJson, RecurrenceJson, CreatedAt, UpdatedAt
+	query := `SELECT Id, DatabaseId, Time, Date, Note, DynamicFieldsJson, RecurrenceJson, TagsJson, CreatedAt, UpdatedAt
 	          FROM ScheduleEntries WHERE DatabaseId = ? ORDER BY Id ASC`
 	err := MainDB.Select(&entries, query, sharedDbID)
 	if err != nil {
@@ -110,8 +110,8 @@ func CreateScheduleEntryWithTx(tx *sqlx.Tx, entry *models.ScheduleEntry) (int64,
 	entry.CreatedAt = now
 	entry.UpdatedAt = now
 
-	query := `INSERT INTO ScheduleEntries (DatabaseId, Time, Date, Note, DynamicFieldsJson, RecurrenceJson, CreatedAt, UpdatedAt)
-	          VALUES (:DatabaseId, :Time, :Date, :Note, :DynamicFieldsJson, :RecurrenceJson, :CreatedAt, :UpdatedAt)`
+	query := `INSERT INTO ScheduleEntries (DatabaseId, Time, Date, Note, DynamicFieldsJson, RecurrenceJson, TagsJson, CreatedAt, UpdatedAt)
+	          VALUES (:DatabaseId, :Time, :Date, :Note, :DynamicFieldsJson, :RecurrenceJson, :TagsJson, :CreatedAt, :UpdatedAt)`
 
 	result, err := tx.NamedExec(query, entry)
 	if err != nil {
@@ -127,7 +127,7 @@ func CreateScheduleEntryWithTx(tx *sqlx.Tx, entry *models.ScheduleEntry) (int64,
 // GetScheduleEntryByIDWithTx извлекает запись расписания по ID и ID совместной БД в рамках транзакции.
 func GetScheduleEntryByIDWithTx(tx *sqlx.Tx, id int64, sharedDbID int64) (*models.ScheduleEntry, error) {
 	entry := &models.ScheduleEntry{}
-	query := `SELECT Id, DatabaseId, Time, Date, Note, DynamicFieldsJson, RecurrenceJson, CreatedAt, UpdatedAt
+	query := `SELECT Id, DatabaseId, Time, Date, Note, DynamicFieldsJson, RecurrenceJson, TagsJson, CreatedAt, UpdatedAt
 	          FROM ScheduleEntries WHERE Id = ? AND DatabaseId = ?`
 	err := tx.Get(entry, query, id, sharedDbID)
 	if err != nil {
@@ -145,7 +145,7 @@ func UpdateScheduleEntryWithTx(tx *sqlx.Tx, entry *models.ScheduleEntry) error {
 
 	query := `UPDATE ScheduleEntries SET 
 			  Time = :Time, Date = :Date, Note = :Note, DynamicFieldsJson = :DynamicFieldsJson, 
-			  RecurrenceJson = :RecurrenceJson, UpdatedAt = :UpdatedAt
+			  RecurrenceJson = :RecurrenceJson, TagsJson = :TagsJson, UpdatedAt = :UpdatedAt
 	          WHERE Id = :Id AND DatabaseId = :DatabaseId`
 	result, err := tx.NamedExec(query, entry)
 	if err != nil {
@@ -161,7 +161,7 @@ func UpdateScheduleEntryWithTx(tx *sqlx.Tx, entry *models.ScheduleEntry) error {
 // GetScheduleEntriesByDBIDWithTx извлекает все записи расписания для указанной совместной БД в рамках транзакции.
 func GetScheduleEntriesByDBIDWithTx(tx *sqlx.Tx, sharedDbID int64) ([]models.ScheduleEntry, error) {
 	var entries []models.ScheduleEntry
-	query := `SELECT Id, DatabaseId, Time, Date, Note, DynamicFieldsJson, RecurrenceJson, CreatedAt, UpdatedAt
+	query := `SELECT Id, DatabaseId, Time, Date, Note, DynamicFieldsJson, RecurrenceJson, TagsJson, CreatedAt, UpdatedAt
 	          FROM ScheduleEntries WHERE DatabaseId = ? ORDER BY Id ASC`
 	err := tx.Select(&entries, query, sharedDbID)
 	if err != nil {
@@ -201,7 +201,7 @@ func GetAllScheduleEntryIDsForDBWithTx(tx *sqlx.Tx, sharedDbID int64) ([]int64, 
 // GetScheduleEntriesForDatabase извлекает все записи расписания для указанной ID базы данных.
 func GetScheduleEntriesForDatabase(databaseID int64) ([]models.ScheduleEntry, error) {
 	var entries []models.ScheduleEntry
-	query := `SELECT Id, DatabaseId, Time, Date, Note, DynamicFieldsJson, RecurrenceJson, CreatedAt, UpdatedAt 
+	query := `SELECT Id, DatabaseId, Time, Date, Note, DynamicFieldsJson, RecurrenceJson, TagsJson, CreatedAt, UpdatedAt 
 	          FROM ScheduleEntries 
 	          WHERE DatabaseId = ? 
 	          ORDER BY Id ASC`

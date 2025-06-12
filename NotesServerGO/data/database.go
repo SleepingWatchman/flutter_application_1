@@ -88,6 +88,11 @@ func InitMainDB() error {
 		return fmt.Errorf("failed to upgrade folder schema: %w", err)
 	}
 
+	// Обновляем схему для добавления недостающих полей в ScheduleEntries
+	if err = EnsureScheduleEntriesSchemaUpgrade(); err != nil {
+		return fmt.Errorf("failed to upgrade schedule entries schema: %w", err)
+	}
+
 	return nil
 }
 
@@ -174,6 +179,28 @@ func EnsureFolderSchemaUpgrade() error {
 			return fmt.Errorf("failed to add IsExpanded column: %w", err)
 		}
 		log.Printf("Добавлена колонка IsExpanded в таблицу Folders")
+	}
+
+	return nil
+}
+
+// EnsureScheduleEntriesSchemaUpgrade добавляет недостающие поля в таблицу ScheduleEntries
+func EnsureScheduleEntriesSchemaUpgrade() error {
+	// Проверяем, есть ли поле TagsJson
+	var tagsJsonColumnExists bool
+	err := MainDB.Get(&tagsJsonColumnExists, `
+		SELECT COUNT(*) > 0 
+		FROM pragma_table_info('ScheduleEntries') 
+		WHERE name = 'TagsJson'
+	`)
+	if err != nil {
+		log.Printf("Ошибка проверки колонки TagsJson: %v", err)
+	} else if !tagsJsonColumnExists {
+		_, err = MainDB.Exec(`ALTER TABLE ScheduleEntries ADD COLUMN TagsJson TEXT`)
+		if err != nil {
+			return fmt.Errorf("failed to add TagsJson column: %w", err)
+		}
+		log.Printf("Добавлена колонка TagsJson в таблицу ScheduleEntries")
 	}
 
 	return nil

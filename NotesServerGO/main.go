@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 
 	"notes_server_go/controllers" // Импортируем пакет controllers
 	"notes_server_go/data"        // Импортируем наш пакет data
@@ -135,9 +136,11 @@ func main() {
 		fmt.Fprintf(w, "Привет! Сервер NotesServerGO запущен. Используется gorilla/mux.")
 	}).Methods(http.MethodGet)
 
-	log.Println("Запуск сервера на порту :8080")
-	// Используем наш gorilla/mux router
-	if err := http.ListenAndServe(":8080", router); err != nil {
-		log.Fatal(err)
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
 	}
+	addr := ":" + port
+	log.Printf("Сервер слушает на порту %s", port)
+	log.Fatal(http.ListenAndServe(addr, router))
 }

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import 'package:flutter_application_1/providers/auth_provider.dart';
+import 'package:flutter_application_1/services/server_config_service.dart';
 
 enum ServerStatus {
   online,
@@ -30,7 +31,7 @@ class ServerHealthService {
   bool get isOffline => _currentStatus == ServerStatus.offline;
 
   /// Инициализация сервиса проверки здоровья сервера
-  void initialize(BuildContext context) {
+  Future<void> initialize(BuildContext context) async {
     if (_isInitialized) return;
     
     print('🏥 HEALTH: Инициализация сервиса проверки здоровья сервера');
@@ -38,12 +39,12 @@ class ServerHealthService {
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     
     // Используем базовый URL из сервиса аутентификации или стандартный
-    _baseUrl = 'http://localhost:8080'; // Можно сделать настраиваемым
+    _baseUrl = await ServerConfigService.getBaseUrl();
     _token = authProvider.token;
     _isInitialized = true;
     
     // Выполняем первоначальную проверку
-    _performHealthCheck(context);
+    await _performHealthCheck(context);
     
     // Запускаем периодические проверки каждые 5 минут
     _startPeriodicHealthChecks(context);
@@ -195,4 +196,6 @@ class ServerHealthService {
     dispose();
     initialize(context);
   }
+
+  Future<String> _getBaseUrl() async => await ServerConfigService.getBaseUrl();
 } 

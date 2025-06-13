@@ -7,6 +7,7 @@ import '../../providers/backup_provider.dart';
 import '../../utils/toast_utils.dart';
 import 'edit_profile_screen.dart';
 import '../auth/login_screen.dart';
+import '../settings_screen.dart';
 
 class AccountScreen extends StatelessWidget {
   const AccountScreen({Key? key}) : super(key: key);
@@ -33,6 +34,17 @@ class AccountScreen extends StatelessWidget {
         return Scaffold(
           appBar: AppBar(
             title: const Text('Аккаунт'),
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.settings),
+                tooltip: 'Настройки сервера',
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                  );
+                },
+              ),
+            ],
           ),
           body: Center(
             child: Column(

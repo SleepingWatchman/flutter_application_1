@@ -6,11 +6,11 @@ import '../db/database_helper.dart';
 import 'auth_service.dart';
 import '../models/backup_data.dart';
 import 'package:dio/dio.dart';
+import 'server_config_service.dart';
 
 /// Сервис для работы с совместными базами данных (коллаборация)
 class CollaborationService {
   final AuthService _authService;
-  final String _baseUrl = 'http://localhost:8080/api/collaboration/databases';
   final DatabaseHelper _dbHelper = DatabaseHelper();
   final Dio _dio = Dio();
 
@@ -19,6 +19,8 @@ class CollaborationService {
   String? _getToken() {
     return _authService.token;
   }
+
+  Future<String> _getBaseUrl() async => await ServerConfigService.getBaseUrl() + '/api/collaboration/databases';
 
   Future<List<SharedDatabase>> getSharedDatabases() async {
     try {
@@ -31,7 +33,7 @@ class CollaborationService {
       print('Используемый токен: $token');
 
       final response = await http.get(
-        Uri.parse('$_baseUrl/with-users'),
+        Uri.parse(await _getBaseUrl()),
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
@@ -95,7 +97,7 @@ class CollaborationService {
       }
 
       final response = await http.post(
-        Uri.parse(_baseUrl),
+        Uri.parse(await _getBaseUrl()),
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
@@ -129,7 +131,7 @@ class CollaborationService {
       }
 
       final response = await http.post(
-        Uri.parse('$_baseUrl/$databaseId/import'),
+        Uri.parse(await _getBaseUrl() + '/$databaseId/import'),
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
@@ -160,7 +162,7 @@ class CollaborationService {
       }
 
       final response = await http.delete(
-        Uri.parse('$_baseUrl/$databaseId'),
+        Uri.parse(await _getBaseUrl() + '/$databaseId'),
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
@@ -190,7 +192,7 @@ class CollaborationService {
       }
 
       final response = await http.post(
-        Uri.parse('$_baseUrl/$databaseId/join'),
+        Uri.parse(await _getBaseUrl() + '/$databaseId/join'),
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
@@ -222,7 +224,7 @@ class CollaborationService {
       }
 
       final response = await http.post(
-        Uri.parse('$_baseUrl/$databaseId/leave'),
+        Uri.parse(await _getBaseUrl() + '/$databaseId/leave'),
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
@@ -270,7 +272,7 @@ class CollaborationService {
       print('Отправляем запрос синхронизации: ${json.encode(requestBody)}');
 
       final response = await http.post(
-        Uri.parse('$_baseUrl/${database.id}/sync'),
+        Uri.parse(await _getBaseUrl() + '/${database.id}/sync'),
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
@@ -319,7 +321,7 @@ class CollaborationService {
       }
 
       final response = await http.post(
-        Uri.parse('$_baseUrl/$databaseId/backup'),
+        Uri.parse(await _getBaseUrl() + '/$databaseId/backup'),
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
@@ -350,7 +352,7 @@ class CollaborationService {
       }
 
       final response = await http.get(
-        Uri.parse('$_baseUrl/$databaseId/backup'),
+        Uri.parse(await _getBaseUrl() + '/$databaseId/backup'),
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',

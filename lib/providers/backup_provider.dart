@@ -20,12 +20,12 @@ class BackupProvider extends ChangeNotifier {
   BackupProvider(this._authProvider) {
     _userBackupService = UserBackupService(
       _dbHelper,
-      Config.apiBaseUrl,
+      '',
       _authProvider.token ?? '',
     );
     _collaborationBackupService = CollaborationBackupService(
       _dbHelper,
-      Config.apiBaseUrl,
+      '',
       _authProvider.token ?? '',
     );
   }

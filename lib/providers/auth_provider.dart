@@ -4,6 +4,7 @@ import '../services/auth_service.dart';
 import '../services/backup_service.dart';
 import '../db/database_helper.dart';
 import '../utils/config.dart';
+import '../services/server_config_service.dart';
 
 class AuthProvider with ChangeNotifier {
   final AuthService _authService = AuthService();
@@ -141,7 +142,7 @@ class AuthProvider with ChangeNotifier {
       
       return UserBackupService(
         dbHelper,
-        Config.apiBaseUrl,
+        await _getBaseUrl(),
         token,
       );
     } catch (e) {
@@ -149,6 +150,8 @@ class AuthProvider with ChangeNotifier {
       return null;
     }
   }
+
+  Future<String> _getBaseUrl() async => await ServerConfigService.getBaseUrl();
 
   /// Публичный метод для ручного восстановления данных из бэкапа
   Future<void> restoreUserBackup([Function()? onBackupRestored]) async {

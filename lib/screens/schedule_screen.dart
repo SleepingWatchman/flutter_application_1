@@ -520,7 +520,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                                 initialTime: TimeOfDay(
                                   hour: (startTime.hour + 1) % 24,
                                   minute: startTime.minute,
-                                ),
+                        ),
                               ).then((endTime) {
                                 if (endTime != null) {
                                   timeController.text = 
@@ -534,15 +534,15 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                     ),
                   ),
                   const SizedBox(height: 16),
-                  
+                      
                   // Поле краткой заметки
                         TextField(
                     controller: shortNoteController,
                           decoration: const InputDecoration(
                       labelText: 'Краткая заметка',
-                    ),
+                          ),
                     maxLines: 3,
-                  ),
+                        ),
                   const SizedBox(height: 16),
                     
                     // Динамические поля
@@ -1820,14 +1820,14 @@ class _ScheduleEventCardState extends State<_ScheduleEventCard> {
               border: Border.all(
                 color: Theme.of(context).colorScheme.outline.withOpacity(0.3),
                 width: 1.5,
-              ),
+                    ),
               boxShadow: [
                 BoxShadow(
                   color: Colors.black.withOpacity(0.8),
                   blurRadius: 25,
                   offset: const Offset(0, 15),
                   spreadRadius: 8,
-                ),
+                        ),
               ],
             ),
             child: _buildTooltipContent(),
@@ -1870,8 +1870,8 @@ class _ScheduleEventCardState extends State<_ScheduleEventCard> {
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               fontWeight: FontWeight.bold,
               color: Theme.of(context).colorScheme.primary,
-            ),
-          ),
+                                                    ),
+                                                  ),
           const SizedBox(height: 4),
           Wrap(
             spacing: 4,
@@ -1907,7 +1907,7 @@ class _ScheduleEventCardState extends State<_ScheduleEventCard> {
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               fontWeight: FontWeight.bold,
               color: Theme.of(context).colorScheme.primary,
-            ),
+                                        ),
           ),
           const SizedBox(height: 4),
           Flexible(
@@ -1916,8 +1916,8 @@ class _ScheduleEventCardState extends State<_ScheduleEventCard> {
                 widget.entry.note!,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: Theme.of(context).colorScheme.onSurface,
-                ),
-              ),
+                                  ),
+                                ),
                           ),
                         ),
                       ],
@@ -2004,9 +2004,9 @@ class _ScheduleEventCardState extends State<_ScheduleEventCard> {
                 color: Colors.black.withOpacity(0.1),
                 blurRadius: 4,
                 offset: const Offset(0, 2),
-              ),
+                          ),
             ],
-          ),
+                        ),
                             padding: const EdgeInsets.all(8),
           child: isShortEvent ? _buildShortEventContent() : _buildFullEventContent(),
         ),
@@ -2105,10 +2105,10 @@ class _ScheduleEventCardState extends State<_ScheduleEventCard> {
               style: const TextStyle(
                 color: Colors.white,
                 fontSize: 11,
-              ),
+                                    ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-            ),
+                                  ),
           );
         }).toList(),
       );
@@ -2138,8 +2138,8 @@ class _ScheduleEventCardState extends State<_ScheduleEventCard> {
               color: Colors.white,
               fontSize: 9,
             ),
-          ),
-        );
+      ),
+    );
       }).toList(),
     );
   }

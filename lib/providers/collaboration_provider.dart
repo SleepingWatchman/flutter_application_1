@@ -13,6 +13,7 @@ import '../db/database_helper.dart';
 import '../models/collaboration_database.dart';
 import 'package:flutter/foundation.dart';
 import '../services/auth_service.dart';
+import '../services/server_config_service.dart';
 
 class CollaborationProvider with ChangeNotifier {
   final AuthProvider _authProvider;
@@ -24,7 +25,6 @@ class CollaborationProvider with ChangeNotifier {
   bool _isUsingSharedDatabase = false;
   bool _isLoading = false;
   List<SharedDatabase> _databases = [];
-  final String _baseUrl = 'http://localhost:8080/api/collaboration';
   String? _error;
   List<CollaborationDatabase>? _collaborationDatabases;
 
@@ -198,7 +198,7 @@ class CollaborationProvider with ChangeNotifier {
 
       // Проверяем существование базы данных на сервере
       final response = await http.get(
-        Uri.parse('$_baseUrl/databases/$databaseId'),
+        Uri.parse(await _getBaseUrl() + '/databases/$databaseId'),
         headers: {
           'Authorization': 'Bearer ${_authProvider.token}',
         },
@@ -255,7 +255,7 @@ class CollaborationProvider with ChangeNotifier {
       print('Загрузка базы данных с ID: $databaseId');
       
       final response = await http.get(
-        Uri.parse('$_baseUrl/databases/$databaseId/backup'),
+        Uri.parse(await _getBaseUrl() + '/databases/$databaseId/backup'),
         headers: {
           'Authorization': 'Bearer ${_authProvider.token}',
         },
@@ -396,7 +396,7 @@ class CollaborationProvider with ChangeNotifier {
       }
 
       final response = await http.get(
-        Uri.parse('$_baseUrl/databases/$databaseId'),
+        Uri.parse(await _getBaseUrl() + '/databases/$databaseId'),
         headers: {
           'Authorization': 'Bearer $token',
         },
@@ -419,7 +419,7 @@ class CollaborationProvider with ChangeNotifier {
       }
 
       final response = await http.post(
-        Uri.parse('$_baseUrl/databases'),
+        Uri.parse(await _getBaseUrl() + '/databases'),
         headers: {
           'Authorization': 'Bearer $token',
         },
@@ -442,7 +442,7 @@ class CollaborationProvider with ChangeNotifier {
   Future<void> uploadDatabase(BackupData backupData, String databaseId) async {
     try {
       final response = await http.post(
-        Uri.parse('$_baseUrl/databases/$databaseId/backup'),
+        Uri.parse(await _getBaseUrl() + '/databases/$databaseId/backup'),
         headers: {
           'Authorization': 'Bearer ${_authProvider.token}',
           'Content-Type': 'application/json',
@@ -464,7 +464,7 @@ class CollaborationProvider with ChangeNotifier {
       if (isOwner) {
         // Если пользователь владелец - удаляем базу полностью
         final response = await http.delete(
-          Uri.parse('$_baseUrl/databases/$databaseId'),
+          Uri.parse(await _getBaseUrl() + '/databases/$databaseId'),
           headers: {
             'Authorization': 'Bearer ${_authProvider.token}',
           },
@@ -476,7 +476,7 @@ class CollaborationProvider with ChangeNotifier {
       } else {
         // Если пользователь соавтор - удаляем только из списка соавторов
         final response = await http.post(
-          Uri.parse('$_baseUrl/databases/$databaseId/leave'),
+          Uri.parse(await _getBaseUrl() + '/databases/$databaseId/leave'),
           headers: {
             'Authorization': 'Bearer ${_authProvider.token}',
           },
@@ -638,4 +638,6 @@ class CollaborationProvider with ChangeNotifier {
       notifyListeners();
     }
   }
+
+  Future<String> _getBaseUrl() async => await ServerConfigService.getBaseUrl() + '/api/collaboration';
 } 

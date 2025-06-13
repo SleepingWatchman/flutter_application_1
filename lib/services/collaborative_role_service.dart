@@ -5,15 +5,14 @@ import '../models/collaborative_database_role.dart';
 import '../models/enhanced_collaborative_database.dart';
 import 'auth_service.dart';
 import 'dart:async';
+import 'server_config_service.dart';
 
 class CollaborativeRoleService {
   final AuthService _authService;
-  final String _baseUrl;
   final Dio dio;
 
   CollaborativeRoleService(this._authService)
-      : _baseUrl = 'http://localhost:8080/api/collaboration',
-        dio = Dio() {
+      : dio = Dio() {
     dio.interceptors.add(InterceptorsWrapper(
       onRequest: (options, handler) async {
         final token = await _authService.getToken();
@@ -33,10 +32,12 @@ class CollaborativeRoleService {
     dio.options.sendTimeout = Duration(seconds: 15);
   }
 
+  Future<String> _getBaseUrl() async => await ServerConfigService.getBaseUrl() + '/api/collaboration';
+
   /// Получить список пользователей в совместной базе данных
   Future<List<CollaborativeDatabaseUser>> getDatabaseUsers(String databaseId) async {
     try {
-      final response = await dio.get('$_baseUrl/databases/$databaseId/users');
+      final response = await dio.get((await _getBaseUrl()) + '/databases/$databaseId/users');
       
       if (response.statusCode == 200) {
         final List<dynamic> data = response.data;
@@ -54,7 +55,7 @@ class CollaborativeRoleService {
   Future<void> inviteUser(String databaseId, String userEmail, CollaborativeDatabaseRole role) async {
     try {
       final response = await dio.post(
-        '$_baseUrl/databases/$databaseId/invite',
+        (await _getBaseUrl()) + '/databases/$databaseId/invite',
         data: {
           'email': userEmail,
           'role': role.value,
@@ -74,7 +75,7 @@ class CollaborativeRoleService {
   Future<void> addUserById(String databaseId, String userId, CollaborativeDatabaseRole role) async {
     try {
       final response = await dio.post(
-        '$_baseUrl/databases/$databaseId/users',
+        (await _getBaseUrl()) + '/databases/$databaseId/users',
         data: {
           'user_id': int.parse(userId),
           'role': role.value,
@@ -94,7 +95,7 @@ class CollaborativeRoleService {
   Future<void> updateUserRole(String databaseId, String userId, CollaborativeDatabaseRole newRole) async {
     try {
       final response = await dio.put(
-        '$_baseUrl/databases/$databaseId/users/$userId',
+        (await _getBaseUrl()) + '/databases/$databaseId/users/$userId',
         data: {
           'role': newRole.value,
         },
@@ -112,7 +113,7 @@ class CollaborativeRoleService {
   /// Удалить пользователя из совместной базы данных
   Future<void> removeUser(String databaseId, String userId) async {
     try {
-      final response = await dio.delete('$_baseUrl/databases/$databaseId/users/$userId');
+      final response = await dio.delete((await _getBaseUrl()) + '/databases/$databaseId/users/$userId');
 
       if (response.statusCode != 204 && response.statusCode != 200) {
         throw Exception('Ошибка при удалении пользователя: ${response.statusCode}');
@@ -126,7 +127,7 @@ class CollaborativeRoleService {
   /// Покинуть совместную базу данных
   Future<void> leaveDatabase(String databaseId) async {
     try {
-      final response = await dio.post('$_baseUrl/databases/$databaseId/leave');
+      final response = await dio.post((await _getBaseUrl()) + '/databases/$databaseId/leave');
 
       if (response.statusCode != 204 && response.statusCode != 200) {
         throw Exception('Ошибка при выходе из базы данных: ${response.statusCode}');
@@ -140,7 +141,7 @@ class CollaborativeRoleService {
   /// Получить роль текущего пользователя в базе данных
   Future<CollaborativeDatabaseRole?> getCurrentUserRole(String databaseId) async {
     try {
-      final response = await dio.get('$_baseUrl/databases/$databaseId/my-role');
+      final response = await dio.get((await _getBaseUrl()) + '/databases/$databaseId/my-role');
       
       if (response.statusCode == 200) {
         final roleString = response.data['role'] as String?;
@@ -159,7 +160,7 @@ class CollaborativeRoleService {
   /// Проверить права доступа пользователя
   Future<Map<String, bool>> checkPermissions(String databaseId) async {
     try {
-      final response = await dio.get('$_baseUrl/databases/$databaseId/permissions');
+      final response = await dio.get((await _getBaseUrl()) + '/databases/$databaseId/permissions');
       
       if (response.statusCode == 200) {
         final data = response.data as Map<String, dynamic>;
@@ -194,7 +195,7 @@ class CollaborativeRoleService {
   /// Найти пользователя по email
   Future<Map<String, dynamic>?> findUserByEmail(String email) async {
     try {
-      final response = await dio.get('$_baseUrl/users/search?email=$email');
+      final response = await dio.get((await _getBaseUrl()) + '/users/search?email=$email');
       
       if (response.statusCode == 200) {
         return response.data as Map<String, dynamic>?;
@@ -210,7 +211,7 @@ class CollaborativeRoleService {
   /// Получить приглашения для текущего пользователя
   Future<List<Map<String, dynamic>>> getPendingInvitations() async {
     try {
-      final response = await dio.get('$_baseUrl/invitations');
+      final response = await dio.get((await _getBaseUrl()) + '/invitations');
       
       if (response.statusCode == 200) {
         final data = response.data;
@@ -229,7 +230,7 @@ class CollaborativeRoleService {
   /// Принять приглашение
   Future<void> acceptInvitation(String invitationId) async {
     try {
-      final response = await dio.post('$_baseUrl/invitations/$invitationId/accept');
+      final response = await dio.post((await _getBaseUrl()) + '/invitations/$invitationId/accept');
 
       if (response.statusCode != 200) {
         throw Exception('Ошибка при принятии приглашения: ${response.statusCode}');
@@ -243,7 +244,7 @@ class CollaborativeRoleService {
   /// Отклонить приглашение
   Future<void> declineInvitation(String invitationId) async {
     try {
-      final response = await dio.post('$_baseUrl/invitations/$invitationId/decline');
+      final response = await dio.post((await _getBaseUrl()) + '/invitations/$invitationId/decline');
 
       if (response.statusCode != 200) {
         throw Exception('Ошибка при отклонении приглашения: ${response.statusCode}');
@@ -257,7 +258,7 @@ class CollaborativeRoleService {
   /// Получить статистику по базе данных
   Future<Map<String, dynamic>> getDatabaseStats(String databaseId) async {
     try {
-      final response = await dio.get('$_baseUrl/databases/$databaseId/stats');
+      final response = await dio.get((await _getBaseUrl()) + '/databases/$databaseId/stats');
       
       if (response.statusCode == 200) {
         return response.data as Map<String, dynamic>;

@@ -2,10 +2,18 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:path/path.dart' as path;
+import 'server_config_service.dart';
 
 class FileService {
-  static const String baseUrl = 'http://127.0.0.1:8080/api/file';
-  static const String serverBaseUrl = 'http://127.0.0.1:8080';
+  static Future<String> getUploadUrl() async {
+    final baseUrl = await ServerConfigService.getBaseUrl();
+    return '$baseUrl/api/file/upload';
+  }
+
+  static Future<String> getFileUrl(String relativeUrl) async {
+    final baseUrl = await ServerConfigService.getBaseUrl();
+    return '$baseUrl$relativeUrl';
+  }
 
   Future<String> uploadFile(File file, String token) async {
     try {
@@ -23,7 +31,7 @@ class FileService {
       }
 
       print('Creating multipart request...');
-      var request = http.MultipartRequest('POST', Uri.parse('$baseUrl/upload'));
+      var request = http.MultipartRequest('POST', Uri.parse(await getUploadUrl()));
       
       print('Adding authorization header...');
       request.headers['Authorization'] = 'Bearer $token';
@@ -47,9 +55,7 @@ class FileService {
           if (data['url'] != null) {
             String relativeUrl = data['url'];
             // Формируем полный URL для изображения
-            String fullUrl = relativeUrl.startsWith('http') 
-                ? relativeUrl 
-                : '$serverBaseUrl$relativeUrl';
+            String fullUrl = await getFileUrl(relativeUrl);
             print('Successfully uploaded file. URL: $fullUrl');
             return fullUrl;
           } else {

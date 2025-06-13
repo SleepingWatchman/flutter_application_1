@@ -1,0 +1,44 @@
+# Бинарные файлы
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Базы данных (будут созданы в runtime)
+*.db
+*.db-shm
+*.db-wal
+
+# Временные файлы
+*.tmp
+*.temp
+
+# Логи
+*.log
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile
+.dockerignore
+
+# Документация
+README.md
+*.md
+
+# Тестовые файлы
+*_test.go
+test/
+tests/ 

@@ -16,6 +16,7 @@ import 'dart:io';
 import '../models/backup_data.dart';
 import '../utils/config.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'server_config_service.dart';
 
 class UserBackupService {
   final DatabaseHelper _dbHelper;
@@ -23,6 +24,8 @@ class UserBackupService {
   final String _token;
 
   UserBackupService(this._dbHelper, this._baseUrl, this._token);
+
+  Future<String> _getBaseUrl() async => await ServerConfigService.getBaseUrl();
 
   Future<void> createAndUploadBackup() async {
     try {
@@ -69,7 +72,7 @@ class UserBackupService {
   }
 
   Future<void> _uploadBackup(BackupData backupData) async {
-    final url = Uri.parse('$_baseUrl/api/backup/personal/upload');
+    final url = Uri.parse(await _getBaseUrl() + '/api/backup/personal/upload');
     
     // Используем UTF-8 кодировку для правильной обработки русских символов
     final jsonData = utf8.encode(jsonEncode(backupData.toJson()));
@@ -105,7 +108,7 @@ class UserBackupService {
   }
 
   Future<BackupData> _downloadLatestBackup() async {
-    final url = Uri.parse('$_baseUrl/api/backup/personal/download/latest');
+    final url = Uri.parse(await _getBaseUrl() + '/api/backup/personal/download/latest');
     final response = await http.get(
       url,
       headers: {
@@ -217,6 +220,8 @@ class CollaborationBackupService {
 
   CollaborationBackupService(this._dbHelper, this._baseUrl, this._token);
 
+  Future<String> _getBaseUrl() async => await ServerConfigService.getBaseUrl();
+
   Future<void> createAndUploadBackup(String databaseId) async {
     try {
       print('Начало создания резервной копии для совместной работы...');
@@ -279,7 +284,7 @@ class CollaborationBackupService {
   }
 
   Future<void> _uploadBackup(String databaseId, BackupData backupData) async {
-    final url = Uri.parse('$_baseUrl/api/collaboration/databases/$databaseId/data');
+    final url = Uri.parse(await _getBaseUrl() + '/api/collaboration/databases/$databaseId/data');
     final jsonData = jsonEncode(backupData.toJson());
     
     final request = http.MultipartRequest('POST', url)
@@ -313,7 +318,7 @@ class CollaborationBackupService {
   }
 
   Future<BackupData> _downloadLatestBackup(String databaseId) async {
-    final url = Uri.parse('$_baseUrl/api/collaboration/databases/$databaseId/data');
+    final url = Uri.parse(await _getBaseUrl() + '/api/collaboration/databases/$databaseId/data');
     final response = await http.get(
       url,
       headers: {

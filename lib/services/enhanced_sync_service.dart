@@ -9,6 +9,7 @@ import '../models/enhanced_collaborative_database.dart';
 import '../db/database_helper.dart';
 import 'auth_service.dart';
 import 'dart:math' as math;
+import '../services/server_config_service.dart';
 
 enum SyncStatus {
   idle,
@@ -53,7 +54,6 @@ class SyncResult {
 class EnhancedSyncService {
   final AuthService _authService;
   final DatabaseHelper _dbHelper;
-  final String _baseUrl;
   final Dio _dio;
   
   static const Duration _syncInterval = Duration(minutes: 5);
@@ -67,10 +67,9 @@ class EnhancedSyncService {
   final StreamController<SyncStatus> _syncStatusController = StreamController<SyncStatus>.broadcast();
 
   EnhancedSyncService(this._authService, this._dbHelper)
-      : _baseUrl = 'http://localhost:8080/api/collaboration',
-        _dio = Dio() {
-    // Настраиваем базовый URL для Dio
-    _dio.options.baseUrl = 'http://localhost:8080';
+      : _dio = Dio() {
+    _initBaseUrl();
+    
     _dio.options.connectTimeout = Duration(seconds: 10);
     _dio.options.receiveTimeout = Duration(seconds: 30);
     _dio.options.sendTimeout = Duration(seconds: 30);
@@ -616,7 +615,7 @@ class EnhancedSyncService {
     if (!useLocal) {
       try {
         await _dio.post(
-          '$_baseUrl/sync/$_currentDatabaseId/resolve',
+          '/sync/$_currentDatabaseId/resolve',
           data: {
             'conflict_id': conflict.id,
             'resolution': 'server',
@@ -785,6 +784,17 @@ class EnhancedSyncService {
       print('Ошибка форматирования даты $dateTimeString: $e');
       // Возвращаем текущее время в случае ошибки
       return DateTime.now().toUtc().toIso8601String();
+    }
+  }
+
+  Future<void> _initBaseUrl() async {
+    try {
+      final baseUrl = await ServerConfigService.getBaseUrl();
+      _dio.options.baseUrl = baseUrl;
+      print('Dio baseUrl установлен: $baseUrl');
+    } catch (e) {
+      _dio.options.baseUrl = 'http://localhost:8080';
+      print('Ошибка получения baseUrl, используется по умолчанию: http://localhost:8080');
     }
   }
 } 

@@ -3,9 +3,9 @@ import 'dart:async';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/user_model.dart';
+import 'server_config_service.dart';
 
 class AuthService {
-  static const String baseUrl = 'http://127.0.0.1:8080/api/auth';
   String? _token;
   UserModel? _currentUser;
   late Future<SharedPreferences> _prefs;
@@ -117,10 +117,11 @@ class AuthService {
 
   Future<UserModel> register(String email, String password, String displayName) async {
     try {
-      print('Attempting to register with URL: $baseUrl/register');
+      final dynamicBaseUrl = await ServerConfigService.getBaseUrl();
+      print('Attempting to register with URL: ' + dynamicBaseUrl + '/api/auth/register');
       
       final response = await http.post(
-        Uri.parse('$baseUrl/register'),
+        Uri.parse(dynamicBaseUrl + '/api/auth/register'),
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
@@ -158,10 +159,11 @@ class AuthService {
 
   Future<UserModel> login(String email, String password) async {
     try {
-      print('Attempting to login with URL: $baseUrl/login');
+      final dynamicBaseUrl = await ServerConfigService.getBaseUrl();
+      print('Attempting to login with URL: ' + dynamicBaseUrl + '/api/auth/login');
       
       final response = await http.post(
-        Uri.parse('$baseUrl/login'),
+        Uri.parse(dynamicBaseUrl + '/api/auth/login'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'email': email,
@@ -198,8 +200,9 @@ class AuthService {
     if (_token == null) throw Exception('Not authenticated');
 
     try {
+      final dynamicBaseUrl = await ServerConfigService.getBaseUrl();
       final response = await http.put(
-        Uri.parse('$baseUrl/profile'),
+        Uri.parse(dynamicBaseUrl + '/api/auth/profile'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $_token',
@@ -237,5 +240,10 @@ class AuthService {
 
   void dispose() {
     _userController.close();
+  }
+
+  Future<Uri> _getAuthUri(String path) async {
+    final dynamicBaseUrl = await ServerConfigService.getBaseUrl();
+    return Uri.parse(dynamicBaseUrl + '/api/auth$path');
   }
 } 

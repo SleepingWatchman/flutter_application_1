@@ -793,8 +793,18 @@ class EnhancedSyncService {
       _dio.options.baseUrl = baseUrl;
       print('Dio baseUrl установлен: $baseUrl');
     } catch (e) {
-      _dio.options.baseUrl = 'http://localhost:8080';
-      print('Ошибка получения baseUrl, используется по умолчанию: http://localhost:8080');
+      print('Ошибка получения baseUrl: $e');
+      // В крайнем случае используем ServerConfigService напрямую
+      try {
+        final fallbackBaseUrl = await ServerConfigService.getBaseUrl();
+        _dio.options.baseUrl = fallbackBaseUrl;
+        print('Dio baseUrl установлен через fallback: $fallbackBaseUrl');
+      } catch (fallbackError) {
+        print('Ошибка получения fallback baseUrl: $fallbackError');
+        // В самом крайнем случае используем localhost
+        _dio.options.baseUrl = 'http://localhost:8080';
+        print('Ошибка получения baseUrl, используется по умолчанию: http://localhost:8080');
+      }
     }
   }
 } 

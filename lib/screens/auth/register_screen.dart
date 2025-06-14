@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../utils/toast_utils.dart';
 import 'login_screen.dart';
+import '../../widgets/server_status_indicator.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({Key? key}) : super(key: key);
@@ -16,6 +17,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _displayNameController = TextEditingController();
+  
+  // Добавляем переменные для отслеживания состояния полей
+  bool _displayNameHasError = false;
+  bool _emailHasError = false;
+  bool _passwordHasError = false;
 
   @override
   void dispose() {
@@ -26,6 +32,51 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   Future<void> _register() async {
+    // Сбрасываем состояния ошибок
+    setState(() {
+      _displayNameHasError = false;
+      _emailHasError = false;
+      _passwordHasError = false;
+    });
+    
+    // Проверяем поля вручную для подсветки ошибок
+    bool hasErrors = false;
+    
+    if (_displayNameController.text.trim().isEmpty) {
+      setState(() {
+        _displayNameHasError = true;
+      });
+      hasErrors = true;
+    }
+    
+    if (_emailController.text.trim().isEmpty) {
+      setState(() {
+        _emailHasError = true;
+      });
+      hasErrors = true;
+    } else if (!_emailController.text.contains('@')) {
+      setState(() {
+        _emailHasError = true;
+      });
+      hasErrors = true;
+    }
+    
+    if (_passwordController.text.trim().isEmpty) {
+      setState(() {
+        _passwordHasError = true;
+      });
+      hasErrors = true;
+    } else if (_passwordController.text.length < 6) {
+      setState(() {
+        _passwordHasError = true;
+      });
+      hasErrors = true;
+    }
+    
+    if (hasErrors) {
+      return; // Не продолжаем, если есть ошибки
+    }
+    
     if (_formKey.currentState!.validate()) {
       try {
         await context.read<AuthProvider>().register(
@@ -56,7 +107,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Регистрация'),
+        title: Row(
+          children: [
+            const Text('Регистрация'),
+            const SizedBox(width: 10),
+            const ServerStatusIndicator(),
+          ],
+        ),
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -67,9 +124,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
             children: [
               TextFormField(
                 controller: _displayNameController,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Имя',
                   border: OutlineInputBorder(),
+                  errorText: _displayNameHasError ? 'Пожалуйста, введите имя' : null,
                 ),
                 validator: (value) {
                   if (value == null || value.isEmpty) {
@@ -81,9 +139,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
               const SizedBox(height: 16),
               TextFormField(
                 controller: _emailController,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Email',
                   border: OutlineInputBorder(),
+                  errorText: _emailHasError ? 'Пожалуйста, введите корректный email' : null,
                 ),
                 keyboardType: TextInputType.emailAddress,
                 validator: (value) {
@@ -99,9 +158,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
               const SizedBox(height: 16),
               TextFormField(
                 controller: _passwordController,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Пароль',
                   border: OutlineInputBorder(),
+                  errorText: _passwordHasError ? 'Пароль должен быть не менее 6 символов' : null,
                 ),
                 obscureText: true,
                 validator: (value) {

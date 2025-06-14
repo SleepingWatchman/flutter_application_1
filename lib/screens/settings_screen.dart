@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/server_config_service.dart';
+import 'package:provider/provider.dart';
+import '../providers/enhanced_collaborative_provider.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({Key? key}) : super(key: key);
@@ -30,6 +32,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _portController.text.trim(),
     );
     if (mounted) {
+      final enhancedProvider = Provider.of<EnhancedCollaborativeProvider>(context, listen: false);
+      await enhancedProvider.updateBaseUrl();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Настройки сервера сохранены')),
       );

@@ -30,12 +30,10 @@ func CreateUser(user *models.User) (int64, error) {
 	}
 
 	now := time.Now()
-	// Убран Username из запроса, так как его нет в таблице.
-	// Предполагается, что user.Username (из модели) будет равен user.Email,
-	// это должно быть установлено на уровне контроллера при регистрации.
-	query := `INSERT INTO Users (Email, DisplayName, PhotoUrl, PasswordHash, CreatedAt, UpdatedAt)
-	          VALUES (?, ?, ?, ?, ?, ?)`
-	result, err := AuthDB.Exec(query, user.Email, user.DisplayName, user.PhotoUrl, hashedPassword, now, now)
+	// Добавляем Username в запрос, так как оно требуется в схеме базы данных
+	query := `INSERT INTO Users (Username, Email, DisplayName, PhotoUrl, PasswordHash, CreatedAt, UpdatedAt)
+	          VALUES (?, ?, ?, ?, ?, ?, ?)`
+	result, err := AuthDB.Exec(query, user.Username, user.Email, user.DisplayName, user.PhotoUrl, hashedPassword, now, now)
 	if err != nil {
 		return 0, fmt.Errorf("failed to insert user: %w", err)
 	}
@@ -71,8 +69,8 @@ func GetUserByUsername(username string) (*models.User, error) {
 // GetUserByEmail извлекает пользователя по email.
 func GetUserByEmail(email string) (*models.User, error) {
 	user := &models.User{}
-	// Убран Username из SELECT
-	query := `SELECT Id, Email, DisplayName, PhotoUrl, PasswordHash, CreatedAt, UpdatedAt
+	// Добавляем Username в SELECT
+	query := `SELECT Id, Username, Email, DisplayName, PhotoUrl, PasswordHash, CreatedAt, UpdatedAt
 	          FROM Users WHERE Email = ?`
 	err := AuthDB.Get(user, query, email)
 	if err != nil {
@@ -81,15 +79,14 @@ func GetUserByEmail(email string) (*models.User, error) {
 		}
 		return nil, fmt.Errorf("failed to get user by email %s: %w", email, err)
 	}
-	user.Username = user.Email // Устанавливаем Username из Email
 	return user, nil
 }
 
 // GetUserByID извлекает пользователя по ID.
 func GetUserByID(id int64) (*models.User, error) {
 	user := &models.User{}
-	// Убран Username из SELECT
-	query := `SELECT Id, Email, DisplayName, PhotoUrl, PasswordHash, CreatedAt, UpdatedAt
+	// Добавляем Username в SELECT
+	query := `SELECT Id, Username, Email, DisplayName, PhotoUrl, PasswordHash, CreatedAt, UpdatedAt
               FROM Users WHERE Id = ?`
 	err := AuthDB.Get(user, query, id)
 	if err != nil {
@@ -98,7 +95,6 @@ func GetUserByID(id int64) (*models.User, error) {
 		}
 		return nil, fmt.Errorf("failed to get user by ID %d: %w", id, err)
 	}
-	user.Username = user.Email // Устанавливаем Username из Email
 	return user, nil
 }
 

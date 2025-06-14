@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/user_model.dart';
 import 'server_config_service.dart';
+import 'profile_image_cache_service.dart';
 
 class AuthService {
   String? _token;
@@ -141,7 +142,7 @@ class AuthService {
       print('Response status: ${response.statusCode}');
       print('Response body: ${response.body}');
 
-      if (response.statusCode == 200) {
+      if (response.statusCode == 200 || response.statusCode == 201) {
         final data = json.decode(response.body);
         _token = data['token'];
         _currentUser = UserModel.fromJson(data['user']);
@@ -149,7 +150,7 @@ class AuthService {
         return _currentUser!;
       } else {
         final error = json.decode(response.body);
-        throw Exception(error['message'] ?? 'Failed to register');
+        throw Exception(error['error'] ?? error['message'] ?? 'Failed to register');
       }
     } catch (e) {
       print('Registration error: $e');
@@ -179,10 +180,20 @@ class AuthService {
         _token = data['token'];
         _currentUser = UserModel.fromJson(data['user']);
         await _saveData();
+        
+        // Предварительно загружаем фото профиля в кэш
+        if (_currentUser?.photoURL != null && _currentUser!.photoURL!.isNotEmpty) {
+          try {
+            await ProfileImageCacheService().preloadImage(_currentUser!.photoURL!);
+          } catch (e) {
+            print('Ошибка предзагрузки фото профиля: $e');
+          }
+        }
+        
         return _currentUser!;
       } else {
         final error = json.decode(response.body);
-        throw Exception(error['message'] ?? 'Failed to login');
+        throw Exception(error['error'] ?? error['message'] ?? 'Failed to login');
       }
     } catch (e) {
       print('Login error: $e');
@@ -217,6 +228,16 @@ class AuthService {
         final data = json.decode(response.body);
         _currentUser = UserModel.fromJson(data);
         await _saveData();
+        
+        // Предварительно загружаем новое фото профиля в кэш
+        if (photoURL != null && photoURL.isNotEmpty) {
+          try {
+            await ProfileImageCacheService().preloadImage(photoURL);
+          } catch (e) {
+            print('Ошибка предзагрузки фото профиля: $e');
+          }
+        }
+        
         return _currentUser!;
       } else {
         final error = json.decode(response.body);

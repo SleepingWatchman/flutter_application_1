@@ -1635,6 +1635,16 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                   child: const Text('Сохранить'),
                 ),
                 TextButton(
+                  onPressed: () {
+                    Navigator.of(outerContext).pop();
+                    _deleteScheduleEntry(index);
+                  },
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.red,
+                  ),
+                  child: const Text('Удалить'),
+                ),
+                TextButton(
                   onPressed: () => Navigator.of(outerContext).pop(),
                   child: const Text('Отмена'),
                 ),
@@ -1986,8 +1996,8 @@ class _ScheduleEventCardState extends State<_ScheduleEventCard> {
         }
       },
       child: GestureDetector(
-        onTap: widget.onTap,
-                  child: Container(
+        onSecondaryTap: widget.onTap, // Изменено: правая кнопка мыши для редактирования
+        child: Container(
           key: _cardKey,
           width: 180, // Строго фиксированная ширина
           height: double.infinity, // ИСПРАВЛЕНИЕ: Растягиваем на всю доступную высоту

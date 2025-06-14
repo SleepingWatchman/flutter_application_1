@@ -241,6 +241,13 @@ func GetPendingInvitationsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Добавляем проверку на nil пользователя
+	if user == nil {
+		log.Printf("Пользователь с ID %d не найден в базе данных", currentUserID)
+		respondError(w, http.StatusNotFound, "Пользователь не найден.")
+		return
+	}
+
 	invitations, err := data.GetPendingInvitations(user.Email)
 	if err != nil {
 		log.Printf("Ошибка при получении приглашений для %s: %v", user.Email, err)

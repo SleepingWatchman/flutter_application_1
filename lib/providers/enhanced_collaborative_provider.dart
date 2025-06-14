@@ -13,6 +13,7 @@ import 'database_provider.dart';
 import 'package:oktoast/oktoast.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/rendering.dart';
+import '../services/server_config_service.dart';
 
 class EnhancedCollaborativeProvider extends ChangeNotifier {
   final CollaborativeRoleService _roleService;
@@ -59,8 +60,17 @@ class EnhancedCollaborativeProvider extends ChangeNotifier {
     this._dbHelper,
     this._dio,
   ) {
-    // Настраиваем Dio
-    _dio.options.baseUrl = 'http://localhost:8080';
+    // Настраиваем Dio с правильным baseUrl
+    _initializeDio();
+    
+    _initializeSubscriptions();
+    _initServerHealthCheck();
+  }
+
+  Future<void> _initializeDio() async {
+    // Получаем правильный baseUrl из конфигурации
+    final baseUrl = await _getBaseUrl();
+    _dio.options.baseUrl = baseUrl;
     _dio.options.connectTimeout = Duration(seconds: 5);
     _dio.options.receiveTimeout = Duration(seconds: 15);
     _dio.options.sendTimeout = Duration(seconds: 15);
@@ -84,8 +94,63 @@ class EnhancedCollaborativeProvider extends ChangeNotifier {
       },
     ));
     
-    _initializeSubscriptions();
-    _initServerHealthCheck();
+    print('Dio baseUrl установлен: $baseUrl');
+  }
+
+  Future<String> _getBaseUrl() async {
+    try {
+      // Используем ServerConfigService для получения правильного адреса
+      return await ServerConfigService.getBaseUrl();
+    } catch (e) {
+      print('Ошибка получения baseUrl: $e');
+      // Возвращаем адрес из ServerConfigService как fallback
+      try {
+        return await ServerConfigService.getBaseUrl();
+      } catch (fallbackError) {
+        print('Ошибка получения fallback baseUrl: $fallbackError');
+        // В крайнем случае возвращаем localhost
+        return 'http://localhost:8080';
+      }
+    }
+  }
+
+  Future<String> _getServerAddress() async {
+    try {
+      // Используем ServerConfigService
+      return await ServerConfigService.getAddress();
+    } catch (e) {
+      print('Ошибка получения адреса сервера: $e');
+      // В крайнем случае возвращаем localhost
+      return 'localhost';
+    }
+  }
+
+  Future<String> _getServerPort() async {
+    try {
+      // Используем ServerConfigService
+      return await ServerConfigService.getPort();
+    } catch (e) {
+      print('Ошибка получения порта сервера: $e');
+      // В крайнем случае возвращаем стандартный порт
+      return '8080';
+    }
+  }
+
+  Future<String> _getConfigValue(String key) async {
+    try {
+      // Используем ServerConfigService для получения конфигурации
+      switch (key) {
+        case 'server_address':
+          return await ServerConfigService.getAddress();
+        case 'server_port':
+          return await ServerConfigService.getPort();
+        default:
+          return '';
+      }
+    } catch (e) {
+      print('Ошибка получения конфигурации $key: $e');
+      return '';
+    }
   }
 
   // Геттеры
@@ -206,6 +271,7 @@ class EnhancedCollaborativeProvider extends ChangeNotifier {
   }
 
   Future<List<EnhancedCollaborativeDatabase>> _loadDatabasesFromServer() async {
+    await _initializeDio();
     try {
       final response = await _dio.get('/api/collaboration/databases');
       
@@ -282,6 +348,7 @@ class EnhancedCollaborativeProvider extends ChangeNotifier {
   }
 
   Future<EnhancedCollaborativeDatabase> _createDatabaseOnServer(String name) async {
+    await _initializeDio();
     try {
       final response = await _dio.post(
         '/api/collaboration/databases',
@@ -435,6 +502,7 @@ class EnhancedCollaborativeProvider extends ChangeNotifier {
 
   // ИСПРАВЛЕНИЕ: Отдельный метод для загрузки данных без блокировки UI
   Future<void> _loadDataFromServerInBackground(String databaseId) async {
+    await _initializeDio();
     try {
       // ИСПРАВЛЕНИЕ: Устанавливаем блокировку загрузки данных экранами
       if (_databaseProvider != null) {
@@ -928,5 +996,11 @@ class EnhancedCollaborativeProvider extends ChangeNotifier {
     _syncStatusSubscription?.cancel();
     _syncService.dispose();
     super.dispose();
+  }
+
+  /// Публичный метод для обновления baseUrl после изменения настроек сервера
+  Future<void> updateBaseUrl() async {
+    await _initializeDio();
+    notifyListeners();
   }
 } 

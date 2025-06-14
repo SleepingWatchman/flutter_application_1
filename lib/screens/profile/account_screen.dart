@@ -5,9 +5,11 @@ import 'dart:io' show Platform, exit;
 import '../../providers/auth_provider.dart';
 import '../../providers/backup_provider.dart';
 import '../../utils/toast_utils.dart';
+import '../../services/profile_image_cache_service.dart';
 import 'edit_profile_screen.dart';
 import '../auth/login_screen.dart';
 import '../settings_screen.dart';
+import '../../widgets/server_status_indicator.dart';
 
 class AccountScreen extends StatelessWidget {
   const AccountScreen({Key? key}) : super(key: key);
@@ -33,7 +35,13 @@ class AccountScreen extends StatelessWidget {
         
         return Scaffold(
           appBar: AppBar(
-            title: const Text('Аккаунт'),
+            title: Row(
+              children: [
+                const Text('Аккаунт'),
+                const SizedBox(width: 10),
+                const ServerStatusIndicator(),
+              ],
+            ),
             actions: [
               IconButton(
                 icon: const Icon(Icons.settings),
@@ -52,14 +60,10 @@ class AccountScreen extends StatelessWidget {
               children: [
                 Hero(
                   tag: 'profile_button',
-                  child: CircleAvatar(
+                  child: ProfileImageCacheService().getCachedProfileImage(
+                    photoURL: user?.photoURL,
                     radius: 50,
-                    backgroundImage: user?.photoURL != null && user!.photoURL!.isNotEmpty
-                        ? NetworkImage('${user!.photoURL!}?t=${DateTime.now().millisecondsSinceEpoch}')
-                        : null,
-                    child: user?.photoURL == null || user!.photoURL!.isEmpty
-                        ? const Icon(Icons.person, size: 50)
-                        : null,
+                    placeholder: const Icon(Icons.person, size: 50),
                   ),
                 ),
                 const SizedBox(height: 16),

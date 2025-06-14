@@ -17,8 +17,10 @@ import 'screens/auth/login_screen.dart';
 import 'services/collaborative_role_service.dart';
 import 'services/enhanced_sync_service.dart';
 import 'services/server_health_service.dart';
+import 'services/profile_image_cache_service.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:dio/dio.dart';
+import 'widgets/server_status_indicator.dart';
 
 /// Функция main: инициализация БД и запуск приложения
 void main() async {
@@ -32,6 +34,9 @@ void main() async {
     
     // Инициализация локализации
     await initializeDateFormatting('ru', null);
+    
+    // Инициализация кэша изображений профиля
+    await ProfileImageCacheService().initialize();
     
     // Инициализация базы данных
     final dbHelper = DatabaseHelper();
@@ -304,6 +309,10 @@ class _MainScreenState extends State<MainScreen> {
               final auth = Provider.of<AuthProvider>(context, listen: false);
               auth.enableGuestMode();
               Navigator.of(context).pop();
+              // Добавляем переход к главному экрану приложения
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (_) => const MainScreen()),
+              );
             },
             child: const Text('Продолжить в гостевом режиме'),
           ),
@@ -345,116 +354,72 @@ class _MainScreenState extends State<MainScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Consumer<EnhancedCollaborativeProvider>(
-          builder: (context, enhancedProvider, child) {
-            return Row(
-              children: [
-                const Text('Notes App'),
-                const SizedBox(width: 10),
-                // Постоянный индикатор статуса сервера
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: enhancedProvider.isServerAvailable 
-                        ? Colors.green.withOpacity(0.15)
-                        : Colors.red.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: enhancedProvider.isServerAvailable 
-                          ? Colors.green.withOpacity(0.4)
-                          : Colors.red.withOpacity(0.4),
-                      width: 0.5,
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        enhancedProvider.isServerAvailable 
-                            ? Icons.cloud_done 
-                            : Icons.cloud_off,
-                        size: 12,
-                        color: enhancedProvider.isServerAvailable 
-                            ? Colors.green
-                            : Colors.red,
-                      ),
-                      const SizedBox(width: 3),
-                      Text(
-                        enhancedProvider.isServerAvailable ? 'Онлайн' : 'Офлайн',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w500,
-                          color: enhancedProvider.isServerAvailable 
-                              ? Colors.green
-                              : Colors.red,
-                        ),
-                      ),
-                    ],
+        title: Row(
+          children: [
+            const Text('Notes App'),
+            const SizedBox(width: 10),
+            const ServerStatusIndicator(),
+            // Дополнительный индикатор для совместной базы
+            if (_enhancedCollabProvider?.isUsingSharedDatabase == true) ...[
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: _enhancedCollabProvider?.syncStatus == SyncStatus.syncing
+                      ? Colors.blue.withOpacity(0.15)
+                      : Colors.cyan.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: _enhancedCollabProvider?.syncStatus == SyncStatus.syncing
+                        ? Colors.blue.withOpacity(0.4)
+                        : Colors.cyan.withOpacity(0.4),
                   ),
                 ),
-                // Дополнительный индикатор для совместной базы
-                if (enhancedProvider.isUsingSharedDatabase) ...[
-                  const SizedBox(width: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: enhancedProvider.syncStatus == SyncStatus.syncing
-                          ? Colors.blue.withOpacity(0.15)
-                          : Colors.cyan.withOpacity(0.15),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                        color: enhancedProvider.syncStatus == SyncStatus.syncing
-                            ? Colors.blue.withOpacity(0.4)
-                            : Colors.cyan.withOpacity(0.4),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      _enhancedCollabProvider?.syncStatus == SyncStatus.syncing 
+                          ? Icons.sync 
+                          : Icons.people,
+                      size: 14,
+                      color: _enhancedCollabProvider?.syncStatus == SyncStatus.syncing 
+                          ? Colors.blue
+                          : Colors.cyan,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      _enhancedCollabProvider?.syncStatus == SyncStatus.syncing 
+                          ? 'Синхронизация...'
+                          : () {
+                              final currentDbId = _enhancedCollabProvider?.currentDatabaseId;
+                              final currentDb = _enhancedCollabProvider?.databases
+                                  .where((db) => db.id == currentDbId)
+                                  .firstOrNull;
+                              return currentDb?.name ?? 'Совместная база';
+                            }(),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: _enhancedCollabProvider?.syncStatus == SyncStatus.syncing 
+                            ? Colors.blue
+                            : Colors.cyan,
                       ),
                     ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          enhancedProvider.syncStatus == SyncStatus.syncing 
-                              ? Icons.sync 
-                              : Icons.people,
-                          size: 14,
-                          color: enhancedProvider.syncStatus == SyncStatus.syncing 
-                              ? Colors.blue
-                              : Colors.cyan,
+                    if (_enhancedCollabProvider?.syncStatus == SyncStatus.syncing)
+                      Container(
+                        margin: const EdgeInsets.only(left: 4),
+                        width: 12,
+                        height: 12,
+                        child: const CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
                         ),
-                        const SizedBox(width: 4),
-                        Text(
-                          enhancedProvider.syncStatus == SyncStatus.syncing 
-                              ? 'Синхронизация...'
-                              : () {
-                                  final currentDbId = enhancedProvider.currentDatabaseId;
-                                  final currentDb = enhancedProvider.databases
-                                      .where((db) => db.id == currentDbId)
-                                      .firstOrNull;
-                                  return currentDb?.name ?? 'Совместная база';
-                                }(),
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: enhancedProvider.syncStatus == SyncStatus.syncing 
-                                ? Colors.blue
-                                : Colors.cyan,
-                          ),
-                        ),
-                        if (enhancedProvider.syncStatus == SyncStatus.syncing)
-                          Container(
-                            margin: const EdgeInsets.only(left: 4),
-                            width: 12,
-                            height: 12,
-                            child: const CircularProgressIndicator(
-                              strokeWidth: 2,
-                              valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                ],
-              ],
-            );
-          },
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ],
         ),
         leading: IconButton(
           icon: Icon(_isExtended ? Icons.menu_open : Icons.menu),
@@ -554,14 +519,10 @@ class _MainScreenState extends State<MainScreen> {
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      CircleAvatar(
+                                      ProfileImageCacheService().getCachedProfileImage(
+                                        photoURL: user?.photoURL,
                                         radius: 20,
-                                        backgroundImage: user?.photoURL != null && user!.photoURL!.isNotEmpty
-                                            ? NetworkImage('${user!.photoURL!}?t=${DateTime.now().millisecondsSinceEpoch}')
-                                            : null,
-                                        child: user?.photoURL == null || user!.photoURL!.isEmpty
-                                            ? const Icon(Icons.person)
-                                            : null,
+                                        placeholder: const Icon(Icons.person),
                                       ),
                                       const SizedBox(width: 12),
                                       Flexible(
@@ -577,14 +538,10 @@ class _MainScreenState extends State<MainScreen> {
                                     ],
                                   ),
                                 )
-                              : CircleAvatar(
+                              : ProfileImageCacheService().getCachedProfileImage(
+                                  photoURL: user?.photoURL,
                                   radius: 20,
-                                  backgroundImage: user?.photoURL != null && user!.photoURL!.isNotEmpty
-                                      ? NetworkImage('${user!.photoURL!}?t=${DateTime.now().millisecondsSinceEpoch}')
-                                      : null,
-                                  child: user?.photoURL == null || user!.photoURL!.isEmpty
-                                      ? const Icon(Icons.person)
-                                      : null,
+                                  placeholder: const Icon(Icons.person),
                                 ),
                         ),
                       );

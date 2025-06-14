@@ -4,7 +4,9 @@ import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/file_service.dart';
+import '../../services/profile_image_cache_service.dart';
 import '../../utils/toast_utils.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 
 class EditProfileScreen extends StatefulWidget {
   const EditProfileScreen({Key? key}) : super(key: key);
@@ -146,8 +148,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                       backgroundImage: _imageFile != null
                           ? FileImage(_imageFile!)
                           : (user?.photoURL != null && user!.photoURL!.isNotEmpty
-                              ? NetworkImage('${user!.photoURL!}?t=${DateTime.now().millisecondsSinceEpoch}')
-                              : null) as ImageProvider?,
+                              ? CachedNetworkImageProvider(user!.photoURL!)
+                              : null),
                       child: (_imageFile == null && (user?.photoURL == null || user!.photoURL!.isEmpty))
                           ? const Icon(Icons.person, size: 50)
                           : null,

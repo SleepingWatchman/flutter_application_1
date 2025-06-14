@@ -4,6 +4,7 @@ import '../../providers/enhanced_collaborative_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../models/enhanced_collaborative_database.dart';
 import '../../models/collaborative_database_role.dart';
+import '../../services/profile_image_cache_service.dart';
 import '../../utils/toast_utils.dart';
 import 'invite_user_screen.dart';
 
@@ -359,16 +360,13 @@ class _DatabaseUsersScreenState extends State<DatabaseUsersScreen> {
                     return Card(
                       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                       child: ListTile(
-                        leading: CircleAvatar(
-                          backgroundImage: user.photoURL != null && user.photoURL!.isNotEmpty
-                              ? NetworkImage(user.photoURL!)
-                              : null,
-                          child: user.photoURL == null || user.photoURL!.isEmpty
-                              ? Text(
-                                  user.displayName?.substring(0, 1).toUpperCase() ?? 
-                                  user.email.substring(0, 1).toUpperCase(),
-                                )
-                              : null,
+                        leading: ProfileImageCacheService().getCachedProfileImage(
+                          photoURL: user.photoURL,
+                          radius: 20,
+                          placeholder: Text(
+                            user.displayName?.substring(0, 1).toUpperCase() ?? 
+                            user.email.substring(0, 1).toUpperCase(),
+                          ),
                         ),
                         title: Text(
                           user.displayName ?? user.email,

@@ -3,7 +3,7 @@ package models
 // User представляет пользователя системы.
 type User struct {
 	ID           int64   `json:"id" db:"Id"`
-	Username     string  `json:"username"`
+	Username     string  `json:"username" db:"Username"`
 	Email        string  `json:"email" db:"Email"`
 	DisplayName  string  `json:"display_name" db:"DisplayName"`
 	PhotoUrl     string  `json:"photo_url" db:"PhotoUrl"`

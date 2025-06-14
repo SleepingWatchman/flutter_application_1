@@ -8,6 +8,8 @@ services:
     environment:
       - PORT=8080
       - HOST=0.0.0.0
+    ports:
+      - "8080:8080"
     volumes:
       # Volumes для постоянного хранения данных
       - notes_data:/app/data
@@ -19,9 +21,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-    # DockHost автоматически назначит порт
-    # ports:
-    #   - "8080:8080"
 
 volumes:
   notes_data:

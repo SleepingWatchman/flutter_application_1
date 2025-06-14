@@ -179,6 +179,61 @@ class _SharedDatabasesScreenState extends State<SharedDatabasesScreen> {
           return const Center(child: CircularProgressIndicator());
         }
 
+        if (!provider.isServerAvailable) {
+          return Scaffold(
+            appBar: AppBar(
+              title: const Text('Совместные базы данных'),
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.refresh),
+                  onPressed: () {
+                    _loadDatabases();
+                  },
+                ),
+              ],
+            ),
+            body: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.wifi_off,
+                    size: 64,
+                    color: Colors.grey,
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Нет соединения с сервером',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Проверьте подключение к интернету\nи попробуйте обновить страницу',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Colors.grey[600],
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 24),
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      _loadDatabases();
+                    },
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Обновить'),
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
         if (provider.error != null) {
           return Center(
             child: Column(
@@ -271,7 +326,7 @@ class _SharedDatabasesScreenState extends State<SharedDatabasesScreen> {
             children: [
               Expanded(
                 child: databases.isEmpty
-                    ? const Center(
+                    ? Center(
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
@@ -294,6 +349,15 @@ class _SharedDatabasesScreenState extends State<SharedDatabasesScreen> {
                               style: TextStyle(
                                 fontSize: 14,
                                 color: Colors.grey,
+                              ),
+                            ),
+                            SizedBox(height: 24),
+                            ElevatedButton.icon(
+                              onPressed: _showCreateDialog,
+                              icon: Icon(Icons.add),
+                              label: Text('Создать новую базу данных'),
+                              style: ElevatedButton.styleFrom(
+                                padding: EdgeInsets.symmetric(horizontal: 24, vertical: 16),
                               ),
                             ),
                           ],

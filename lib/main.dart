@@ -309,10 +309,6 @@ class _MainScreenState extends State<MainScreen> {
               final auth = Provider.of<AuthProvider>(context, listen: false);
               auth.enableGuestMode();
               Navigator.of(context).pop();
-              // Добавляем переход к главному экрану приложения
-              Navigator.of(context).pushReplacement(
-                MaterialPageRoute(builder: (_) => const MainScreen()),
-              );
             },
             child: const Text('Продолжить в гостевом режиме'),
           ),
@@ -360,65 +356,71 @@ class _MainScreenState extends State<MainScreen> {
             const SizedBox(width: 10),
             const ServerStatusIndicator(),
             // Дополнительный индикатор для совместной базы
-            if (_enhancedCollabProvider?.isUsingSharedDatabase == true) ...[
-              const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: _enhancedCollabProvider?.syncStatus == SyncStatus.syncing
-                      ? Colors.blue.withOpacity(0.15)
-                      : Colors.cyan.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: _enhancedCollabProvider?.syncStatus == SyncStatus.syncing
-                        ? Colors.blue.withOpacity(0.4)
-                        : Colors.cyan.withOpacity(0.4),
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      _enhancedCollabProvider?.syncStatus == SyncStatus.syncing 
-                          ? Icons.sync 
-                          : Icons.people,
-                      size: 14,
-                      color: _enhancedCollabProvider?.syncStatus == SyncStatus.syncing 
-                          ? Colors.blue
-                          : Colors.cyan,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      _enhancedCollabProvider?.syncStatus == SyncStatus.syncing 
-                          ? 'Синхронизация...'
-                          : () {
-                              final currentDbId = _enhancedCollabProvider?.currentDatabaseId;
-                              final currentDb = _enhancedCollabProvider?.databases
-                                  .where((db) => db.id == currentDbId)
-                                  .firstOrNull;
-                              return currentDb?.name ?? 'Совместная база';
-                            }(),
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: _enhancedCollabProvider?.syncStatus == SyncStatus.syncing 
-                            ? Colors.blue
-                            : Colors.cyan,
+            Consumer<EnhancedCollaborativeProvider>(
+              builder: (context, enhancedProvider, child) {
+                if (enhancedProvider.isUsingSharedDatabase) {
+                  return Container(
+                    margin: const EdgeInsets.only(left: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: enhancedProvider.syncStatus == SyncStatus.syncing
+                          ? Colors.blue.withOpacity(0.15)
+                          : Colors.cyan.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: enhancedProvider.syncStatus == SyncStatus.syncing
+                            ? Colors.blue.withOpacity(0.4)
+                            : Colors.cyan.withOpacity(0.4),
                       ),
                     ),
-                    if (_enhancedCollabProvider?.syncStatus == SyncStatus.syncing)
-                      Container(
-                        margin: const EdgeInsets.only(left: 4),
-                        width: 12,
-                        height: 12,
-                        child: const CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          enhancedProvider.syncStatus == SyncStatus.syncing 
+                              ? Icons.sync 
+                              : Icons.people,
+                          size: 14,
+                          color: enhancedProvider.syncStatus == SyncStatus.syncing 
+                              ? Colors.blue
+                              : Colors.cyan,
                         ),
-                      ),
-                  ],
-                ),
-              ),
-            ],
+                        const SizedBox(width: 4),
+                        Text(
+                          enhancedProvider.syncStatus == SyncStatus.syncing 
+                              ? 'Синхронизация...'
+                              : () {
+                                  final currentDbId = enhancedProvider.currentDatabaseId;
+                                  final currentDb = enhancedProvider.databases
+                                      .where((db) => db.id == currentDbId)
+                                      .firstOrNull;
+                                  return currentDb?.name ?? 'Совместная база';
+                                }(),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: enhancedProvider.syncStatus == SyncStatus.syncing 
+                                ? Colors.blue
+                                : Colors.cyan,
+                          ),
+                        ),
+                        if (enhancedProvider.syncStatus == SyncStatus.syncing)
+                          Container(
+                            margin: const EdgeInsets.only(left: 4),
+                            width: 12,
+                            height: 12,
+                            child: const CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+                            ),
+                          ),
+                      ],
+                    ),
+                  );
+                } else {
+                  return const SizedBox.shrink();
+                }
+              },
+            ),
           ],
         ),
         leading: IconButton(

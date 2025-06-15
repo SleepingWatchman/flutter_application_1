@@ -482,6 +482,9 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
     // Инициализируем начальные значения
     _newFolderName = folder.name;
     _selectedColor = folder.color;
+    
+    // Создаем контроллер с правильным текстом
+    final nameController = TextEditingController(text: folder.name);
 
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
@@ -496,7 +499,7 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
                   labelText: 'Название папки',
                   border: OutlineInputBorder(),
                 ),
-                controller: TextEditingController(text: _newFolderName),
+                controller: nameController,
                 onChanged: (value) {
                   setState(() {
                     _newFolderName = value;
@@ -534,6 +537,9 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
         ),
       ),
     );
+
+    // Освобождаем контроллер
+    nameController.dispose();
 
     if (result != null) {
       try {
@@ -681,7 +687,14 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
                   : Icons.folder,
               color: folder.color,
             ),
-            title: Text(folder.name),
+            title: SizedBox(
+              width: 180, // Ограничение ширины для названия папки
+              child: Text(
+                folder.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
             selected: isSelected,
             selectedTileColor: isSelected ? Colors.cyan.withOpacity(0.15) : Colors.transparent, // Полупрозрачный cyan для выбранной папки
             shape: RoundedRectangleBorder(
@@ -722,9 +735,13 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
                     child: Container(
                       padding: const EdgeInsets.all(8),
                       color: Colors.blue.withOpacity(0.1),
-                      child: Text(
-                        note.title.isEmpty ? 'Новая заметка' : note.title,
-                        style: const TextStyle(fontSize: 16),
+                      child: SizedBox(
+                        width: 180, // Ограничение ширины для названия заметки
+                        child: Text(
+                          note.title.isEmpty ? 'Новая заметка' : note.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                     ),
                   ),
@@ -751,7 +768,14 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
                       ),
                       child: ListTile(
                         leading: const Icon(Icons.note),
-                        title: Text(note.title.isEmpty ? 'Новая заметка' : note.title),
+                        title: SizedBox(
+                          width: 180, // Ограничение ширины для названия заметки
+                          child: Text(
+                            note.title.isEmpty ? 'Новая заметка' : note.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
                         selected: _selectedNote?.id == note.id,
                         selectedTileColor: _selectedNote?.id == note.id ? Colors.cyan.withOpacity(0.15) : Colors.transparent, // Полупрозрачный cyan для выбранной заметки
                         shape: RoundedRectangleBorder(
@@ -837,7 +861,14 @@ class _NotesScreenState extends State<NotesScreen> with AutomaticKeepAliveClient
                       ),
                       ..._folders.map((folder) => DropdownMenuItem(
                             value: folder.id,
-                            child: Text(folder.name),
+                            child: SizedBox(
+                              width: 180, // Ограничение ширины для выпадающего списка
+                              child: Text(
+                                folder.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
                           )),
                     ],
                     onChanged: (value) {

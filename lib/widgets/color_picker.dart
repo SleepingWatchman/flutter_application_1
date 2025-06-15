@@ -131,6 +131,22 @@ class _ColorPickerState extends State<ColorPicker> {
                 onTapDown: (details) {
                   _updateColorFromPosition(details.localPosition);
                 },
+                onTap: () {
+                  // onTap не предоставляет позицию, поэтому используем текущую позицию
+                  // или можно добавить глобальную переменную для последней позиции
+                },
+                onLongPressStart: (details) {
+                  _isDragging = true;
+                  _updateColorFromPosition(details.localPosition);
+                },
+                onLongPressMoveUpdate: (details) {
+                  if (_isDragging) {
+                    _updateColorFromPosition(details.localPosition);
+                  }
+                },
+                onLongPressEnd: (details) {
+                  _isDragging = false;
+                },
               ),
             ),
             // Маркер выбранного цвета

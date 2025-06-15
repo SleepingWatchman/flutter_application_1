@@ -4,6 +4,7 @@ import '../../providers/auth_provider.dart';
 import '../../utils/toast_utils.dart';
 import 'login_screen.dart';
 import '../../widgets/server_status_indicator.dart';
+import '../settings_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({Key? key}) : super(key: key);
@@ -114,6 +115,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
             const ServerStatusIndicator(),
           ],
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.settings),
+            tooltip: 'Настройки сервера',
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const SettingsScreen()),
+              );
+            },
+          ),
+        ],
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),

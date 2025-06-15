@@ -468,7 +468,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
       filter: {'#': RegExp(r'[0-9]')},
     );
     List<DynamicFieldEntry> dynamicFields = [
-      DynamicFieldEntry(key: 'Предмет', value: '')
+      DynamicFieldEntry(key: '', value: '')
     ];
     List<String> tags = []; // Добавляем список тегов
     String? timeError;
@@ -507,19 +507,19 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                       decoration: InputDecoration(
                       labelText: 'Время (ЧЧ:ММ - ЧЧ:ММ)',
                         errorText: timeError,
-                      suffixIcon: IconButton(
-                        icon: const Icon(Icons.schedule),
-                        onPressed: () {
-                          showTimePicker(
-                            context: context,
-                            initialTime: TimeOfDay.now(),
-                          ).then((startTime) {
-                            if (startTime != null) {
-                              showTimePicker(
-                                context: context,
-                                initialTime: TimeOfDay(
-                                  hour: (startTime.hour + 1) % 24,
-                                  minute: startTime.minute,
+                        suffixIcon: IconButton(
+                          icon: const Icon(Icons.schedule),
+                          onPressed: () {
+                            showTimePicker(
+                              context: context,
+                              initialTime: TimeOfDay.now(),
+                            ).then((startTime) {
+                              if (startTime != null) {
+                                showTimePicker(
+                                  context: context,
+                                  initialTime: TimeOfDay(
+                                    hour: (startTime.hour + 1) % 24,
+                                    minute: startTime.minute,
                         ),
                               ).then((endTime) {
                                 if (endTime != null) {
@@ -535,17 +535,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                   ),
                   const SizedBox(height: 16),
                       
-                  // Поле краткой заметки
-                        TextField(
-                    controller: shortNoteController,
-                          decoration: const InputDecoration(
-                      labelText: 'Краткая заметка',
-                          ),
-                    maxLines: 3,
-                        ),
-                  const SizedBox(height: 16),
-                    
-                    // Динамические поля
+                  // Динамические поля
                   ...dynamicFields.asMap().entries.map((entry) {
                     int index = entry.key;
                     DynamicFieldEntry field = entry.value;
@@ -602,6 +592,160 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                   ),
                   
                   const SizedBox(height: 16),
+                  
+                  // Секция повторяемости
+                  const Divider(),
+                  const Text(
+                    'Повторяемость',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  
+                  // Выбор типа повторения
+                  DropdownButtonFormField<RecurrenceType>(
+                    value: recurrence.type,
+                    decoration: const InputDecoration(
+                      labelText: 'Тип повторения',
+                    ),
+                    items: RecurrenceType.values.map((type) {
+                      String label;
+                      switch (type) {
+                        case RecurrenceType.none:
+                          label = 'Без повторения';
+                          break;
+                        case RecurrenceType.daily:
+                          label = 'Ежедневно';
+                          break;
+                        case RecurrenceType.weekly:
+                          label = 'Еженедельно';
+                          break;
+                        case RecurrenceType.monthly:
+                          label = 'Ежемесячно';
+                          break;
+                        case RecurrenceType.yearly:
+                          label = 'Ежегодно';
+                          break;
+                      }
+                      return DropdownMenuItem<RecurrenceType>(
+                        value: type,
+                        child: Text(label),
+                      );
+                    }).toList(),
+                    onChanged: (value) {
+                      setState(() {
+                        recurrence.type = value!;
+                        // При смене типа повторения сразу показываем все поля
+                        if (recurrence.type == RecurrenceType.none) {
+                          selectedEndDate = null;
+                          countController.text = '';
+                        }
+                      });
+                    },
+                  ),
+                  
+                  // Показываем дополнительные настройки только если тип не "Без повторения"
+                  if (recurrence.type != RecurrenceType.none) ...[
+                    const SizedBox(height: 16),
+                    
+                    // Интервал повторения
+                    TextField(
+                      controller: intervalController,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(
+                        labelText: 'Интервал',
+                        helperText: _getIntervalHelperText(recurrence.type),
+                      ),
+                    ),
+                    
+                    const SizedBox(height: 16),
+                    
+                    // Выбор способа окончания повторения
+                    const Text('Окончание повторения:', style: TextStyle(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    
+                    // Радиокнопки для выбора способа окончания
+                    Row(
+                      children: [
+                        Radio<bool>(
+                          value: false,
+                          groupValue: selectedEndDate != null,
+                          onChanged: (value) {
+                            setState(() {
+                              selectedEndDate = null;
+                              countController.text = '';
+                            });
+                          },
+                        ),
+                        const Text('По количеству повторений'),
+                      ],
+                    ),
+                    
+                    if (selectedEndDate == null) ...[
+                      TextField(
+                        controller: countController,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'Количество повторений',
+                          helperText: 'Оставьте пустым для бесконечного повторения',
+                        ),
+                      ),
+                    ],
+                    
+                    Row(
+                      children: [
+                        Radio<bool>(
+                          value: true,
+                          groupValue: selectedEndDate != null,
+                          onChanged: (value) {
+                            setState(() {
+                              selectedEndDate = DateTime.now().add(const Duration(days: 30));
+                              countController.text = '';
+                            });
+                          },
+                        ),
+                        const Text('По дате окончания'),
+                      ],
+                    ),
+                    
+                    if (selectedEndDate != null)
+                      Row(
+                        children: [
+                          const Text('Дата окончания: '),
+                          TextButton(
+                            onPressed: () async {
+                              final DateTime? picked = await showDatePicker(
+                                context: context,
+                                initialDate: selectedEndDate!,
+                                firstDate: DateTime.now(),
+                                lastDate: DateTime(2100),
+                                locale: const Locale('ru', 'RU'),
+                              );
+                              if (picked != null && picked != selectedEndDate) {
+                                setState(() {
+                                  selectedEndDate = picked;
+                                });
+                              }
+                            },
+                            child: Text(
+                              DateFormat('dd.MM.yyyy').format(selectedEndDate!),
+                            ),
+                          ),
+                        ],
+                      ),
+                  ],
+                  const Divider(),
+                  const Text(
+                    'Краткая заметка',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: shortNoteController,
+                    decoration: const InputDecoration(
+                      labelText: 'Заметка',
+                      hintText: 'Введите краткую заметку',
+                    ),
+                    maxLines: 3,
+                  ),
                   ],
                 ),
               ),
@@ -695,11 +839,11 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                           return; // Пользователь отменил сохранение
                         }
                         // Продолжаем с сохранением
-                      _saveNewScheduleEntry(timeController, shortNoteController, dynamicFields, recurrence, databaseId, tags);
+                        _saveNewScheduleEntryWithRecurrence(timeController, shortNoteController, dynamicFields, recurrence, databaseId, tags, intervalController, countController, selectedEndDate);
                       });
                     } else {
                       // Нет наложения времени, сохраняем сразу
-                    _saveNewScheduleEntry(timeController, shortNoteController, dynamicFields, recurrence, databaseId, tags);
+                      _saveNewScheduleEntryWithRecurrence(timeController, shortNoteController, dynamicFields, recurrence, databaseId, tags, intervalController, countController, selectedEndDate);
                     }
                   },
                   child: const Text('Сохранить'),
@@ -712,12 +856,29 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
   }
 
   // Вспомогательный метод для сохранения новой записи расписания
-  void _saveNewScheduleEntry(TextEditingController timeController, TextEditingController shortNoteController, 
-      List<DynamicFieldEntry> dynamicFields, Recurrence recurrence, String? databaseId, List<String> tags) {
+  void _saveNewScheduleEntryWithRecurrence(TextEditingController timeController, TextEditingController shortNoteController, 
+      List<DynamicFieldEntry> dynamicFields, Recurrence recurrence, String? databaseId, List<String> tags, 
+      TextEditingController intervalController, TextEditingController countController, DateTime? selectedEndDate) {
     // Собираем динамические поля
     Map<String, String> dynamicMap = {};
     for (var field in dynamicFields) {
       dynamicMap[field.keyController.text] = field.valueController.text;
+    }
+
+    // Финальное обновление параметров повторяемости
+    if (recurrence.type != RecurrenceType.none) {
+      recurrence.interval = int.tryParse(intervalController.text) ?? 1;
+      if (selectedEndDate != null) {
+        recurrence.endDate = selectedEndDate;
+        recurrence.count = null;
+      } else if (countController.text.isNotEmpty) {
+        recurrence.count = int.tryParse(countController.text);
+        recurrence.endDate = null;
+      }
+    } else {
+      recurrence.interval = 1;
+      recurrence.endDate = null;
+      recurrence.count = null;
     }
 
     // Создаем объект записи
@@ -1185,19 +1346,110 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    // 1. Интервал времени
                     TextField(
                       controller: timeController,
                       inputFormatters: [timeMaskFormatter],
-                      keyboardType: TextInputType.number,
                       decoration: InputDecoration(
-                        labelText: 'Время (HH:MM - HH:MM)',
+                        labelText: 'Время (ЧЧ:ММ - ЧЧ:ММ)',
                         errorText: timeError,
-                        helperText: 'Допустимые значения: 00:00 - 23:59',
+                        suffixIcon: IconButton(
+                          icon: const Icon(Icons.schedule),
+                          onPressed: () {
+                            showTimePicker(
+                              context: context,
+                              initialTime: TimeOfDay.now(),
+                            ).then((startTime) {
+                              if (startTime != null) {
+                                showTimePicker(
+                                  context: context,
+                                  initialTime: TimeOfDay(
+                                    hour: (startTime.hour + 1) % 24,
+                                    minute: startTime.minute,
+                                  ),
+                                ).then((endTime) {
+                                  if (endTime != null) {
+                                    timeController.text = 
+                                      '${startTime.hour.toString().padLeft(2, '0')}:${startTime.minute.toString().padLeft(2, '0')} - ${endTime.hour.toString().padLeft(2, '0')}:${endTime.minute.toString().padLeft(2, '0')}';
+                                  }
+                                });
+                              }
+                            });
+                          },
+                        ),
                       ),
                     ),
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 16),
                     
-                    // Секция повторяемости
+                    // 2. Свободные поля
+                    const Divider(),
+                    const Text(
+                      'Свободные поля',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    ...dynamicFields.asMap().entries.map((entry) {
+                      int index = entry.key;
+                      DynamicFieldEntry field = entry.value;
+                      return Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: field.keyController,
+                              decoration: const InputDecoration(labelText: 'Название поля'),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: TextField(
+                              controller: field.valueController,
+                              decoration: const InputDecoration(labelText: 'Значение'),
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.delete),
+                            onPressed: () {
+                              setStateDialog(() {
+                                dynamicFields.removeAt(index);
+                              });
+                            },
+                          ),
+                        ],
+                      );
+                    }).toList(),
+                    
+                    // Кнопка добавления нового поля
+                    TextButton.icon(
+                      icon: const Icon(Icons.add),
+                      label: const Text('Добавить поле'),
+                      onPressed: () {
+                        setStateDialog(() {
+                          dynamicFields.add(DynamicFieldEntry(key: '', value: ''));
+                        });
+                      },
+                    ),
+                    
+                    const SizedBox(height: 16),
+                    
+                    // 3. Теги
+                    const Divider(),
+                    const Text(
+                      'Теги',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    TagInputWidget(
+                      initialTags: tags,
+                      onTagsChanged: (newTags) {
+                        tags = newTags;
+                      },
+                      hintText: 'Добавить тег...',
+                      maxTags: 10,
+                    ),
+                    
+                    const SizedBox(height: 16),
+                    
+                    // 4. Повторяемость
                     const Divider(),
                     const Text(
                       'Повторяемость',
@@ -1237,15 +1489,20 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                       onChanged: (value) {
                         setStateDialog(() {
                           recurrence.type = value!;
+                          // При смене типа повторения сразу показываем все поля
+                          if (recurrence.type == RecurrenceType.none) {
+                            selectedEndDate = null;
+                            countController.text = '';
+                          }
                         });
                       },
                     ),
                     
                     // Показываем дополнительные настройки только если тип не "Без повторения"
                     if (recurrence.type != RecurrenceType.none) ...[
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 16),
                       
-                      // Интервал
+                      // Интервал повторения
                       TextField(
                         controller: intervalController,
                         keyboardType: TextInputType.number,
@@ -1253,72 +1510,58 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                           labelText: 'Интервал',
                           helperText: _getIntervalHelperText(recurrence.type),
                         ),
-                        onChanged: (value) {
-                          int? interval = int.tryParse(value);
-                          if (interval != null && interval > 0) {
-                            recurrence.interval = interval;
-                          }
-                        },
                       ),
                       
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 16),
                       
-                      // Тип ограничения (по дате или количеству)
+                      // Выбор способа окончания повторения
+                      const Text('Окончание повторения:', style: TextStyle(fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 8),
+                      
+                      // Радиокнопки для выбора способа окончания
                       Row(
                         children: [
-                          const Text('Ограничение: '),
-                          Radio<String>(
-                            value: 'none',
-                            groupValue: selectedEndDate != null 
-                                ? 'date' 
-                                : (recurrence.count != null ? 'count' : 'none'),
+                          Radio<bool>(
+                            value: false,
+                            groupValue: selectedEndDate != null,
                             onChanged: (value) {
                               setStateDialog(() {
                                 selectedEndDate = null;
-                                recurrence.endDate = null;
-                                recurrence.count = null;
                                 countController.text = '';
                               });
                             },
                           ),
-                          const Text('Без ограничения'),
-                          
-                          Radio<String>(
-                            value: 'date',
-                            groupValue: selectedEndDate != null 
-                                ? 'date' 
-                                : (recurrence.count != null ? 'count' : 'none'),
-                            onChanged: (value) {
-                              setStateDialog(() {
-                                selectedEndDate = DateTime.now().add(const Duration(days: 30));
-                                recurrence.endDate = selectedEndDate;
-                                recurrence.count = null;
-                                countController.text = '';
-                              });
-                            },
-                          ),
-                          const Text('По дате'),
-                          
-                          Radio<String>(
-                            value: 'count',
-                            groupValue: selectedEndDate != null 
-                                ? 'date' 
-                                : (recurrence.count != null ? 'count' : 'none'),
-                            onChanged: (value) {
-                              setStateDialog(() {
-                                selectedEndDate = null;
-                                recurrence.endDate = null;
-                                recurrence.count = 10;
-                                countController.text = '10';
-                              });
-                            },
-                          ),
+                          const Text('По количеству повторений'),
                         ],
                       ),
                       
-                      const SizedBox(height: 10),
+                      if (selectedEndDate == null) ...[
+                        TextField(
+                          controller: countController,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Количество повторений',
+                            helperText: 'Оставьте пустым для бесконечного повторения',
+                          ),
+                        ),
+                      ],
                       
-                      // Ввод даты окончания
+                      Row(
+                        children: [
+                          Radio<bool>(
+                            value: true,
+                            groupValue: selectedEndDate != null,
+                            onChanged: (value) {
+                              setStateDialog(() {
+                                selectedEndDate = DateTime.now().add(const Duration(days: 30));
+                                countController.text = '';
+                              });
+                            },
+                          ),
+                          const Text('По дате окончания'),
+                        ],
+                      ),
+                      
                       if (selectedEndDate != null)
                         Row(
                           children: [
@@ -1326,16 +1569,15 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                             TextButton(
                               onPressed: () async {
                                 final DateTime? picked = await showDatePicker(
-                                  context: innerContext,
+                                  context: context,
                                   initialDate: selectedEndDate!,
                                   firstDate: DateTime.now(),
                                   lastDate: DateTime(2100),
                                   locale: const Locale('ru', 'RU'),
                                 );
                                 if (picked != null && picked != selectedEndDate) {
-                                  setStateDialog(() {
+                                  setState(() {
                                     selectedEndDate = picked;
-                                    recurrence.endDate = picked;
                                   });
                                 }
                               },
@@ -1345,93 +1587,24 @@ class _ScheduleScreenState extends State<ScheduleScreen> with WidgetsBindingObse
                             ),
                           ],
                         ),
-                      
-                      // Ввод количества повторений
-                      if (recurrence.count != null)
-                        TextField(
-                          controller: countController,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Количество повторений',
-                          ),
-                          onChanged: (value) {
-                            int? count = int.tryParse(value);
-                            if (count != null && count > 0) {
-                              recurrence.count = count;
-                            }
-                          },
-                        ),
                     ],
-                    
-                    const Divider(),
-                    
-                    Column(
-                      children: dynamicFields.map((field) {
-                        int fieldIndex = dynamicFields.indexOf(field);
-                        return Row(
-                          children: [
-                            Expanded(
-                              flex: 3,
-                              child: TextField(
-                                controller: field.keyController,
-                                decoration:
-                                    const InputDecoration(labelText: 'Поле'),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              flex: 4,
-                              child: TextField(
-                                controller: field.valueController,
-                                decoration: const InputDecoration(
-                                    labelText: 'Значение'),
-                              ),
-                            ),
-                            IconButton(
-                              onPressed: () {
-                                setStateDialog(() {
-                                  dynamicFields.removeAt(fieldIndex);
-                                });
-                              },
-                              icon: const Icon(Icons.delete),
-                            ),
-                          ],
-                        );
-                      }).toList(),
-                    ),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: TextButton(
-                        onPressed: () {
-                          setStateDialog(() {
-                            dynamicFields.add(DynamicFieldEntry(
-                                key: 'Новое поле', value: ''));
-                          });
-                        },
-                        child: const Text('Добавить поле'),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    TextField(
-                      controller: shortNoteController,
-                      decoration:
-                          const InputDecoration(labelText: 'Краткая заметка'),
-                      maxLines: null,
-                      keyboardType: TextInputType.multiline,
-                    ),
                     
                     const SizedBox(height: 16),
                     
-                    // Виджет для работы с тегами
-                    const Text('Теги:', style: TextStyle(fontWeight: FontWeight.bold)),
+                    // 5. Краткая заметка
+                    const Divider(),
+                    const Text(
+                      'Краткая заметка',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
                     const SizedBox(height: 8),
-                    TagInputWidget(
-                      initialTags: tags,
-                      onTagsChanged: (newTags) {
-                        tags = newTags;
-                      },
-                      hintText: 'Добавить тег...',
-                      maxTags: 10,
+                    TextField(
+                      controller: shortNoteController,
+                      decoration: const InputDecoration(
+                        labelText: 'Заметка',
+                        hintText: 'Введите краткую заметку',
+                      ),
+                      maxLines: 3,
                     ),
                   ],
                 ),

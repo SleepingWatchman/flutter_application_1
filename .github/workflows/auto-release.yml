@@ -1,4 +1,4 @@
-name: Auto Release
+name: Auto Release on Version Change
 
 on:
   push:
@@ -21,12 +21,12 @@ jobs:
           flutter-version: '3.29.0'
           channel: 'stable'
 
-      - name: Get current version
+      - name: Get current version from pubspec.yaml
         id: version
         run: |
-          VERSION=$(flutter pub deps --style=compact | grep "flutter_application_1" | head -1 | sed 's/.*flutter_application_1: //')
+          VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //' | tr -d ' ')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Current version: $VERSION"
+          echo "Current version from pubspec.yaml: $VERSION"
 
       - name: Check if tag exists
         id: check_tag
@@ -34,10 +34,10 @@ jobs:
           TAG="v${{ steps.version.outputs.version }}"
           if git rev-parse "$TAG" >/dev/null 2>&1; then
             echo "exists=true" >> $GITHUB_OUTPUT
-            echo "Tag $TAG already exists"
+            echo "Tag $TAG already exists, skipping release"
           else
             echo "exists=false" >> $GITHUB_OUTPUT
-            echo "Tag $TAG does not exist"
+            echo "Tag $TAG does not exist, will create release"
           fi
 
       - name: Create and push tag
@@ -48,4 +48,5 @@ jobs:
           TAG="v${{ steps.version.outputs.version }}"
           git tag $TAG
           git push origin $TAG
-          echo "Created and pushed tag: $TAG" 
+          echo "Created and pushed tag: $TAG"
+          echo "This will trigger the release workflow automatically" 

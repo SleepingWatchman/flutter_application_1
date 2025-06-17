@@ -1,13 +1,12 @@
-name: Build macOS Release
+name: Release macOS DMG
 
 on:
   push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+    tags:
+      - 'v*'  # Запускается при создании тега, начинающегося с 'v'
 
 jobs:
-  build-macos:
+  build-and-release:
     runs-on: macos-latest
     steps:
       - name: Checkout code
@@ -30,10 +29,14 @@ jobs:
 
       - name: Create DMG
         run: |
+          # Получаем версию из тега
+          VERSION=${GITHUB_REF#refs/tags/}
+          VERSION=${VERSION#v}
+          
           # Настройки приложения
           APP_NAME="Notes App"
           APP_PATH="build/macos/Build/Products/Release/flutter_application_1.app"
-          DMG_NAME="NotesApp-macOS-$(date +%Y%m%d-%H%M%S).dmg"
+          DMG_NAME="NotesApp-macOS-v${VERSION}.dmg"
           
           # Создаем временную папку для DMG
           TEMP_DIR=$(mktemp -d)
@@ -52,8 +55,29 @@ jobs:
           
           echo "DMG_NAME=$DMG_NAME" >> $GITHUB_ENV
 
-      - name: Upload DMG Artifact
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          draft: false
+          prerelease: false
+
+      - name: Upload DMG to Release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./${{ env.DMG_NAME }}
+          asset_name: ${{ env.DMG_NAME }}
+          asset_content_type: application/octet-stream
+
+      - name: Upload DMG as Artifact (for debugging)
         uses: actions/upload-artifact@v4
         with:
-          name: macos-dmg
-          path: ${{ env.DMG_NAME }}
+          name: macos-dmg-${{ github.ref_name }}
+          path: ${{ env.DMG_NAME }} 
